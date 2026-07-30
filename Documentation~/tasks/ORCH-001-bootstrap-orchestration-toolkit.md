@@ -6,7 +6,7 @@
 | --- | --- |
 | Roadmap ID | `ORCH-001` |
 | Priority | `P1` |
-| Status | `In Progress` |
+| Status | `Done` |
 | Risk | `Medium` |
 | Tools repository base | Empty remote; `main` unborn |
 | Package-container base | Recorded locally before mutation; omitted from the portable task file |
@@ -84,21 +84,21 @@ Create and publish a UPM-compatible, documentation-only repository containing a 
 - [x] Validate skill, JSON, Markdown links, and diff.
 - [x] Forward-test simple, parallel, Unity-conflict, and model-override scenarios.
 - [x] Complete independent Sol High review.
-- [ ] Commit and push `unigame.ai.tools/main`.
-- [ ] Register nested submodule in `Game.Packages`.
-- [ ] Add root `AGENTS.md` pointer and update parent gitlinks.
-- [ ] Create isolated parent commits without unrelated changes.
+- [x] Commit and push `unigame.ai.tools/main`.
+- [x] Register nested submodule in `Game.Packages`.
+- [x] Add root `AGENTS.md` pointer and update parent gitlinks.
+- [x] Create isolated parent commits without unrelated changes.
 
 ## Acceptance Criteria
 
-- [ ] Remote `main` contains the complete package.
+- [x] Remote `main` contains the complete package.
 - [x] `quick_validate.py` passes.
 - [x] All local Markdown links resolve.
 - [x] User model assignments are explicit, scoped, validated, and never silently substituted.
 - [x] Guide covers parallel worktrees, Unity/submodule boundaries, edge cases, and risk-based tests.
 - [x] Forward-tests demonstrate expected mode/model routing.
-- [ ] Parent repositories contain only intended integration commits.
-- [ ] Existing user changes remain uncommitted and untouched.
+- [x] Parent repositories contain only intended integration commits.
+- [x] Existing user changes remain uncommitted and untouched.
 
 ## Risk-To-Test Matrix
 
@@ -119,6 +119,8 @@ Create and publish a UPM-compatible, documentation-only repository containing a 
 - Repository content is authored and passes local static checks.
 - Four fresh-agent scenarios verified simple-task bypass, parallel ownership/model routing, Unity conflict serialization, and unavailable-model blocking.
 - Independent Sol High review found cross-repository metadata, Reviewer invariants, assignment auditability, and evidence gaps; all findings were addressed before commit.
+- Canonical `main` was pushed, nested submodule registration and root skill discovery pointer were committed on dedicated local `codex/` branches.
+- Existing user-owned root changes remained unstaged and unmodified.
 
 ## Validation Evidence
 
@@ -135,6 +137,10 @@ Create and publish a UPM-compatible, documentation-only repository containing a 
 | Forward: Unity conflict | Pass | Shared prefab/meta, submodule, Addressables, Editor, and device serialized |
 | Forward: unavailable model | Pass | Invalid pinned spawn blocked; independent valid work continued; no substitution |
 | Independent review | Pass | Sol High findings resolved; no code or files edited by Reviewer |
+| Remote publication | Pass | Canonical `main` created on the requested GitHub remote |
+| Package-container integration | Pass | Commit contains only `.gitmodules` and the new tools gitlink |
+| Root integration | Pass | Commit contains only `AGENTS.md` and the package-container gitlink |
+| Dirty-state preservation | Pass | Pre-existing root changes remain outside orchestration commits |
 
 ## Reviewer Findings
 
@@ -143,6 +149,12 @@ Create and publish a UPM-compatible, documentation-only repository containing a 
 - Closed: replace scalar model metadata with auditable per-role assignments.
 - Closed: link audit claims to dated task evidence.
 - Closed before review completion: remove extra EOF blank lines reported by `git diff --check`.
+
+## Final Notes
+
+- The package is documentation-only; Unity Runtime/Editor validation is not applicable.
+- Parent integration branches are intentionally local and were not pushed.
+- Future automation work is prioritized as ORCH-002 through ORCH-004 in the roadmap.
 
 ## Rollback
 

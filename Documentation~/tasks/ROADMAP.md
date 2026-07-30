@@ -29,7 +29,7 @@ Draft -> Plan Review -> Ready -> In Progress -> Code Review -> Integration -> Do
 
 | ID | Priority | Status | Task | Assignment Summary | Isolation | Dependencies | Parallel Group | Shared Resources | Merge Order | Updated |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- |
-| ORCH-001 | P1 | In Progress | [Bootstrap orchestration toolkit](ORCH-001-bootstrap-orchestration-toolkit.md) | `O/R=sol:high; forward-tests=terra:low\|medium+sol:medium` | single-writer | — | — | Git remotes | 1 | 2026-07-30 |
+| ORCH-001 | P1 | Done | [Bootstrap orchestration toolkit](ORCH-001-bootstrap-orchestration-toolkit.md) | `O/R=sol:high; forward-tests=terra:low\|medium+sol:medium` | single-writer | — | — | Git remotes | 1 | 2026-07-30 |
 | ORCH-002 | P2 | Inbox | Add task/roadmap schema and linter | `O/R=sol:high; W=sol:medium` | isolated-worktree | ORCH-001 | quality-automation | CI | 2 | 2026-07-30 |
 | ORCH-003 | P2 | Inbox | Add orchestration contract and forward-test CI | `O/R=sol:high; W=sol:medium` | isolated-worktree | ORCH-002 | quality-automation | CI/model catalog | 3 | 2026-07-30 |
 | ORCH-004 | P3 | Inbox | Benchmark token, cost, latency, and repair rate | `O/R=sol:high; V=terra:medium` | isolated-worktree | ORCH-001 | measurement | model catalog | 4 | 2026-07-30 |
