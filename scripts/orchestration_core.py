@@ -181,6 +181,7 @@ def _canonical_name(name: str) -> str:
         "mergecommits": "mergeCommits",
         "integrationvalidationpassed": "integrationValidationPassed",
         "phasevalidationpassed": "phaseValidationPassed",
+        "legacycompatibility": "legacyCompatibility",
         "dependencies": "dependencies",
         "ownedpaths": "ownedPaths",
         "writepaths": "ownedPaths",
@@ -352,6 +353,11 @@ def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
             result.error("profile.parallelism", "maxWriters cannot exceed maxAgents")
     if isinstance(profile.get("reviewCycles"), int) and profile["reviewCycles"] > 2:
         result.error("profile.review_cycles", "reviewCycles cannot exceed 2")
+    if profile.get("legacyCompatibilityDefault") is True:
+        result.error(
+            "profile.legacy_default",
+            "Legacy compatibility cannot be enabled profile-wide; mark individual tracked tasks",
+        )
     return result
 
 
@@ -434,8 +440,11 @@ def validate_task(
             result.error("task.missing", f"Missing task field: {name}")
     state = str(task.get("state", ""))
     previous = task.get("previousState")
+    if "legacyCompatibility" in task and task.get("legacyCompatibility") not in (True, False):
+        result.error("task.legacy_compatibility", "legacyCompatibility must be a boolean")
+    legacy_compatibility = task.get("legacyCompatibility") is True
     if state != "Planned" and not previous:
-        if adapter == "autoqa-markdown-v1":
+        if legacy_compatibility:
             result.warn("state.legacy_history", "Legacy AutoQA task has no previousState transition evidence")
         else:
             result.error("state.history", f"{state} requires previousState transition evidence")
@@ -458,7 +467,7 @@ def validate_task(
     if task.get("state") in {"Candidate", "Sol Review", "Accepted", "Integrated"}:
         commits = as_list(task.get("candidateCommits", task.get("candidateCommit")))
         if not commits:
-            if adapter == "autoqa-markdown-v1":
+            if legacy_compatibility:
                 result.warn(
                     "candidate.commit.legacy",
                     "Legacy AutoQA task omits candidate commit; require it in the handoff",
@@ -468,7 +477,7 @@ def validate_task(
     if task.get("state") == "Accepted" and task.get("integrated") is True:
         result.error("state.accepted", "Accepted is distinct from Integrated")
     if task.get("state") == "Integrated" and task.get("integrationValidationPassed") is not True:
-        if adapter == "autoqa-markdown-v1":
+        if legacy_compatibility:
             result.warn(
                 "integration.validation.legacy",
                 "Legacy AutoQA task omits structured integration validation evidence",
@@ -740,8 +749,8 @@ def validate_cross_artifacts(
         for task_id in ids:
             integrations_by_task.setdefault(str(task_id), []).append(item)
 
-    def lifecycle_finding(code: str, message: str) -> None:
-        if adapter == "autoqa-markdown-v1":
+    def lifecycle_finding(task: Mapping[str, Any], code: str, message: str) -> None:
+        if task.get("legacyCompatibility") is True:
             result.warn(code + ".legacy", message + " (legacy AutoQA compatibility)")
         else:
             result.error(code, message)
@@ -753,7 +762,7 @@ def validate_cross_artifacts(
         handoff = handoffs_by_task.get(task_id)
         if state in candidate_plus:
             if not handoff:
-                lifecycle_finding("lifecycle.handoff", f"{task_id} {state} requires a handoff")
+                lifecycle_finding(task, "lifecycle.handoff", f"{task_id} {state} requires a handoff")
             evidence = (
                 task.get("validationEvidence")
                 or task.get("validationPassed") is True
@@ -762,15 +771,17 @@ def validate_cross_artifacts(
             )
             if not evidence and not as_list(task.get("validationDebt")):
                 lifecycle_finding(
+                    task,
                     "lifecycle.validation",
                     f"{task_id} {state} requires validation evidence or owned validation debt",
                 )
         if state in accepted_plus and not reviews_by_task.get(task_id):
-            lifecycle_finding("lifecycle.review", f"{task_id} {state} requires a Sol review")
+            lifecycle_finding(task, "lifecycle.review", f"{task_id} {state} requires a Sol review")
         if state == "Integrated":
             evidence_items = integrations_by_task.get(task_id, [])
             if not evidence_items:
                 lifecycle_finding(
+                    task,
                     "lifecycle.integration",
                     f"{task_id} Integrated requires merge/integration evidence",
                 )
@@ -778,6 +789,7 @@ def validate_cross_artifacts(
                 latest = evidence_items[-1]
                 if not _commit_values(latest, "mergeCommit", "mergeCommits"):
                     lifecycle_finding(
+                        task,
                         "lifecycle.merge_commit",
                         f"{task_id} integration evidence requires a merge commit",
                     )
@@ -785,11 +797,13 @@ def validate_cross_artifacts(
                     for merge_commit in _commit_values(latest, "mergeCommit", "mergeCommits"):
                         if run_git(repo, "rev-parse", "--verify", f"{merge_commit}^{{commit}}").returncode:
                             lifecycle_finding(
+                                task,
                                 "lifecycle.merge_commit",
                                 f"{task_id} merge commit does not exist: {merge_commit}",
                             )
                 if latest.get("integrationValidationPassed") is not True:
                     lifecycle_finding(
+                        task,
                         "lifecycle.integration_validation",
                         f"{task_id} integration evidence requires integrationValidationPassed",
                     )
@@ -798,6 +812,7 @@ def validate_cross_artifacts(
                 )
                 if not phase_passed:
                     lifecycle_finding(
+                        task,
                         "lifecycle.phase_validation",
                         f"{task_id} Integrated requires successful phase validation",
                     )

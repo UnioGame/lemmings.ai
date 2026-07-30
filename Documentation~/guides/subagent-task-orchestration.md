@@ -47,7 +47,7 @@ Changes Requested -> Candidate -> Accepted -> Integrated
 - `routing-scorecard.md` — фактологическая оценка маршрутизации;
 - `consumer-profile.json` — generic consumer contract.
 
-`generic-markdown-v1` — канонический формат. `autoqa-markdown-v1` сохраняет совместимость с существующими AutoQA packet без массовой миграции истории. Runtime state хранится untracked и не заменяет tracked artifacts.
+`generic-markdown-v1` — канонический формат. `autoqa-markdown-v1` парсит существующие AutoQA packet без массовой миграции, но применяет те же строгие lifecycle gates. Только конкретный tracked historical packet с `legacyCompatibility: true` получает warning-only режим для отсутствующих structured lifecycle fields; profile-wide downgrade запрещён. Runtime state хранится untracked и не заменяет tracked artifacts.
 
 ## Модели и назначения
 

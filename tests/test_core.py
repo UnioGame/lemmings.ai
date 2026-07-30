@@ -79,6 +79,10 @@ class ProfilePhaseTests(unittest.TestCase):
     def test_valid_profile(self):
         self.assertTrue(validate_profile(profile()).ok)
 
+    def test_profile_cannot_enable_blanket_legacy_compatibility(self):
+        result = validate_profile(profile(legacyCompatibilityDefault=True))
+        self.assertIn("profile.legacy_default", {item.code for item in result.findings})
+
     def test_phase_without_baseline_cannot_dispatch(self):
         invalid = phase(baselineAccepted=False)
         self.assertFalse(validate_phase(invalid).ok)
@@ -234,6 +238,7 @@ class CrossArtifactTests(unittest.TestCase):
             previousState=None,
             candidateCommit="c1",
             actualModel="gpt-5.6-sol",
+            legacyCompatibility=True,
         )
         result = validate_cross_artifacts([value], adapter="autoqa-markdown-v1")
         self.assertTrue(any(item.code.endswith(".legacy") for item in result.findings))
@@ -340,6 +345,7 @@ class AdapterScorecardTests(unittest.TestCase):
 - Selected runtime model: GPT-5.6 Terra medium
 - Actual runtime model: GPT-5.6 Terra medium
 - Review cycles: `0/2`
+- Legacy compatibility: true
 - Branch: `codex/p0-17-example`
 - Worktree: `../worktrees/p0-17`
 - Baseline commit: `abc123`
@@ -356,6 +362,7 @@ class AdapterScorecardTests(unittest.TestCase):
         self.assertEqual("Ready", value["state"])
         self.assertEqual("abc123", value["baselineSha"])
         self.assertEqual(0, value["reviewCycle"])
+        self.assertTrue(value["legacyCompatibility"])
         self.assertEqual(["scripts/**"], value["ownedPaths"])
 
     def test_generic_phase_table_compatibility(self):

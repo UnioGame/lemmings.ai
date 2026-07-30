@@ -12,6 +12,10 @@
 8. Cleanup: worktrees, markers and temporary resources are inventoried.
 9. Phase Close: roadmap, validation debt and routing scorecard are current.
 
+Apply these gates strictly for every adapter. A tracked historical task may set
+`legacyCompatibility: true` to turn only its missing structured lifecycle
+evidence into warnings; never infer legacy mode from `autoqa-markdown-v1`.
+
 ## Context and hooks
 
 The context packet contains the task packet, nearest `AGENTS.md`, frozen contracts, direct ADRs/knowledge, affected interfaces/tests, and prerequisite handoffs. Allow one concrete expansion request naming the missing decision or symbol.

@@ -7,6 +7,7 @@
 | Phase / wave / state | `<phase> / <wave> / Planned>` |
 | Previous state | `<previous>` |
 | State history | `["Planned", "Ready", "<current>"]` |
+| Legacy compatibility | `false` |
 | Base SHA / branch / absolute worktree | `<sha> / <branch> / <path>` |
 | Preferred / approved fallback / selected / actual | `<model> / <model> / <model> / pending>` |
 | Role and rationale | `<role/reason>` |
@@ -39,6 +40,9 @@
 
 Record structured `validationEvidence`, or structured validation debt with
 reason, owner, blocking policy, and future gate, before `Candidate`.
+
+Set `legacyCompatibility: true` only on a tracked historical packet that cannot
+be migrated yet. The adapter alone never relaxes lifecycle gates.
 
 ## Failure and control
 

@@ -9,6 +9,7 @@
   "maxWriters": 2,
   "integrationStrategy": "no-ff",
   "reviewCycles": 2,
+  "legacyCompatibilityDefault": false,
   "candidateCommitRequired": true,
   "sharedPathOwners": { "<path>": "sol" },
   "validationCommands": [],

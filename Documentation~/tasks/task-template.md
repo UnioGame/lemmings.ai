@@ -2,4 +2,7 @@
 
 Use the canonical [task packet](templates/task-packet.md). It includes phase/wave state, four model assignments, owned/forbidden/shared sets, candidate/fix protocol, validation debt, bounded context, review, and integration requirements.
 
-Existing AutoQA packets remain valid through the `autoqa-markdown-v1` adapter; do not rewrite historical task files solely to migrate their format.
+`autoqa-markdown-v1` continues to parse historical AutoQA packets, but
+validation is strict by default. A historical packet may opt into warning-only
+missing structured lifecycle fields only with tracked
+`legacyCompatibility: true`; never enable compatibility profile-wide.

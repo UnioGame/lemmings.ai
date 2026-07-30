@@ -51,6 +51,11 @@ Sol review of the actual range; `Integrated` requires merge evidence and passed
 integration and phase validation. Record `previousState` or ordered state
 history for every non-`Planned` generic task.
 
+Adapters only parse layouts; they never weaken gates. Keep
+`legacyCompatibility` false for new packets. Set it to true only in a specific
+tracked historical packet that cannot yet carry structured lifecycle evidence;
+never enable warning-only compatibility profile-wide.
+
 Give Sol High the packet, baseline/contracts, actual candidate/fix commit range, diff, concise evidence, and direct interfaces/tests. Findings P0–P2 block acceptance unless a P2 follow-up has an owner. The reviewer must not patch worker code.
 
 Integrate accepted commits only in dependency order using the profile integration strategy (normally `--no-ff`), then run phase validation. Record integration evidence, cleanup inventory, deferred validation, and routing scorecard. Inspect cleanup safely; do not delete worktrees automatically.

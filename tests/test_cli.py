@@ -319,6 +319,169 @@ class CliTests(unittest.TestCase):
             self.assertTrue(output["data"]["bindings"][0]["branchExists"])
             self.assertTrue(output["data"]["bindings"][0]["worktreeExists"])
 
+    def test_autoqa_status_is_strict_unless_task_explicitly_opts_into_legacy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-m", "base"],
+                check=True,
+                capture_output=True,
+            )
+            baseline = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            (repo / "candidate.txt").write_text("candidate\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "candidate.txt"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-m", "candidate"],
+                check=True,
+                capture_output=True,
+            )
+            candidate = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            branch = subprocess.run(
+                ["git", "-C", str(repo), "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            (repo / "ROADMAP.md").write_text(
+                "| Task |\n| T-ACCEPT |\n| T-INTEGRATED |\n| T-LEGACY |\n",
+                encoding="utf-8",
+            )
+            profile_path = repo / "profile.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "taskAdapter": "autoqa-markdown-v1",
+                        "roadmap": "ROADMAP.md",
+                        "worktreeRoot": ".",
+                        "phaseBranchPattern": "codex/phase-{phase}-{slug}",
+                        "taskBranchPattern": "codex/{taskId}-{slug}",
+                        "maxAgents": 3,
+                        "maxWriters": 2,
+                        "integrationStrategy": "no-ff",
+                        "reviewCycles": 2,
+                        "legacyCompatibilityDefault": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def base_task(task_id: str, state: str, previous: str | None) -> dict:
+                return {
+                    "taskId": task_id,
+                    "phaseId": "P1",
+                    "state": state,
+                    "previousState": previous,
+                    "baselineSha": baseline,
+                    "branch": branch,
+                    "worktree": str(repo),
+                    "preferredModel": "sol",
+                    "approvedFallback": "terra",
+                    "selectedModel": "sol",
+                    "actualModel": "sol",
+                    "candidateCommit": candidate,
+                    "validationEvidence": {"command": "test", "exitCode": 0},
+                    "ownedPaths": ["scripts/**"],
+                    "sharedPaths": [],
+                    "forbiddenPaths": [],
+                    "dependencies": [],
+                    "integrationOrder": 1,
+                }
+
+            def run_status(task_value: dict, **artifacts: dict) -> subprocess.CompletedProcess[str]:
+                task_path = repo / f"{task_value['taskId']}.json"
+                task_path.write_text(json.dumps(task_value), encoding="utf-8")
+                command = [
+                    sys.executable,
+                    str(CLI),
+                    "status",
+                    "--repo",
+                    str(repo),
+                    "--profile",
+                    str(profile_path),
+                    "--task",
+                    str(task_path),
+                    "--json",
+                ]
+                for option, value in artifacts.items():
+                    artifact_path = repo / f"{task_value['taskId']}-{option}.json"
+                    artifact_path.write_text(json.dumps(value), encoding="utf-8")
+                    command.extend(["--" + option.replace("_", "-"), str(artifact_path)])
+                return subprocess.run(command, capture_output=True, text=True, check=False)
+
+            accepted = base_task("T-ACCEPT", "Accepted", "Sol Review")
+            accepted_result = run_status(
+                accepted,
+                handoff={
+                    "taskId": "T-ACCEPT",
+                    "actualModel": "sol",
+                    "candidateCommit": candidate,
+                    "validationEvidence": {"command": "test", "exitCode": 0},
+                },
+            )
+            self.assertNotEqual(0, accepted_result.returncode)
+            self.assertIn(
+                "lifecycle.review",
+                {item["code"] for item in json.loads(accepted_result.stdout)["findings"]},
+            )
+
+            integrated = base_task("T-INTEGRATED", "Integrated", "Accepted")
+            integrated["integrationValidationPassed"] = True
+            integrated_result = run_status(
+                integrated,
+                handoff={
+                    "taskId": "T-INTEGRATED",
+                    "actualModel": "sol",
+                    "candidateCommit": candidate,
+                    "validationEvidence": {"command": "test", "exitCode": 0},
+                },
+                review={
+                    "taskId": "T-INTEGRATED",
+                    "commitRange": f"{baseline}..{candidate}",
+                    "verdict": "Accepted",
+                },
+            )
+            self.assertNotEqual(0, integrated_result.returncode)
+            self.assertIn(
+                "lifecycle.integration",
+                {item["code"] for item in json.loads(integrated_result.stdout)["findings"]},
+            )
+
+            legacy = base_task("T-LEGACY", "Accepted", None)
+            legacy["legacyCompatibility"] = True
+            legacy.pop("candidateCommit")
+            legacy.pop("validationEvidence")
+            legacy_result = run_status(legacy)
+            legacy_output = json.loads(legacy_result.stdout)
+            self.assertEqual(0, legacy_result.returncode, legacy_result.stdout + legacy_result.stderr)
+            self.assertTrue(legacy_output["ok"])
+            self.assertGreater(legacy_output["warnings"], 0)
+            self.assertTrue(
+                all(
+                    item["severity"] == "warning"
+                    for item in legacy_output["findings"]
+                    if ".legacy" in item["code"]
+                )
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
