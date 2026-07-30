@@ -1,4 +1,4 @@
-# UniGame AI Tools
+# AI Tools
 
 UPM-compatible, documentation-only package with a reusable Codex orchestration skill, phase/wave delivery artifacts, and validation contracts.
 
