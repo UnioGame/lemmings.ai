@@ -9,9 +9,10 @@
 ## Sources Of Truth
 
 - `Documentation~/guides/subagent-task-orchestration.md` owns the detailed orchestration policy.
-- `.agents/skills/orchestrate-agent-tasks/SKILL.md` owns the concise agent workflow and command contract.
+- `skills/orchestrate-agent-tasks/SKILL.md` owns the concise agent workflow and command contract.
+- `skills/orchestrate-agent-tasks/references/` owns compact advanced workflow references.
 - `Documentation~/tasks/ROADMAP.md` owns orchestration-tooling priorities.
-- `Documentation~/tasks/task-template.md` owns the reusable task-file schema.
+- `Documentation~/tasks/templates/` owns reusable phase, task, review, and integration schemas.
 
 Avoid duplicating detailed policy across these files. Keep the skill compact and link it to the guide for advanced cases.
 

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "taskAdapter": "generic-markdown-v1",
+  "roadmap": "Documentation~/tasks/ROADMAP.md",
+  "worktreeRoot": "../worktrees",
+  "phaseBranchPattern": "codex/phase-{phase}-{slug}",
+  "taskBranchPattern": "codex/{taskId}-{slug}",
+  "maxAgents": 3,
+  "maxWriters": 2,
+  "integrationStrategy": "no-ff",
+  "reviewCycles": 2,
+  "candidateCommitRequired": true,
+  "sharedPathOwners": { "<path>": "sol" },
+  "validationCommands": [],
+  "externalGates": [],
+  "contextExclusions": ["generated", "logs", "videos", "screenshots", "dumps"],
+  "cleanupPolicy": "inspect-only"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "unigame-agent-orchestration",
+  "version": "0.2.0",
+  "description": "Gated phase and wave orchestration for repository delivery",
+  "author": {
+    "name": "UnioGame"
+  },
+  "repository": "https://github.com/UnioGame/unigame.ai.tools",
+  "homepage": "https://github.com/UnioGame/unigame.ai.tools",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Unigame Agent Orchestration",
+    "shortDescription": "Coordinate gated multi-agent repository delivery.",
+    "longDescription": "Unigame Agent Orchestration adds phase baselines, dispatch manifests, commit-range review, and integration evidence.",
+    "developerName": "UnioGame",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use $orchestrate-agent-tasks to deliver this work with explicit phase, task, review, and integration gates."
+  }
+}

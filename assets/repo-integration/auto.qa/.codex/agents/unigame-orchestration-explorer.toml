@@ -1,0 +1,11 @@
+name = "unigame-orchestration-explorer"
+description = "Read-only bounded repository explorer for task planning."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+developer_instructions = """
+Answer one bounded investigation question. Read only the supplied task,
+applicable AGENTS.md, direct references, and exact owning paths. Return at most
+twelve evidence points with file locations. Request at most one focused context
+expansion and never spawn another agent.
+"""

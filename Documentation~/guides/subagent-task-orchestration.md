@@ -1,39 +1,150 @@
-# Оркестрация реализации задач через субагентов
+# Оркестрация задач через субагентов
 
-Гайд описывает cost-aware пайплайн: сильная модель принимает решения и проверяет результат, дешёвые модели выполняют ограниченные задачи, Git worktrees изолируют параллельные изменения, тесты дают проверяемые доказательства.
+Этот гайд задаёт проверяемый delivery-пайплайн: сильный Orchestrator фиксирует решения и интегрирует, Workers делают ограниченные изменения в изолированных worktree, а Sol High независимо проверяет реальные commit ranges. Для простой локальной правки не создавайте бюрократию и работайте одним агентом.
 
-## Содержание
+## Фаза, волна и состояния
 
-1. [Принципы](#принципы)
-2. [Управление skill](#управление-skill)
-3. [Выбор моделей пользователем](#выбор-моделей-пользователем)
-4. [Роли и модели по умолчанию](#роли-и-модели-по-умолчанию)
-5. [Пайплайн](#пайплайн)
-6. [Roadmap и task-файлы](#roadmap-и-task-файлы)
-7. [Параллельная работа в одном репозитории](#параллельная-работа-в-одном-репозитории)
-8. [Unity и submodules](#unity-и-submodules)
-9. [Граничные случаи](#граничные-случаи)
-10. [Тестовая стратегия](#тестовая-стратегия)
-11. [Экономия токенов](#экономия-токенов)
-12. [Аудит плана и улучшения](#аудит-плана-и-улучшения)
-13. [Закрытие задачи](#закрытие-задачи)
+Roadmap хранит только приоритеты и зависимости. Исполнение живёт в phase/task artifacts:
 
-## Принципы
+```text
+Roadmap -> Phase baseline -> Wave dispatch -> Task candidate/fix commits
+        -> Sol review -> Accepted -> Integration evidence -> Phase close
+```
 
-- Главный агент хранит требования, решения, зависимости и итоговый результат.
-- Субагент получает одну ограниченную ответственность.
-- План должен быть decision-complete до начала записи файлов.
-- Пользовательский выбор модели имеет приоритет над автоматической экономией.
-- Неизвестную или недоступную модель нельзя молча заменять.
-- Параллелить выгодно чтение, диагностику, независимые реализации и проверки.
-- Параллельные writers требуют отдельных worktrees.
-- Acceptance criteria и существенные риски должны иметь тестовое доказательство.
-- Review выполняет агент, не писавший проверяемый код.
-- Security, sandbox, approvals и destructive-action rules нельзя отключить командой skill.
+Состояния задачи:
 
-## Управление skill
+```text
+Planned -> Ready -> Dispatched -> In Progress -> Candidate -> Sol Review
+Changes Requested -> Candidate -> Accepted -> Integrated
+```
 
-Использовать explicit skill invocation:
+`Blocked`, `Cancelled`, `Superseded` доступны как исключения. `Replan Required` обязателен после двух неудачных review/fix циклов, scope drift, изменения frozen contract или неверного baseline. `Accepted` означает только качество candidate; `Integrated` требует merge и phase validation.
+
+## Девять gates
+
+1. Planning — цель, scope, DAG, ownership, критерии и risks полны.
+2. Baseline — branch, SHA, dirty state, submodule revisions и rollback зафиксированы.
+3. Contract Freeze — Sol принял shared/public contracts и владельца shared paths.
+4. Dispatch — модели, worktrees, leases, paths, бюджеты и внешние gates доступны.
+5. Candidate — есть candidate commit, handoff и task-level validation.
+6. Review — Sol High проверил фактический commit range и evidence.
+7. Integration — accepted commits влиты в DAG-порядке и проверены вместе.
+8. Cleanup — worktrees, markers и временные ресурсы инвентаризированы.
+9. Phase Close — roadmap, validation debt и routing scorecard обновлены.
+
+Параллельная wave не начинается без принятых первых трёх gates.
+
+## Artifact contracts
+
+Используйте шаблоны в [`../tasks/templates`](../tasks/templates/):
+
+- `phase-baseline.md` — integration branch, reviewed base, contracts, resources и phase checks;
+- `dispatch-manifest.md` — сгенерированный снимок назначений и изоляции волны;
+- `task-packet.md` — единая задача и test contract;
+- `handoff.md` — candidate/fix ranges и фактическое evidence;
+- `sol-review.md` — независимый review;
+- `integration-evidence.md` — merge и phase verification;
+- `routing-scorecard.md` — фактологическая оценка маршрутизации;
+- `consumer-profile.json` — generic consumer contract.
+
+`generic-markdown-v1` — канонический формат. `autoqa-markdown-v1` сохраняет совместимость с существующими AutoQA packet без массовой миграции истории. Runtime state хранится untracked и не заменяет tracked artifacts.
+
+## Модели и назначения
+
+Для каждой роли фиксировать четыре поля: **preferred**, **approved fallback**, **selected** (перед dispatch) и **actual** (в handoff). Прямой user pin выше task/thread/default routing, но не выше availability и safety. Недоступный pin не подменяется молча: блокируйте только этот spawn и запрашивайте замену.
+
+Reviewer всегда `gpt-5.6-sol/high`, read-only. Complex Worker поддерживается как `gpt-5.6-sol/medium`. Consumer profile может задать integration strategy, по умолчанию `no-ff`.
+
+## Планирование и dispatch
+
+1. Прочитать ближайшие `AGENTS.md`, profile, roadmap, прямые owning files и validation surfaces.
+2. Зафиксировать phase baseline и Sol-owned shared contracts.
+3. Разбить работу на DAG; задача имеет один independently reviewable outcome.
+4. Задать read/write/generated/shared/forbidden sets, dependencies, lease, acceptance, risk-to-test matrix, rollback и stop conditions.
+5. Выделить уникальные branch/worktree для writers от общего base SHA.
+6. Сгенерировать dispatch manifest из task packets/profile и отклонить drift.
+7. Передать worker только task packet, applicable `AGENTS.md`, frozen decisions, direct ADRs, interfaces/tests и prerequisite handoff.
+
+Worker может сделать один focused context expansion с названием недостающего решения или symbol. Полный transcript, все docs, generated output, logs, videos, screenshots и dumps не передавать без конкретной причины.
+
+## Candidate, review и repair
+
+Worker меняет только owned paths, запускает самый узкий falsifying check и создаёт candidate commit. Handoff содержит changed files, public-contract changes, commands/exit codes, actual model/effort, token/latency/cost, loaded context, assumptions, risks и ссылки на крупные artifacts.
+
+Если validation невозможна, это validation debt: причина, владелец, blocking policy и будущий gate обязательны. Это не `Pass`.
+
+Sol получает task packet, baseline/contracts, **actual candidate/fix commit range**, diff, validation evidence и direct interfaces/tests. Reviewer сам повторяет минимальную falsifying validation, не применяет patch и возвращает findings/verdict. P0–P2 блокируют acceptance, кроме явно оформленного P2 follow-up с владельцем. Fix commits создаёт тот же Worker. Второй неуспешный цикл переводит задачу в `Replan Required`.
+
+## Isolation, integration и cleanup
+
+Нельзя параллелить пересекающиеся owned paths, generated outputs, public contracts, Unity scenes/prefabs/meta/asmdefs/configs, submodules, ports, devices, accounts или mutable external resources. Shared contracts и integration меняет только Sol.
+
+Orchestrator вливает accepted commits по DAG с profile strategy, разрешает semantic conflicts, повторяет integration checks и записывает evidence. `cleanup inspect` только показывает task state, clean/dirty worktree, merged/unmerged branch, last commit и безопасную рекомендацию. Автоматически ничего не удаляйте.
+
+### Параллельные writers в одном репозитории
+
+Каждый writer получает отдельные branch и worktree от **одного phase baseline**. До dispatch сравните literal owned paths, generated outputs и public contracts; не считайте отсутствие Git conflict доказательством независимости. Единственный integration owner serially вливает accepted commits, даже если работа шла параллельно. Один checkout допускает несколько read-only explorers/reviewers или только одного writer.
+
+### Edge cases
+
+- **Dirty base:** не переносите пользовательские изменения в task worktrees. Запишите dirty state в baseline; либо очистите/изолируйте его явно, либо не начинайте wave.
+- **CWD binding:** task packet и manifest содержат абсолютный worktree. Worker обязан сверить `cwd`, branch и base SHA перед записью; несовпадение — stop, не «поправить» текущий checkout.
+- **Submodules:** запишите parent и submodule SHA. Один Worker меняет submodule, создаёт его commit, после чего Sol отдельным integration step обновляет parent gitlink. Dirty submodule не является base.
+- **Generated files:** только declared generated set. Codegen/format/import — writer activity; serialize shared output и проверяйте reproducibility после merge.
+- **Unity:** сцены, prefabs, `.meta`, asmdefs, ProjectSettings, Addressables и serialized configs serially owned. Не запускайте несколько Editors на одном project path; в worktrees изолируйте Library/Temp/Logs/build outputs.
+- **Shared resources:** порты, devices, accounts, databases, editors и paid quotas требуют lease с owner/window/cleanup. External effects используют test identities и idempotent cleanup.
+- **Semantic conflicts:** при чистом merge всё равно проверить contracts, lifecycle and integration scenarios с owner review.
+- **Interrupted worker:** сохранить branch, commit/diff и partial handoff; не удалять worktree до inventory и решения Orchestrator.
+- **Cleanup:** `inspect` безопасен и ничего не удаляет. Удаление accepted worktree — отдельное подтверждённое действие после integration evidence.
+
+## Зачем нужны тесты и какой уровень выбрать
+
+Тест — исполняемое доказательство acceptance criterion, а не формальность для Worker. Он ограничивает риск дешёвых model tiers, даёт Reviewer независимый факт и ловит interaction defects после merge. Каждому critical criterion и material risk назначьте уровень:
+
+| Уровень | Когда использовать |
+| --- | --- |
+| Unit | Детерминированная логика, branches, boundary/negative cases. |
+| Contract | Public API, schema, serialization, provider/consumer compatibility. |
+| Integration | Хранилище, queue, auth, device provider, несколько модулей или реальная инфраструктура. |
+| E2E | Пользовательский критический поток через настоящие boundaries; дорого, поэтому только high-value journeys. |
+| Regression | Воспроизводимый bug: должен падать до fix и проходить после него. |
+| Property/fuzz | Parsers, serializers, mathematical invariants и большое пространство входов. |
+| Manual | Hardware, visual quality, unavailable paid/external environment; не заменяет доступный автоматический test. |
+
+Сначала запускайте самый узкий falsifying check. Затем task-level ladder, а после merge — phase/integration rerun. Недоступная среда становится validation debt с владельцем и будущим gate.
+
+## Hooks и cost discipline
+
+Pre-dispatch hook блокирует task без baseline/Ready/manifest, model mismatch, closed gate, shared writer worktree, path overlap, не-Sol shared edit и recursive spawn. Stop hook проверяет commit, handoff, actual model, validation, clean branch и ownership. Reviewer profile read-only. Повторный stop или cancellation не образует цикл.
+
+Установка project hooks сама по себе не активирует task enforcement. Перед
+dispatch Orchestrator создаёт JSON runtime state и выполняет:
+
+```text
+orchestration_cli runtime activate --repo <worktree> --state <state.json>
+```
+
+Marker хранится в результате
+`git rev-parse --git-path codex-orchestration/active.json`, то есть отдельно
+для каждого worktree. State содержит inline `task`, `phase`, `manifest`,
+`profile` либо ссылки на строгие JSON artifacts. Без marker hooks возвращают
+`allow/inactive`; повреждённый активный marker блокирует `PreToolUse`, но
+quality events только предупреждают. `runtime deactivate` удаляет только этот
+marker. Stop-continuation записывается атомарно и допускается один раз.
+
+### Hybrid hook failure policy
+
+Hooks являются enforcement aid, а не единственным source of truth: artifacts и review остаются обязательны. В `hybrid` profile fail closed для `spawn-safety` и `write-scope`: hook unavailable, malformed input или deny не позволяет spawn/write. Fail open только для `handoff-quality` и `validation-completeness`: не прерывайте уже выполненную работу, но создайте visible warning/validation debt и потребуйте gate до acceptance. Повторная continuation разрешена один раз; затем `Cancelled` или явное решение Orchestrator, без stop-loop.
+
+### Native workspace activation и soft modes
+
+**Native workspace activation** — consumer кладёт `.codex/config.toml`, `orchestration.json`, `hooks.json` и agent profiles в свой workspace, включает hooks и использует repo-scoped plugin marketplace. Это режим AutoQA: правила могут быть проверены при dispatch/write, но остаются ограничены возможностями host surface.
+
+**Soft mode** — skill вызывается явно (`$orchestrate-agent-tasks on/auto`) или по trigger description без workspace hooks. Он всё равно требует artifacts, gates, ручную сверку worktree/model/ownership и Sol review, но не обещает runtime blocking. Используйте soft mode, когда repo не может или не должен получать `.codex` config; не изменяйте global Codex config ради активации.
+
+## Управление skill и модельные назначения
+
+Используйте explicit invocation:
 
 ```text
 $orchestrate-agent-tasks on
@@ -42,524 +153,136 @@ $orchestrate-agent-tasks auto
 $orchestrate-agent-tasks status
 ```
 
-### `on`
+`on` включает workflow только в текущем thread: material work получает artifacts/review, но простая правка остаётся single-agent. `off` прекращает implicit/proactive orchestration, не отменяет прямую команду пользователя и не меняет repository/global config. `auto` — default нового thread и включает skill по description-based trigger. `status` не меняет state и показывает mode, Orchestrator, WIP limits, roadmap и active phase/task. Не создавайте `/orchestration`: используйте `$orchestrate-agent-tasks`.
 
-- Включает workflow в текущем thread.
-- Для многошаговой задачи требует roadmap/task files и review gates.
-- Не заставляет создавать субагентов для простой локальной работы.
-
-### `off`
-
-- Отключает implicit и proactive использование orchestration workflow в текущем thread.
-- Не создаёт автоматически task files и субагентов.
-- Не отменяет последующую прямую команду пользователя.
-- Не меняет repository или global configuration.
-
-### `auto`
-
-- Возвращает стандартный description-based trigger.
-- Является default для нового thread.
-
-### `status`
-
-Показывает без мутаций:
-
-```text
-Orchestration: AUTO|ON|OFF
-Orchestrator: gpt-5.6-sol / high
-Max subagents: 3
-Max parallel writers: 2
-Roadmap: <path>
-Active task: <id|none>
-```
-
-Skill не регистрирует `/orchestration`: custom slash prompts deprecated. Для включения используется `$orchestrate-agent-tasks`.
-
-Persistent explicit-only режим задаётся в `agents/openai.yaml`:
-
-```yaml
-policy:
-  allow_implicit_invocation: false
-```
-
-Explicit `$orchestrate-agent-tasks on` остаётся доступным.
-
-## Выбор моделей пользователем
-
-### Thread-wide assignments
+Для назначений поддерживаются:
 
 ```text
 $orchestrate-agent-tasks models set worker=gpt-5.6-sol:medium
 $orchestrate-agent-tasks models set explorer=gpt-5.6-terra:low validator=gpt-5.6-terra:medium
-```
-
-### Task-specific assignments
-
-```text
 $orchestrate-agent-tasks models task ORCH-017 worker=gpt-5.6-sol:medium
-$orchestrate-agent-tasks models task ORCH-018 explorer=gpt-5.6-terra:medium
-```
-
-### Просмотр и сброс
-
-```text
 $orchestrate-agent-tasks models status
-$orchestrate-agent-tasks models reset
-$orchestrate-agent-tasks models reset worker
+$orchestrate-agent-tasks models reset [role]
 $orchestrate-agent-tasks models reset task ORCH-017
 ```
 
-Формат пользовательского ввода:
+Формат — `<model>:<reasoning-effort>`, но в artifact model и effort хранятся раздельно. Поддерживаемые роли: `complex-worker`, `worker`, `mechanical-worker`, `explorer`, `validator`, `summarizer`; `workers=` назначает три worker-роли. `all=` не поддерживается, а `reviewer=` отклоняется: дополнительный advisory reviewer не заменяет mandatory Sol gate.
 
-```text
-<model>:<reasoning-effort>
-```
-
-Model и effort сохраняются раздельно. Поддерживаемые user-assigned роли:
-
-- `complex-worker`;
-- `worker`;
-- `mechanical-worker`;
-- `explorer`;
-- `validator`;
-- `summarizer`.
-
-`workers=` назначает одну конфигурацию трём worker-ролям. `all=` запрещён: он может случайно понизить Reviewer.
-
-Mandatory Reviewer всегда `gpt-5.6-sol/high`. Команда `reviewer=` отклоняется. Пользователь может запросить дополнительного advisory-агента другой модели, но он не заменяет обязательный quality gate.
-
-Natural-language запрос тоже допустим:
-
-```text
-Используй Terra Low для explorer и Sol Medium для workers.
-```
-
-Orchestrator нормализует его в точные model/effort поля до spawn.
-
-### Scope и precedence
-
-- `models set` действует до reset или конца thread.
-- `models task <ID>` записывается в task-файл и сохраняется между threads.
-- При `off` assignments сохраняются, но не используются до `on`/`auto`.
-- Новый thread не наследует thread assignments.
-
-Приоритет:
-
-1. System/admin/surface availability и safety constraints.
-2. Последнее прямое указание пользователя для spawn.
-3. Task-specific assignment.
-4. Thread role assignment.
-5. Skill default.
-6. Автоматическая cost-based маршрутизация.
-
-Перед spawn проверить model catalog и поддержку effort. Если pin недоступен:
-
-- не запускать этого субагента;
-- не подменять модель молча;
-- сообщить точную несовместимость;
-- предложить ближайший доступный вариант;
-- продолжить независимые задачи с валидными assignments.
-
-Предложение замены строится детерминированно, но применяется только после подтверждения пользователя:
-
-1. Model доступна, effort нет — сохранить model и предложить ближайший поддерживаемый effort не ниже запрошенного; если такого нет, максимальный поддерживаемый.
-2. Model недоступна — взять default model роли с запрошенным effort, если сочетание валидно.
-3. Иначе предложить полный default assignment роли.
-
-`models status` показывает model, effort, source и scope каждой роли.
+Приоритет назначения: system/admin/surface availability и safety; последнее прямое user instruction для spawn; task pin; thread pin; role default; automatic cost routing. Сохраняйте partial overrides. Перед spawn проверяйте catalog/effort; неизвестный user pin не заменяйте молча. Если model доступна, но effort нет, предложите ближайший поддерживаемый не ниже requested, иначе highest; если model недоступна — role default с requested effort при совместимости, иначе полный default. Применять replacement можно только после user confirmation.
 
 ## Роли и модели по умолчанию
 
-| Роль | Модель | Effort | Назначение |
-| --- | --- | --- | --- |
-| Orchestrator | `gpt-5.6-sol` | `high` | требования, архитектура, DAG, интеграция |
-| Reviewer | `gpt-5.6-sol` | `high` | plan/code/test review |
-| Complex Worker | `gpt-5.6-sol` | `medium` | сложная реализация по готовому плану |
-| Standard Worker | `gpt-5.6-terra` | `medium` | обычная ограниченная реализация |
-| Mechanical Worker | `gpt-5.6-terra` | `low` | повторяемые изменения, docs, fixtures |
-| Explorer | `gpt-5.6-terra` | `low` | узкий поиск, чтение, сбор evidence |
-| Validator | `gpt-5.6-terra` | `medium` | тесты, воспроизведение и диагностика failures |
-| Summarizer | `gpt-5.6-luna`, если доступна | `low` | extraction/classification |
-
-`Worker-Sol-Medium` — роль, не model slug:
-
-```toml
-model = "gpt-5.6-sol"
-model_reasoning_effort = "medium"
-```
-
-Orchestrator по умолчанию использует `Sol High`. Повышение допускается только явно:
-
-- «выше high» без точного значения означает `xhigh`;
-- точный `xhigh`, `max` или `ultra` применяется при доступности;
-- Orchestrator нельзя понизить ниже `high`;
-- `Ultra` не отменяет ownership, WIP и recursive-spawn limits.
-
-Reviewer нельзя заменить или понизить ниже `Sol High`. Дополнительный user-selected reviewer может дать второе мнение, но обязательный `Sol High` review всё равно выполняется.
-
-## Пайплайн
-
-### 1. Triage
-
-Orchestrator:
-
-- читает применимые `AGENTS.md` и domain skills;
-- проверяет branch, dirty state, submodules и текущий roadmap;
-- уточняет goal, non-goals, acceptance criteria и ограничения;
-- выбирает single-agent или multi-agent режим;
-- назначает priority, risk и isolation.
-
-Простая детерминированная задача остаётся single-agent.
-
-### 2. Exploration
-
-Использовать 1–2 read-only Explorer только для неизвестных, меняющих план.
-
-Каждый получает отдельный вопрос и возвращает:
-
-- файлы и символы;
-- фактический execution/data flow;
-- constraints;
-- доказанные риски;
-- открытые вопросы.
-
-Лимит: около 12 evidence-пунктов, без raw logs.
-
-### 3. Декомпозиция
-
-Построить dependency DAG. Один task-файл должен давать независимо реализуемый и проверяемый результат.
-
-Не дробить задачу, если coordination/merge overhead выше ожидаемой экономии времени.
-Для простой single-agent правки task-файл и запись в roadmap не нужны.
-
-### 4. Task planning
-
-Зафиксировать:
-
-- base revision и submodule revisions;
-- role, model, effort и assignment source;
-- read/write/generated sets;
-- shared resources;
-- dependencies и merge order;
-- goal, non-goals и решения;
-- implementation steps;
-- acceptance criteria;
-- risk-to-test matrix;
-- rollback.
-
-Нерешённый архитектурный или продуктовый вопрос запрещает статус `Ready`.
-
-### 5. Plan Review
-
-Независимый `Sol High` Reviewer проверяет:
-
-- полноту требований;
-- архитектурные границы;
-- корректность DAG;
-- реальную независимость параллельных задач;
-- failure modes;
-- тестируемость;
-- rollback.
-
-Blocking findings закрываются до implementation.
-
-### 6. Workspace allocation
-
-- Read-only агенты могут использовать основной checkout.
-- В основном checkout допускается один writer.
-- Несколько writers получают отдельные worktrees от одного чистого base commit.
-- Каждый worktree имеет detached HEAD или уникальную ветку `codex/<task-id>-<slug>`.
-
-### 7. Dispatch
-
-Worker получает:
-
-- task ID и путь task-файла;
-- точные owning paths/symbols;
-- declared write set;
-- acceptance criteria;
-- test commands;
-- output contract.
-
-Передавать минимальный контекст, а не полный chat history. Recursive spawn запрещён без разрешения Orchestrator.
-
-### 8. Implementation
-
-Worker:
-
-- меняет только declared write set;
-- останавливается при scope drift;
-- добавляет тесты вместе с поведением;
-- запускает узкий task-level validation;
-- возвращает до 8 handoff-пунктов.
-
-### 9. Code Review
-
-Reviewer получает task-файл, diff и test evidence. Он не исправляет код.
-
-Finding содержит:
-
-- severity;
-- file/line;
-- доказательство;
-- нарушенный acceptance criterion;
-- ожидаемое исправление.
-
-### 10. Repair
-
-Исправления возвращаются исходному Worker. Максимум две итерации. Затем:
-
-- остановить реализацию;
-- вернуть задачу в `Draft`;
-- исправить план, scope или model assignment.
-
-### 11. Integration
-
-Orchestrator:
-
-- интегрирует task commits последовательно по DAG;
-- не разрешает Workers сливать чужие ветки;
-- решает conflicts;
-- запускает post-merge integration tests;
-- обновляет roadmap.
-
-### 12. Closure
-
-`Done` разрешён только после закрытия findings и test gates. Stable knowledge переносится в owning knowledge docs; raw investigation остаётся task-scoped.
-
-## Roadmap и task-файлы
-
-Priority:
-
-- `P0` — production/security/blocker;
-- `P1` — текущая обязательная цель;
-- `P2` — следующая очередь;
-- `P3` — improvement/experiment;
-- `Inbox` — без triage.
-
-Status flow:
-
-```text
-Draft -> Plan Review -> Ready -> In Progress -> Code Review -> Integration -> Done
-```
-
-`Blocked` доступен из любого активного статуса.
-
-Roadmap хранит:
-
-- ID, priority, status;
-- task link;
-- compact assignment summary и ссылку на полную per-role таблицу в task-файле;
-- isolation;
-- dependencies и parallel group;
-- shared resources;
-- merge order;
-- updated date.
-
-Только Orchestrator обновляет общий roadmap. Worker обновляет только Progress/Handoff своего task-файла.
-
-## Параллельная работа в одном репозитории
-
-### Режимы
-
-| Режим | Допустимо | Ограничения |
+| Роль | Model / effort | Назначение |
 | --- | --- | --- |
-| Shared read-only | Несколько Explorer/Reviewer | Только операции без tracked-state mutation |
-| Shared single-writer | Один Worker и read-only агенты | Formatter/codegen/Unity import считаются writer |
-| Isolated worktrees | Несколько Workers | Один writer на worktree, общий base commit |
-| Serialized integration | Один Orchestrator | Merge, conflict resolution, post-merge tests |
+| Orchestrator | `gpt-5.6-sol/high` | requirements, architecture, DAG, integration |
+| Reviewer | `gpt-5.6-sol/high` | independent plan/code/commit-range review |
+| Complex Worker | `gpt-5.6-sol/medium` | complex, risky, multi-boundary packets |
+| Standard Worker | `gpt-5.6-terra/medium` | ordinary bounded implementation |
+| Mechanical Worker | `gpt-5.6-terra/low` | deterministic docs/fixtures/repetition |
+| Explorer | `gpt-5.6-terra/low` | bounded evidence gathering |
+| Validator | `gpt-5.6-terra/medium` | run checks and diagnose failures |
+| Summarizer | `gpt-5.6-luna/low`, if available; otherwise Terra | status/evidence compression |
 
-По умолчанию:
+Orchestrator нельзя понижать ниже high. «Выше high» без точного уровня означает `xhigh`; `xhigh`, `max`, `ultra` допустимы только явно и при availability. Reviewer неизменно Sol High. Более сильная модель не уменьшает required test coverage; слабый user pin может потребовать additional Validator/Reviewer gate.
 
-- максимум три субагента;
-- максимум два параллельных writers;
-- третий слот сохраняется для Explorer, Validator или Reviewer.
+## Полный delivery pipeline
 
-### Conflict gate
+1. **Triage:** прочитать applicable `AGENTS.md`, consumer profile, branch, dirty state, submodules и roadmap; определить goal, non-goals, acceptance, isolation, priority/risk.
+2. **Exploration:** для неизвестных, меняющих plan, запустить 1–2 read-only Explorer с разными вопросами; каждый возвращает files/symbols, flow, constraints, risks и open questions, без raw logs.
+3. **DAG:** разбить только когда expected parallel gain выше coordination/merge cost. Одно task packet — один independently reviewable outcome.
+4. **Phase planning:** создать baseline: branch, SHA, submodules, rollback, frozen contracts, Sol-owned paths, external/paid policy и phase validation.
+5. **Packet planning:** зафиксировать model quartet, read/write/generated/shared/forbidden sets, leases, dependencies, merge order, acceptance, risk-to-test, failure modes, rollback и stop conditions.
+6. **Plan review:** independent Sol High проверяет requirements, architecture, contracts, DAG, ownership, external side effects, testability и rollback. Blocking findings закрыть до `Ready`.
+7. **Workspace allocation:** один writer на worktree/branch от phase base; read-only agents могут использовать primary checkout. CWD/branch/SHA — часть dispatch contract.
+8. **Dispatch:** сгенерировать manifest из packets/profile, проверить gates и передать bounded context packet. Recursive spawn запрещён без explicit Orchestrator authorization.
+9. **Implementation:** Worker работает в owned paths, останавливается на drift, пишет/обновляет test, запускает narrow validation, создаёт candidate commit и handoff.
+10. **Commit-range review:** Sol High читает packet, frozen contracts, actual range/diff/evidence и direct interfaces/tests; сам выполняет minimum falsifying check, но не patch-ит code.
+11. **Repair:** findings возвращаются original Worker. Он создаёт fix commit и новый range. Максимум два failed cycles, затем `Replan Required`.
+12. **Integration/close:** Orchestrator serially merges accepted commits per DAG/profile, запускает phase validation, writes integration evidence, inspects cleanup, updates roadmap/debt/scorecard and stable knowledge.
 
-Задачи параллельны только при одновременном выполнении условий:
+## Roadmap, packets и dispatch artifacts
 
-- между ними нет dependency;
-- write sets не пересекаются;
-- generated output одной задачи не затрагивает другую;
-- одна задача не меняет contract/API, используемый другой;
-- нет общего mutable external resource;
-- определён безопасный merge order;
-- существуют task-level и post-merge test gates.
+Roadmap — компактный реестр priority, state, link, dependencies и isolation; он не дублирует execution evidence. Только Orchestrator изменяет общий roadmap. Worker изменяет только свой packet/handoff.
 
-Даже чистый text merge не доказывает отсутствие semantic conflict.
+Task packet обязан содержать goal/non-goals, inputs/frozen decisions, branch/worktree/base SHA, four model fields and rationale, ownership sets, dependencies/lease/integration order, public contracts, requirements, acceptance, matrix, failure/retry/cancellation/cleanup/idempotency, budget, stop conditions, handoff/review and rollback. Existing AutoQA Markdown остаётся valid посредством adapter; history не мигрируйте ради формы.
 
-## Unity и submodules
+Dispatch manifest генерируется, а не редактируется вручную: phase/wave, baseline, WIP, per-task worktree/branch, models, paths, dependencies, leases/budget и order должны совпадать с packet/profile. Handoff хранит candidate/fix SHA, actual model, outcome, changed files, validation commands/exit/results, debt, loaded context, metrics and risks. Integration evidence хранит ranges/merges, order, validation, semantic conflicts, deferred checks, cleanup and remaining risks.
 
-### Unity hotspots
+## Parallel modes и conflict gate
 
-Сериализовать работу с:
+| Mode | Допустимо | Ограничение |
+| --- | --- | --- |
+| Shared read-only | Explorers/Reviewers | no tracked-state mutation |
+| Shared single-writer | one Worker + readers | formatter/codegen/import тоже writer |
+| Isolated worktrees | parallel Workers | one writer per worktree, common phase base |
+| Serialized integration | Orchestrator | merges, conflicts, phase validation |
 
-- scenes и prefabs;
-- asset и его `.meta`;
-- ScriptableObject configs;
-- asmdefs;
-- `ProjectSettings`;
-- package manifests;
-- Addressables groups/catalog;
-- localization tables;
-- generated linker/codegen outputs.
+По умолчанию максимум три active subagents и два parallel writers; третий slot оставьте Validator/Reviewer/Explorer. Wave может быть параллельной, только если dependencies отсутствуют, write/generated sets не пересекаются, contracts не конфликтуют, external resource is not shared (или имеет safe lease), merge order определён и task/post-merge gates существуют.
 
-Unity Editor нельзя параллельно запускать против одного project path. Каждый worktree имеет отдельные `Library`, `Temp`, `Logs` и build outputs. Учитывать import time и disk usage.
+Shared roadmap/index/codegen, public contracts, Unity assets, Addressables и submodules требуют serialization даже с чистым text merge. `sharedContractOwner` (normally Sol/Orchestrator) один меняет frozen shared paths. Scope expansion, path overlap, changed external gate or upstream contract invalidates downstream packet and requires revalidation.
 
-### Submodules
+## Unity, submodules и external systems
 
-Для изменения submodule:
+Для Unity сериализуйте scenes, prefabs, `.meta`, ScriptableObject configs, asmdefs, ProjectSettings, package manifests, Addressables groups/catalog, localization tables и generated linker/codegen. Unity Editor параллельно не работает с одним project path; worktree получает own Library/Temp/Logs/build outputs, с учётом disk and import time.
 
-1. Записать parent и submodule base revisions.
-2. Создать отдельную ветку внутри submodule.
-3. Реализовать и проверить изменение.
-4. Создать commit submodule.
-5. Отдельным шагом обновить parent gitlink.
+Для submodule записывайте parent/submodule base revisions, создавайте dedicated branch внутри submodule, проверяйте и commit-ите там, затем отдельным parent commit обновляйте gitlink. Один submodule не меняется двумя Workers одновременно; parent pointer обновляйте только после достижимости submodule commit.
 
-Два Workers не меняют один submodule параллельно. Dirty submodule нельзя использовать как неявный base.
+External side effects требуют bounded tool, least privilege, unique test identities, approved cost ceiling и idempotent cleanup. Missing device, PostgreSQL, secret, credential or paid-model evidence переводите в validation debt, не обходите mock-ом без recorded decision.
 
-## Граничные случаи
+## Test strategy, coverage и evidence
 
-- **Dirty checkout:** не копировать пользовательские изменения во все worktrees без явной необходимости.
-- **Branch занята:** использовать detached HEAD, уникальную ветку или Handoff.
-- **Scope drift:** остановить Worker и повторить planning/review.
-- **Upstream contract изменился:** downstream task становится stale и проходит повторную validation.
-- **Semantic conflict:** owner review и integration test обязательны даже без Git conflict.
-- **Shared port/device/account:** использовать resource lease и последовательный запуск.
-- **External side effects:** уникальные test identities, idempotent cleanup, запрет production writes.
-- **Flaky test:** один diagnostic rerun; случайный pass не закрывает задачу.
-- **Interrupted Worker:** сохранить commit/diff/handoff до cleanup worktree.
-- **Generated files:** сохранять только declared outputs.
-- **Secrets:** копировать в worktree минимально необходимое, не добавлять в Git.
-- **Unavailable user model:** блокировать только затронутый spawn, не заменять молча.
+Основная метрика — coverage требований и рисков, не global line coverage. Каждое acceptance criterion связывается с test или justified manual validation; high-risk behavior имеет negative/failure case. Reproducible bug fix получает regression test; manual не заменяет deterministic automation.
 
-## Тестовая стратегия
-
-### Зачем нужны тесты
-
-Тесты:
-
-- превращают acceptance criteria в исполняемое доказательство;
-- позволяют дешёвым Workers безопасно менять код;
-- дают Reviewer факты вместо доверия к summary;
-- защищают contracts между параллельными задачами;
-- ловят interaction regressions после merge;
-- сокращают repair loops и повторное чтение контекста;
-- документируют ожидаемое поведение.
-
-Основная метрика — coverage требований и рисков. Глобальный line-coverage процент без baseline не вводится.
-
-### Минимальные test gates
-
-| Изменение | Проверки |
+| Change | Minimum gate |
 | --- | --- |
-| Docs/skill | Markdown links, YAML/frontmatter, package JSON, `quick_validate.py`, `git diff --check` |
-| Pure logic | Compile, NUnit/EditMode, boundary и negative cases |
-| Runtime service/state | Unit/component, lifecycle, failure/cancellation, PlayMode при необходимости |
-| Async/reactive flow | Success, failure, cancellation, retry, duplicate event, cleanup |
-| Backend/auth/save/purchase | Contract, invalid data, timeout, retry, idempotency, integration smoke |
-| Serialization/migration | Round-trip, old/corrupt data, identity isolation |
-| UI/prefab/scene | Compile, asset validation, PlayMode, visual validation |
+| Docs/skill | links, YAML/JSON/TOML, skill validation, `git diff --check` |
+| Pure logic | unit plus boundary/negative cases |
+| Runtime/state | unit/component, lifecycle, failure/cancellation, integration when boundary is real |
+| Async/reactive | success, failure, cancellation, retry, duplicate event, cleanup |
+| Backend/auth/save/purchase | contract, invalid data, timeout, retry, idempotency, integration smoke |
+| Serialization/migration | round-trip, old/corrupt data, identity isolation |
+| UI/prefab/scene | compile, asset validation, PlayMode and visual/manual check |
 | Addressables/localization/config | GUID/key/schema, load smoke, missing-entry behavior |
-| Package/asmdef/public API | Package tests, consumer compile, compatibility |
-| Platform behavior | Target compile/build, browser/device smoke |
-| Performance/build size | Reproducible baseline, benchmark и delta |
-| Bug fix | Regression test, failing before and passing after |
+| Package/public API | package tests, consumer compile, compatibility |
+| Platform/device | target build and device/browser smoke |
+| Performance/build size | reproducible baseline, benchmark and delta |
 
-Property/fuzz tests применять для parsers, serializers, mathematical invariants и большого пространства входов.
+Evidence records criterion/risk, level, scenario, command/environment, expected/actual result, base/commit, concise failure/artifact and post-merge rerun requirement. A flaky test gets one diagnostic rerun only; random pass does not close the gate. Start at owning asmdef/package/module and widen based on integration risk.
 
-### Coverage rules
+## Token, cost и context discipline
 
-- Каждый acceptance criterion связан с test или обоснованной manual validation.
-- Каждый high-risk пункт имеет failure/negative test.
-- Bug fix без regression test требует записанного обоснования.
-- Manual test не заменяет автоматический, если поведение детерминировано.
-- Сначала запускать owning asmdef/package, затем расширять scope по integration risk.
-- Более сильная модель не уменьшает test coverage.
-- Более слабая user-pinned модель может потребовать дополнительный Reviewer/Validator gate.
+- Передавать exact paths/symbols, task packet и short excerpts, не full roadmap/transcript.
+- Загружать direct ADRs/knowledge and affected interfaces/tests, а не весь docs tree.
+- Exclude generated artifacts, logs, screenshots, videos, APKs, dumps, `node_modules`, `bin`, `obj`, `runs` unless a concrete blocker justifies them.
+- Explorer returns roughly twelve evidence points; worker handoff/reviewer output are concise, links point to large evidence outside Git.
+- Использовать `fork_turns="none"` или minimum context where the surface allows it; do not delegate without useful parallelism.
+- Caveman `full` подходит для prompts/progress/handoff, `lite` — для guide/packet text; никогда не сжимайте contracts/evidence до потери фактов.
+- Summarizer вызывайте только когда measured context saving exceeds coordination cost; reviewer never receives worker hidden transcript.
 
-### Test evidence
+Отслеживайте active agents, repair loops, test failures, repeated context reads, conflicts, import/build time, model escalation, token/latency/cost и escaped defects. Routing scorecard использует фактические данные phase, а не предположения.
 
-Записывать:
+## Audit, CLI и AutoQA-only integration
 
-- criterion/risk;
-- test level и scenario;
-- command/environment;
-- expected result;
-- actual pass/fail;
-- base/commit;
-- краткую точную ошибку или artifact;
-- необходимость post-merge rerun.
+CLI surface: `profile validate`, `phase validate <phase>`, `task validate <task>`, `wave plan <phase> <wave>`, `dispatch validate <manifest>`, `status [--json]`, `worktree allocate|status|release`, `cleanup inspect`, `routing scorecard <phase>`. Validators check transitions, dependency cycles, baseline/model/path/worktree drift, gates, candidate commits, review limits, validation-debt owners and stale markers. `cleanup inspect` is non-destructive.
 
-Raw logs в task-файл не копировать.
+Audit improvements target cross-file schema/linter, hook fixtures, runtime worktree bindings, status aggregation and routing evals. Text artifacts are source contracts; hooks provide enforcement but cannot erase review obligations.
 
-## Экономия токенов
+The plugin lives in `unigame.ai.tools`. AutoQA activates it repo-scoped through its workspace marketplace/pinned submodule and uses `autoqa-markdown-v1`; its docs check invokes the validator and reviews receive Markdown/link hygiene. Do not enable marketplace/plugin/hooks/profiles globally or in `mtt.client`; do not change product source or run paid OpenAI/device actions in the pilot.
 
-- Главный thread хранит решения, не сырые исследования.
-- Использовать `fork_turns="none"` или минимальный fork.
-- Передавать точные paths/symbols и task file.
-- Использовать `rg` и узкие reads.
-- Не загружать все context docs и generated artifacts.
-- Применять domain skills вместо повторения больших prompts.
-- Caveman `full` подходит для prompts/progress/handoff; `lite` — для гайдов и task files.
-- Один Validator может проверять интегрированную parallel group.
-- Reuse исходного Worker для repairs.
-- Не создавать субагента без полезного параллелизма.
+## Closure checklist
 
-Полезные метрики:
+- All acceptance criteria and blocking findings are closed.
+- Candidate/fix/merge ranges, actual model, task and phase validation are recorded.
+- `Accepted` and `Integrated` were not conflated.
+- Validation debt has owner, policy and future gate.
+- User changes, submodule pointers, contracts and external cleanup are safe.
+- Roadmap, integration evidence, cleanup inventory and routing scorecard are current.
 
-- число субагентов;
-- repair loops;
-- test failures;
-- повторные context reads;
-- конфликтующие изменения;
-- время import/build;
-- причины model escalation.
+После phase сравните preferred/fallback/actual модели по completion без replan, severity/count findings, fix cycles, tokens, latency, paid cost, validation failures и escaped defects. Снижать tier можно только при сохранении quality threshold.
 
-## Аудит плана и улучшения
+## Validation checklist
 
-Во время четырёх read-only forward-tests и независимого `Sol High` review выявлены следующие пробелы; evidence хранится в [ORCH-001](../tasks/ORCH-001-bootstrap-orchestration-toolkit.md):
-
-- task-файлы ограничены material/multi-agent работой, чтобы простая правка не создавала бюрократию;
-- Explorer и Validator получили детерминированный effort;
-- exact write/generated sets стали обязательным gate, а заявленная «независимость» задач сама по себе недостаточна;
-- shared roadmap, index, codegen и другие общие outputs явно сериализованы;
-- worktree isolation отделено от semantic safety: общие contracts, Unity assets, Addressables и submodules всё равно сериализуются;
-- добавлены leases для Editor, port, device, account и другого mutable state;
-- parent gitlink разрешено обновлять только после достижимости submodule commit;
-- test coverage привязано к acceptance criteria и рискам, а не только к line coverage;
-- ограничены repair loops, recursive spawn и объём handoff;
-- model pins получили scope, precedence, availability check и запрет silent fallback;
-- обязательный Reviewer зафиксирован на `gpt-5.6-sol/high`, независимо от worker overrides;
-- правило «ближайшей» замены модели стало детерминированным и требует подтверждения пользователя;
-- dirty user state, interrupted workers, flaky tests, secrets и external side effects получили отдельные правила.
-
-Следующие улучшения вынесены в roadmap:
-
-1. Машиночитаемая schema и linter для roadmap/task-файлов.
-2. CI-набор contract/forward-tests для mode commands, model routing и conflict gates.
-3. Benchmark token/cost/latency/repair-rate для адаптивного выбора моделей.
-4. После накопления данных — динамические WIP limits и escalation thresholds по типу репозитория.
-
-Текущий план пригоден для ручного использования. Для командного масштабирования приоритетны schema/linter и CI: они превращают текстовые правила в автоматически проверяемый контракт.
-
-## Закрытие задачи
-
-Перед `Done` проверить:
-
-- acceptance criteria выполнены;
-- blocking review findings закрыты;
-- task-level и post-merge tests записаны;
-- model assignments соответствуют пользовательским pins;
-- user changes не затронуты;
-- submodule pointers корректны;
-- roadmap обновлён;
-- remaining risks явно перечислены.
-
-## Источники
-
-- [Codex Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)
-- [Codex Worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees)
-- [Codex Models](https://learn.chatgpt.com/docs/models)
-- [Build skills](https://learn.chatgpt.com/docs/build-skills)
+- Каждому acceptance criterion и material risk соответствует automated test или обоснованная manual validation.
+- Сначала выполнить узкий owning check, затем post-merge/phase rerun.
+- Проверить compatibility, licenses/dependencies, external gates и cleanup inventory.
+- Документационные изменения: Markdown links, YAML/JSON, `quick_validate.py` и `git diff --check`.

@@ -1,43 +1,25 @@
 # AI Tools Task Roadmap
 
-Единый реестр приоритетов для развития `unigame.ai.tools`.
+Roadmap хранит только приоритет, зависимости и краткий delivery status. Детали исполнения находятся в phase/task artifacts.
 
-## Priority
-
-- `P0` — production/security/blocker.
-- `P1` — текущая обязательная цель.
-- `P2` — следующая очередь.
-- `P3` — improvement или experiment.
-- `Inbox` — задача ещё не прошла triage.
-
-## Status Flow
+## Status flow
 
 ```text
-Draft -> Plan Review -> Ready -> In Progress -> Code Review -> Integration -> Done
+Planned -> Ready -> Dispatched -> In Progress -> Candidate -> Sol Review
+Changes Requested -> Candidate -> Accepted -> Integrated
 ```
 
-`Blocked` допустим из любого активного статуса.
+`Blocked`, `Replan Required`, `Cancelled`, `Superseded` — исключения. WIP: максимум 3 agents, 2 writers; только Orchestrator меняет roadmap.
 
-## WIP
+| ID | Priority | Status | Outcome | Dependencies |
+| --- | --- | --- | --- | --- |
+| ORCH-005 | P1 | Done | Unified lifecycle: phase/wave, gates, states and candidate semantics | ORCH-001 |
+| ORCH-006 | P1 | Done | Artifact contracts and templates | ORCH-005 |
+| ORCH-007 | P1 | Done | Generic profile and AutoQA adapter contract | ORCH-006 |
+| ORCH-008 | P2 | Ready | Validator/status: dependencies, paths, models, drift and validation debt | ORCH-007 |
+| ORCH-009 | P2 | Ready | Worktree reconciliation and safe cleanup inspection | ORCH-008 |
+| ORCH-010 | P2 | Ready | Hybrid hooks and custom profiles | ORCH-009 |
+| ORCH-011 | P1 | In Progress | AutoQA workspace pilot: repo-scoped plugin, adapter and docs gate | ORCH-010 |
+| ORCH-012 | P3 | Planned | Evals, hook fixtures and routing benchmark | ORCH-008 |
 
-- Максимум три активных субагента.
-- Максимум два параллельных writers.
-- Один writer на worktree.
-- Только Orchestrator меняет этот roadmap.
-
-## Tasks
-
-| ID | Priority | Status | Task | Assignment Summary | Isolation | Dependencies | Parallel Group | Shared Resources | Merge Order | Updated |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- |
-| ORCH-001 | P1 | Done | [Bootstrap orchestration toolkit](ORCH-001-bootstrap-orchestration-toolkit.md) | `O/R=sol:high; forward-tests=terra:low\|medium+sol:medium` | single-writer | — | — | Git remotes | 1 | 2026-07-30 |
-| ORCH-002 | P2 | Inbox | Add task/roadmap schema and linter | `O/R=sol:high; W=sol:medium` | isolated-worktree | ORCH-001 | quality-automation | CI | 2 | 2026-07-30 |
-| ORCH-003 | P2 | Inbox | Add orchestration contract and forward-test CI | `O/R=sol:high; W=sol:medium` | isolated-worktree | ORCH-002 | quality-automation | CI/model catalog | 3 | 2026-07-30 |
-| ORCH-004 | P3 | Inbox | Benchmark token, cost, latency, and repair rate | `O/R=sol:high; V=terra:medium` | isolated-worktree | ORCH-001 | measurement | model catalog | 4 | 2026-07-30 |
-
-## Queue Rules
-
-- Не угадывать product priority.
-- Task-specific user model assignment имеет приоритет над role default.
-- Недоступный user-pinned model блокирует spawn, но не меняется молча.
-- Dependency и shared resource должны быть разрешены до `Ready`.
-- `Done` требует закрытого review и записанного post-merge test evidence.
+`Done` requires accepted review, integrated commit, phase validation, and recorded remaining validation debt.

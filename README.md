@@ -1,13 +1,13 @@
 # UniGame AI Tools
 
-UPM-compatible, documentation-only package with reusable Codex skills, orchestration guidance, roadmaps, and task templates.
+UPM-compatible, documentation-only package with a reusable Codex orchestration skill, phase/wave delivery artifacts, and validation contracts.
 
 ## Included
 
-- `orchestrate-agent-tasks` — cost-aware multi-agent planning, delegation, review, testing, and integration.
-- `Documentation~/guides/subagent-task-orchestration.md` — complete human-facing pipeline.
-- `Documentation~/tasks/ROADMAP.md` — live priorities for this toolkit.
-- `Documentation~/tasks/task-template.md` — decision-complete task template.
+- `skills/orchestrate-agent-tasks` — canonical skill: baseline, wave dispatch, candidate commits, Sol review, and integration gates.
+- `Documentation~/guides/subagent-task-orchestration.md` — полный русский delivery-пайплайн.
+- `Documentation~/tasks/templates/` — phase, dispatch, task, handoff, review, integration, scorecard и profile contracts.
+- `Documentation~/tasks/ROADMAP.md` — delivery-приоритеты ORCH-005…012.
 
 ## Quick Start
 

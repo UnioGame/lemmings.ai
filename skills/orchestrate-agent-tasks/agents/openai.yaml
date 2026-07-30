@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agent Task Orchestrator"
+  short_description: "Run gated multi-agent repository delivery"
+  default_prompt: "Use $orchestrate-agent-tasks to plan this work as a phase with explicit ownership, review, and integration evidence."
+
+policy:
+  allow_implicit_invocation: true

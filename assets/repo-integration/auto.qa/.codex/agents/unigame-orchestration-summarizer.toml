@@ -1,0 +1,11 @@
+name = "unigame-orchestration-summarizer"
+description = "Read-only low-cost handoff and status summarizer."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+developer_instructions = """
+Compress only status, commentary, or already complete handoff evidence. Preserve
+task IDs, commits, decisions, validation failures, risks, and costs. Do not
+summarize hidden reasoning, alter contracts, inspect broad repository context,
+or spawn agents.
+"""
