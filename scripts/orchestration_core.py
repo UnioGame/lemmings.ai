@@ -888,14 +888,45 @@ def validate_cross_artifacts(
         ]
         expected_head = commits[-1] if commits else None
         latest_review = reviews_by_task.get(task_id, [])[-1] is review
+        verdict = review.get("verdict", review.get("reviewVerdict"))
+        current_head_review_states = {
+            "Candidate",
+            "Sol Review",
+            "Changes Requested",
+            "Accepted",
+            "Integrated",
+            "Replan Required",
+        }
+        historical_repair_review = (
+            latest_review
+            and task.get("state") == "Candidate"
+            and bool(_commit_values(task, "fixCommit", "fixCommits"))
+            and _key(str(verdict or "")) == "changesrequested"
+        )
+        requires_current_head = (
+            latest_review
+            and task.get("state") in current_head_review_states
+            and not historical_repair_review
+        )
         explicit_range = task.get("reviewCommitRange") or task.get("commitRange")
         if not commit_range:
             result.error("review.commit_range", f"{task_id} review requires the actual commit range")
-        elif latest_review and explicit_range and commit_range != explicit_range:
+        elif requires_current_head and explicit_range and commit_range != explicit_range:
             result.error("review.commit_drift", f"{task_id} review commit range differs from task")
-        elif latest_review and expected_head and not repo and commit_range.split("..")[-1].strip() != expected_head:
+        elif (
+            requires_current_head
+            and expected_head
+            and not repo
+            and commit_range.split("..")[-1].strip() != expected_head
+        ):
             result.error("review.commit_drift", f"{task_id} review range head is not the latest candidate/fix commit")
-        if latest_review and repo and commit_range:
+        elif (
+            historical_repair_review
+            and not repo
+            and commit_range.split("..")[-1].strip() not in commits[:-1]
+        ):
+            result.error("review.commit_drift", f"{task_id} historical review head is not a prior candidate/fix commit")
+        if repo and commit_range:
             range_parts = [part.strip() for part in commit_range.split("..")]
             if len(range_parts) != 2 or not all(range_parts):
                 result.error("review.commit_range", f"{task_id} review range must be base..head")
@@ -918,13 +949,27 @@ def validate_cross_artifacts(
                 else:
                     if task_base.returncode or base_process.stdout.strip() != task_base.stdout.strip():
                         result.error("review.commit_drift", f"{task_id} review range base differs from task baseline")
-                    if (
+                    if requires_current_head and (
                         task_head is None
                         or task_head.returncode
                         or head_process.stdout.strip() != task_head.stdout.strip()
                     ):
                         result.error("review.commit_drift", f"{task_id} review range head differs from task commits")
-        verdict = review.get("verdict", review.get("reviewVerdict"))
+                    if historical_repair_review:
+                        historical_heads = [
+                            run_git(repo, "rev-parse", "--verify", f"{commit}^{{commit}}")
+                            for commit in commits[:-1]
+                        ]
+                        resolved_historical_heads = {
+                            process.stdout.strip()
+                            for process in historical_heads
+                            if not process.returncode
+                        }
+                        if head_process.stdout.strip() not in resolved_historical_heads:
+                            result.error(
+                                "review.commit_drift",
+                                f"{task_id} historical review head is not a prior candidate/fix commit",
+                            )
         task_verdict = task.get("reviewVerdict")
         if not verdict:
             result.error("review.verdict", f"{task_id} review requires a verdict")

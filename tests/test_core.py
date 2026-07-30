@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -187,6 +189,90 @@ class DispatchTests(unittest.TestCase):
 
 
 class CrossArtifactTests(unittest.TestCase):
+    def test_repair_candidate_allows_historical_review_but_acceptance_requires_current_head(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+
+            git("init")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            git("commit", "--allow-empty", "-m", "base")
+            baseline = git("rev-parse", "HEAD").stdout.strip()
+            git("commit", "--allow-empty", "-m", "candidate")
+            candidate = git("rev-parse", "HEAD").stdout.strip()
+            git("commit", "--allow-empty", "-m", "fix")
+            fix = git("rev-parse", "HEAD").stdout.strip()
+
+            handoff = {
+                "taskId": "ORCH-2",
+                "actualModel": "gpt-5.6-sol",
+                "candidateCommit": candidate,
+                "fixCommits": [fix],
+                "validationEvidence": {"command": "test", "exitCode": 0},
+            }
+            repair_candidate = task(
+                "ORCH-2",
+                state="Candidate",
+                previousState="Changes Requested",
+                baselineSha=baseline,
+                candidateCommit=candidate,
+                fixCommits=[fix],
+                actualModel="gpt-5.6-sol",
+                reviewVerdict="Changes Requested",
+                validationEvidence={"command": "test", "exitCode": 0},
+            )
+            stale_review = {
+                "taskId": "ORCH-2",
+                "commitRange": f"{baseline}..{candidate}",
+                "verdict": "Changes Requested",
+            }
+
+            repaired = validate_cross_artifacts(
+                [repair_candidate],
+                handoffs=[handoff],
+                reviews=[stale_review],
+                repo=repo,
+            )
+            self.assertNotIn("review.commit_drift", {item.code for item in repaired.findings})
+            self.assertNotIn("review.commit_range", {item.code for item in repaired.findings})
+
+            accepted = {
+                **repair_candidate,
+                "state": "Accepted",
+                "previousState": "Sol Review",
+                "reviewVerdict": "Accepted",
+            }
+            stale_acceptance = validate_cross_artifacts(
+                [accepted],
+                handoffs=[handoff],
+                reviews=[stale_review],
+                repo=repo,
+            )
+            self.assertIn("review.commit_drift", {item.code for item in stale_acceptance.findings})
+
+            current_acceptance = validate_cross_artifacts(
+                [accepted],
+                handoffs=[handoff],
+                reviews=[
+                    {
+                        "taskId": "ORCH-2",
+                        "commitRange": f"{baseline}..{fix}",
+                        "verdict": "Accepted",
+                    }
+                ],
+                repo=repo,
+            )
+            self.assertNotIn("review.commit_drift", {item.code for item in current_acceptance.findings})
+            self.assertNotIn("review.commit_range", {item.code for item in current_acceptance.findings})
+
     def test_review_verdict_separator_normalization_and_real_mismatch(self):
         value = task(
             "ORCH-1",
