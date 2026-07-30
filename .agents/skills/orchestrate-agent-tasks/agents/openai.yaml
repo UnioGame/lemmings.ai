@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agent Task Orchestrator"
+  short_description: "Coordinate safe multi-agent repository work"
+  default_prompt: "Use $orchestrate-agent-tasks auto to coordinate this task with explicit model routing and the cheapest safe agent mix."
+
+policy:
+  allow_implicit_invocation: true
