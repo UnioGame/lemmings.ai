@@ -187,6 +187,48 @@ class DispatchTests(unittest.TestCase):
 
 
 class CrossArtifactTests(unittest.TestCase):
+    def test_review_verdict_separator_normalization_and_real_mismatch(self):
+        value = task(
+            "ORCH-1",
+            state="Changes Requested",
+            previousState="Sol Review",
+            candidateCommit="c1",
+            actualModel="gpt-5.6-sol",
+            reviewVerdict="changes-requested",
+            validationEvidence={"command": "test", "exitCode": 0},
+        )
+        handoff = {
+            "taskId": "ORCH-1",
+            "actualModel": "gpt-5.6-sol",
+            "candidateCommit": "c1",
+            "validationEvidence": {"command": "test", "exitCode": 0},
+        }
+        equivalent = validate_cross_artifacts(
+            [value],
+            handoffs=[handoff],
+            reviews=[
+                {
+                    "taskId": "ORCH-1",
+                    "commitRange": "abc123..c1",
+                    "verdict": "Changes Requested",
+                }
+            ],
+        )
+        self.assertNotIn("review.verdict_drift", {item.code for item in equivalent.findings})
+
+        mismatch = validate_cross_artifacts(
+            [value],
+            handoffs=[handoff],
+            reviews=[
+                {
+                    "taskId": "ORCH-1",
+                    "commitRange": "abc123..c1",
+                    "verdict": "Accepted",
+                }
+            ],
+        )
+        self.assertIn("review.verdict_drift", {item.code for item in mismatch.findings})
+
     def test_accepted_without_review_fails_strict_contract(self):
         value = task(
             state="Accepted",

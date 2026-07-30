@@ -928,9 +928,9 @@ def validate_cross_artifacts(
         task_verdict = task.get("reviewVerdict")
         if not verdict:
             result.error("review.verdict", f"{task_id} review requires a verdict")
-        elif latest_review and task_verdict and str(verdict).casefold() != str(task_verdict).casefold():
+        elif latest_review and task_verdict and _key(str(verdict)) != _key(str(task_verdict)):
             result.error("review.verdict_drift", f"{task_id} review verdict differs from task")
-        elif latest_review and task.get("state") in {"Accepted", "Integrated"} and str(verdict).casefold() not in {
+        elif latest_review and task.get("state") in {"Accepted", "Integrated"} and _key(str(verdict)) not in {
             "accepted",
             "approve",
             "approved",
