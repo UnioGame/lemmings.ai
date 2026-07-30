@@ -32,4 +32,19 @@ Pin subagent models:
 $orchestrate-agent-tasks models set explorer=gpt-5.6-terra:low workers=gpt-5.6-sol:medium
 ```
 
+Validate tracked lifecycle artifacts together:
+
+```text
+python scripts/orchestration_cli.py status --repo <repo> --profile <profile.json> \
+  --phase <phase> --task <task> --manifest <manifest> --handoff <handoff> \
+  --review <review> --integration-evidence <integration-evidence> --json
+```
+
+Safe allocation requires both the consumer profile and accepted phase baseline:
+
+```text
+python scripts/orchestration_cli.py worktree allocate --repo <repo> <path> <branch> \
+  --profile <profile.json> --phase <phase> --create-branch
+```
+
 The package contains no Unity Runtime or Editor assemblies and does not need to be added to a Unity project's `Packages/manifest.json`.

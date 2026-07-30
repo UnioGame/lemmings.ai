@@ -1,8 +1,11 @@
 # Phase <ID> / Wave <ID>: integration evidence
 
-- Candidate/fix/merge commits: `<ranges>`
+- Task IDs: `<IDs>`
+- Candidate/fix commits: `<ranges>`
+- Merge commits: `<SHAs>`
 - Integration order: `<task IDs>`
-- Task and phase validation: `<commands/results>`
+- Integration validation passed: `<true/false plus command/evidence>`
+- Phase validation passed: `<true/false plus command/evidence>`
 - Semantic conflicts and resolution: `<none/details>`
 - Deferred validation debt: `<owner/gate>`
 - Worktree/runtime-marker inventory: `<clean/dirty, merged/unmerged>`

@@ -4,8 +4,8 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `<ID>` | `<branch> / <absolute path>` | `<model/effort>` | `<approved>` | `<model/effort>` | `<sets>` | `<IDs>` | `<resource>` | `<n>` |
 
-Baseline SHA: `<sha>`  
-Max active agents/writers: `<n>/<n>`  
+Baseline SHA: `<sha>`
+Max active agents/writers: `<n>/<n>`
 Dispatch Gate evidence: `<model, paths, worktrees, resources, budget>`
 
 Generated from task packets and profile. Any manual drift blocks dispatch.

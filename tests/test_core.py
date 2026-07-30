@@ -57,6 +57,7 @@ def task(task_id="T1", **updates):
         "phaseId": "P1",
         "waveId": "W1",
         "state": "Ready",
+        "previousState": "Planned",
         "baselineSha": "abc123",
         "branch": f"codex/{task_id.lower()}",
         "worktree": f"/tmp/{task_id.lower()}",
@@ -182,6 +183,62 @@ class DispatchTests(unittest.TestCase):
 
 
 class CrossArtifactTests(unittest.TestCase):
+    def test_accepted_without_review_fails_strict_contract(self):
+        value = task(
+            state="Accepted",
+            previousState="Sol Review",
+            candidateCommit="c1",
+            actualModel="gpt-5.6-sol",
+            validationEvidence={"command": "test", "exitCode": 0},
+        )
+        result = validate_cross_artifacts(
+            [value],
+            handoffs=[
+                {
+                    "taskId": "T1",
+                    "actualModel": "gpt-5.6-sol",
+                    "candidateCommit": "c1",
+                    "validationEvidence": {"command": "test", "exitCode": 0},
+                }
+            ],
+        )
+        self.assertIn("lifecycle.review", {item.code for item in result.findings})
+        self.assertFalse(result.ok)
+
+    def test_integrated_without_integration_evidence_fails(self):
+        value = task(
+            state="Integrated",
+            previousState="Accepted",
+            candidateCommit="c1",
+            actualModel="gpt-5.6-sol",
+            validationEvidence={"command": "test", "exitCode": 0},
+        )
+        result = validate_cross_artifacts(
+            [value],
+            handoffs=[
+                {
+                    "taskId": "T1",
+                    "actualModel": "gpt-5.6-sol",
+                    "candidateCommit": "c1",
+                    "validationEvidence": {"command": "test", "exitCode": 0},
+                }
+            ],
+            reviews=[{"taskId": "T1", "commitRange": "abc123..c1", "verdict": "Accepted"}],
+        )
+        self.assertIn("lifecycle.integration", {item.code for item in result.findings})
+        self.assertFalse(result.ok)
+
+    def test_legacy_autoqa_missing_artifact_is_warning(self):
+        value = task(
+            state="Accepted",
+            previousState=None,
+            candidateCommit="c1",
+            actualModel="gpt-5.6-sol",
+        )
+        result = validate_cross_artifacts([value], adapter="autoqa-markdown-v1")
+        self.assertTrue(any(item.code.endswith(".legacy") for item in result.findings))
+        self.assertFalse(any(item.severity == "error" for item in result.findings))
+
     def test_historical_ready_manifest_matches_advanced_live_task(self):
         live = task(
             state="Candidate",
@@ -326,6 +383,8 @@ class AdapterScorecardTests(unittest.TestCase):
 | Field | Value |
 | --- | --- |
 | Phase / wave / state | `P1 / W2 / Ready` |
+| Previous state | `Planned` |
+| State history | `["Planned", "Ready"]` |
 | Base SHA / branch / absolute worktree | `abc / codex/orch-17 / D:/worktrees/orch-17` |
 | Preferred / approved fallback / selected / actual | `sol / terra / sol / sol` |
 """,
@@ -334,6 +393,8 @@ class AdapterScorecardTests(unittest.TestCase):
         self.assertEqual("ORCH-17", value["taskId"])
         self.assertEqual("P1", value["phaseId"])
         self.assertEqual("W2", value["waveId"])
+        self.assertEqual("Planned", value["previousState"])
+        self.assertEqual(["Planned", "Ready"], value["stateHistory"])
         self.assertEqual("abc", value["baselineSha"])
         self.assertEqual("codex/orch-17", value["branch"])
         self.assertEqual("D:/worktrees/orch-17", value["worktree"])
@@ -376,6 +437,16 @@ class AdapterScorecardTests(unittest.TestCase):
         self.assertEqual(1, card["acceptedOrIntegrated"])
         self.assertEqual(120, card["tokens"])
         self.assertEqual(1, card["findings"]["P2"])
+
+    def test_routing_scorecard_keeps_unobserved_cost_metrics_null(self):
+        card = routing_scorecard([task(actualModel="sol")])["models"]["sol"]
+        self.assertIsNone(card["tokens"])
+        self.assertIsNone(card["latencyMs"])
+        self.assertIsNone(card["paidCost"])
+        self.assertEqual(
+            {"tokens": 0, "latencyMs": 0, "paidCost": 0},
+            card["observationCounts"],
+        )
 
 
 if __name__ == "__main__":

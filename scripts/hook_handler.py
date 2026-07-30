@@ -144,6 +144,16 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def primary_worktree(cwd: Path) -> Path | None:
+    process = _git(cwd, "worktree", "list", "--porcelain")
+    if process.returncode:
+        return None
+    for line in process.stdout.splitlines():
+        if line.startswith("worktree "):
+            return Path(line.removeprefix("worktree ").strip()).resolve()
+    return None
+
+
 def runtime_location(cwd: str | Path) -> tuple[Path, Path] | None:
     workdir = Path(cwd).resolve()
     root_process = _git(workdir, "rev-parse", "--show-toplevel")
@@ -181,6 +191,7 @@ def load_runtime(payload: Mapping[str, Any]) -> tuple[dict[str, Any], Path | Non
         combined["_orchestrationActive"] = True
         combined["_runtimeMarker"] = str(marker)
         combined["_repoRoot"] = str(root)
+        combined["_primaryRepoRoot"] = str(primary_worktree(root) or root)
         artifacts = state.get("artifacts") or {}
         if not isinstance(artifacts, dict):
             raise ValueError("runtime marker artifacts must be an object")
@@ -236,6 +247,79 @@ def persist_state_updates(marker: Path, updates: Mapping[str, Any]) -> None:
     os.replace(temporary, marker)
 
 
+def spawn_binding_violation(payload: Mapping[str, Any]) -> str | None:
+    task = payload.get("task") or {}
+    phase = payload.get("phase") or {}
+    profile = payload.get("profile") or {}
+    manifest = payload.get("manifest") or {}
+    repo = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve()
+    primary_repo = Path(str(payload.get("_primaryRepoRoot") or primary_worktree(repo) or repo)).resolve()
+    worktree_value = task.get("worktree")
+    if not worktree_value:
+        return "writer requires an isolated worktree"
+    worktree_path = Path(str(worktree_value))
+    if not worktree_path.is_absolute():
+        worktree_path = repo / worktree_path
+    worktree = worktree_path.resolve()
+    if not worktree.is_dir():
+        return f"declared worktree does not exist: {worktree}"
+    cwd = Path(str(payload.get("cwd") or os.getcwd())).resolve()
+    if cwd != worktree:
+        return f"task cwd {cwd} does not equal declared worktree {worktree}"
+    root = Path(str(profile.get("worktreeRoot") or ""))
+    if not root.is_absolute():
+        root = primary_repo / root
+    root = root.resolve()
+    try:
+        worktree.relative_to(root)
+    except ValueError:
+        return f"worktree {worktree} is outside profile worktreeRoot {root}"
+    top = _git(worktree, "rev-parse", "--show-toplevel")
+    if top.returncode or Path(top.stdout.strip()).resolve() != worktree:
+        return "declared worktree is not an exact Git worktree root"
+    repo_common = _git(repo, "rev-parse", "--git-common-dir")
+    worktree_common = _git(worktree, "rev-parse", "--git-common-dir")
+    repo_common_path = Path(repo_common.stdout.strip())
+    worktree_common_path = Path(worktree_common.stdout.strip())
+    if not repo_common_path.is_absolute():
+        repo_common_path = repo / repo_common_path
+    if not worktree_common_path.is_absolute():
+        worktree_common_path = worktree / worktree_common_path
+    if (
+        repo_common.returncode
+        or worktree_common.returncode
+        or repo_common_path.resolve() != worktree_common_path.resolve()
+    ):
+        return "declared worktree is not registered with the active repository"
+    branch = str(task.get("branch") or "")
+    actual_branch = _git(worktree, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if actual_branch.returncode or actual_branch.stdout.strip() != branch:
+        return f"worktree branch does not match declared task branch {branch!r}"
+    baseline = str(task.get("baselineSha") or "")
+    phase_base = str(phase.get("reviewedBaseSha") or "")
+    if not baseline or baseline != phase_base:
+        return "task baseline does not match phase reviewedBaseSha"
+    baseline_process = _git(worktree, "rev-parse", "--verify", f"{baseline}^{{commit}}")
+    if baseline_process.returncode:
+        return f"baseline commit does not exist: {baseline}"
+    if _git(worktree, "merge-base", "--is-ancestor", baseline_process.stdout.strip(), "HEAD").returncode:
+        return "phase baseline is not an ancestor of task worktree HEAD"
+    entries = manifest.get("tasks") or []
+    branches: set[str] = set()
+    worktrees: set[str] = set()
+    for entry in entries:
+        entry_branch = str(entry.get("branch") or "")
+        entry_path = Path(str(entry.get("worktree") or ""))
+        if not entry_path.is_absolute():
+            entry_path = repo / entry_path
+        entry_worktree = str(entry_path.resolve())
+        if entry_branch in branches or entry_worktree in worktrees:
+            return "dispatch manifest contains duplicate branch/worktree bindings"
+        branches.add(entry_branch)
+        worktrees.add(entry_worktree)
+    return None
+
+
 def enforce_pre_tool(payload: Mapping[str, Any]) -> dict[str, Any]:
     tool = str(payload.get("toolName") or payload.get("tool_name") or "")
     task = payload.get("task") or {}
@@ -254,13 +338,21 @@ def enforce_pre_tool(payload: Mapping[str, Any]) -> dict[str, Any]:
         if task.get("state") != "Ready":
             return decision("block", "task must be Ready before spawn")
         entries = manifest.get("tasks") or []
-        if not any(entry.get("taskId") == task_id for entry in entries):
+        dispatch_entry = next((entry for entry in entries if entry.get("taskId") == task_id), None)
+        if not dispatch_entry:
             return decision("block", "task is absent from dispatch manifest")
+        for field in ("branch", "worktree", "baselineSha", "selectedModel"):
+            if dispatch_entry.get(field) != task.get(field):
+                return decision("block", f"task {field} differs from dispatch manifest")
+        if dispatch_entry.get("state") not in (None, "Ready"):
+            return decision("block", "dispatch manifest task snapshot must be Ready")
         requested = payload.get("requestedModel")
         if requested and requested != task.get("selectedModel"):
             return decision("block", "requested model differs from selected runtime model")
-        if task.get("role", "worker") not in {"reviewer", "explorer", "validator"} and not task.get("worktree"):
-            return decision("block", "writer requires an isolated worktree")
+        if task.get("role", "worker") not in {"reviewer", "explorer", "validator"}:
+            binding_violation = spawn_binding_violation(payload)
+            if binding_violation:
+                return decision("block", binding_violation)
         for gate in as_list(task.get("resourceGates")):
             if isinstance(gate, dict) and gate.get("open") is not True:
                 return decision("block", f"resource gate is closed: {gate.get('name')}")
@@ -293,8 +385,14 @@ def enforce_pre_tool(payload: Mapping[str, Any]) -> dict[str, Any]:
             if owned and not any(paths_overlap(path, str(item)) for item in owned):
                 return decision("block", f"path is outside task ownership: {path}")
         if tool in {"Bash", "exec_command"} and not paths:
-            policy = str(profile.get("shellUnknownWritePolicy", "warn"))
-            return decision("block" if policy == "block" else "warn", "shell write-set cannot be proven")
+            policy = str(profile.get("shellUnknownWritePolicy", "block"))
+            fail_closed = "write-scope" in as_list(
+                (profile.get("hooks") or {}).get("failClosed", ["write-scope"])
+            )
+            return decision(
+                "block" if fail_closed or policy == "block" else "warn",
+                "shell write-set cannot be proven",
+            )
         return decision("allow", "write invariants satisfied")
     return decision("allow", "tool is outside enforced write/spawn set")
 

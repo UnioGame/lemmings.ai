@@ -53,17 +53,88 @@ class PreToolTests(unittest.TestCase):
         self.assertEqual("block", output["decision"])
 
     def test_spawn_selected_model_and_manifest(self):
+        spawn_task = ready_task(role="explorer")
         base = {
             "event": "PreToolUse",
             "toolName": "Agent",
-            "task": ready_task(),
+            "task": spawn_task,
             "phase": {"baselineAccepted": True, "contractsFrozen": True},
-            "manifest": {"tasks": [{"taskId": "T1"}]},
+            "manifest": {"tasks": [dict(spawn_task)]},
         }
         self.assertEqual("allow", handle({**base, "requestedModel": "sol"})["decision"])
         self.assertEqual("block", handle({**base, "requestedModel": "terra"})["decision"])
         snake = {**base, "event": None, "hook_event_name": "PreToolUse", "tool_name": "Agent"}
         self.assertEqual("allow", handle({**snake, "requestedModel": "sol"})["decision"])
+
+    def test_writer_spawn_proves_git_binding_and_rejects_missing_worktree(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-m", "base"],
+                check=True,
+                capture_output=True,
+            )
+            branch = subprocess.run(
+                ["git", "-C", str(repo), "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            baseline = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            task = ready_task(
+                worktree=str(repo),
+                branch=branch,
+                baselineSha=baseline,
+            )
+            payload = {
+                "event": "PreToolUse",
+                "toolName": "Agent",
+                "cwd": str(repo),
+                "_repoRoot": str(repo),
+                "task": task,
+                "phase": {
+                    "baselineAccepted": True,
+                    "contractsFrozen": True,
+                    "reviewedBaseSha": baseline,
+                },
+                "profile": {"worktreeRoot": "."},
+                "manifest": {"tasks": [task]},
+                "requestedModel": "sol",
+            }
+            self.assertEqual("allow", handle(payload)["decision"])
+            missing = {**task, "worktree": str(repo / "missing")}
+            blocked = handle({**payload, "task": missing, "manifest": {"tasks": [missing]}})
+            self.assertEqual("block", blocked["decision"])
+            self.assertIn("does not exist", blocked["reason"])
+
+    def test_unknown_bash_write_set_is_fail_closed_and_host_denies(self):
+        internal = handle(
+            {
+                "event": "PreToolUse",
+                "toolName": "Bash",
+                "task": ready_task(),
+                "profile": {"hooks": {"failClosed": ["write-scope"]}},
+            }
+        )
+        self.assertEqual("block", internal["decision"])
+        wire = host_output(internal, "PreToolUse", {})
+        self.assertEqual(
+            "deny",
+            wire["hookSpecificOutput"]["permissionDecision"],
+        )
 
     def test_shared_contract_owner_only(self):
         output = handle(

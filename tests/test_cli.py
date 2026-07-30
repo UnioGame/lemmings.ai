@@ -75,11 +75,21 @@ class CliTests(unittest.TestCase):
                             "taskId": "T1",
                             "state": "Ready",
                             "selectedModel": "sol",
-                            "role": "worker",
+                            "role": "explorer",
                             "worktree": str(repo / "task-worktree"),
                         },
                         "phase": {"baselineAccepted": True, "contractsFrozen": True},
-                        "manifest": {"tasks": [{"taskId": "T1"}]},
+                        "manifest": {
+                            "tasks": [
+                                {
+                                    "taskId": "T1",
+                                    "state": "Ready",
+                                    "selectedModel": "sol",
+                                    "role": "explorer",
+                                    "worktree": str(repo / "task-worktree"),
+                                }
+                            ]
+                        },
                         "profile": {"hooks": {"policy": "hybrid"}},
                     }
                 ),
@@ -200,6 +210,25 @@ class CliTests(unittest.TestCase):
                 text=True,
                 check=True,
             ).stdout.strip()
+            baseline = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            (repo / "candidate.txt").write_text("candidate\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "candidate.txt"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-m", "candidate"],
+                check=True,
+                capture_output=True,
+            )
+            candidate = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
             (repo / "ROADMAP.md").write_text("| Task |\n| T1 |\n", encoding="utf-8")
             profile_path = repo / "profile.json"
             profile_path.write_text(
@@ -208,7 +237,7 @@ class CliTests(unittest.TestCase):
                         "schemaVersion": 1,
                         "taskAdapter": "generic-markdown-v1",
                         "roadmap": "ROADMAP.md",
-                        "worktreeRoot": "../worktrees",
+                        "worktreeRoot": ".",
                         "phaseBranchPattern": "codex/phase-{phase}-{slug}",
                         "taskBranchPattern": "codex/{taskId}-{slug}",
                         "maxAgents": 3,
@@ -224,14 +253,16 @@ class CliTests(unittest.TestCase):
                 "phaseId": "P1",
                 "waveId": "W1",
                 "state": "Candidate",
-                "baselineSha": "base",
+                "previousState": "In Progress",
+                "baselineSha": baseline,
                 "branch": branch,
                 "worktree": str(repo),
                 "preferredModel": "sol",
                 "approvedFallback": "terra",
                 "selectedModel": "sol",
                 "actualModel": "sol",
-                "candidateCommit": "c1",
+                "candidateCommit": candidate,
+                "validationEvidence": {"command": "test", "exitCode": 0},
                 "ownedPaths": ["scripts/**"],
                 "sharedPaths": [],
                 "forbiddenPaths": [],
@@ -248,11 +279,12 @@ class CliTests(unittest.TestCase):
                 "handoff.json": {
                     "taskId": "T1",
                     "actualModel": "sol",
-                    "candidateCommit": "c1",
+                    "candidateCommit": candidate,
+                    "validationEvidence": {"command": "test", "exitCode": 0},
                 },
                 "review.json": {
                     "taskId": "T1",
-                    "commitRange": "base..c1",
+                    "commitRange": f"{baseline}..{candidate}",
                     "verdict": "approved",
                 },
             }

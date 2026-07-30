@@ -139,6 +139,7 @@ def _canonical_name(name: str) -> str:
         "waveid": "waveId",
         "state": "state",
         "status": "state",
+        "previousstate": "previousState",
         "baseline": "baselineSha",
         "baselinesha": "baselineSha",
         "basesha": "baselineSha",
@@ -173,6 +174,13 @@ def _canonical_name(name: str) -> str:
         "candidaterange": "commitRange",
         "verdict": "verdict",
         "reviewverdict": "reviewVerdict",
+        "statehistory": "stateHistory",
+        "validationevidence": "validationEvidence",
+        "taskids": "taskIds",
+        "mergecommit": "mergeCommit",
+        "mergecommits": "mergeCommits",
+        "integrationvalidationpassed": "integrationValidationPassed",
+        "phasevalidationpassed": "phaseValidationPassed",
         "dependencies": "dependencies",
         "ownedpaths": "ownedPaths",
         "writepaths": "ownedPaths",
@@ -415,12 +423,29 @@ def validate_validation_debt(task: Mapping[str, Any]) -> ValidationResult:
     return result
 
 
-def validate_task(task: Mapping[str, Any], phase: Mapping[str, Any] | None = None) -> ValidationResult:
+def validate_task(
+    task: Mapping[str, Any],
+    phase: Mapping[str, Any] | None = None,
+    adapter: str = "generic-markdown-v1",
+) -> ValidationResult:
     result = ValidationResult()
     for name in ("taskId", "phaseId", "state", "baselineSha", "branch", "worktree"):
         if not task.get(name):
             result.error("task.missing", f"Missing task field: {name}")
-    result.extend(validate_transition(task.get("previousState"), str(task.get("state", ""))))
+    state = str(task.get("state", ""))
+    previous = task.get("previousState")
+    if state != "Planned" and not previous:
+        if adapter == "autoqa-markdown-v1":
+            result.warn("state.legacy_history", "Legacy AutoQA task has no previousState transition evidence")
+        else:
+            result.error("state.history", f"{state} requires previousState transition evidence")
+    result.extend(validate_transition(str(previous) if previous else None, state))
+    history = as_list(task.get("stateHistory"))
+    if history:
+        if str(history[-1]) != state:
+            result.error("state.history", "stateHistory must end at the current state")
+        for prior, current in zip(history, history[1:]):
+            result.extend(validate_transition(str(prior), str(current)))
     result.extend(validate_models(task))
     result.extend(validate_validation_debt(task))
     cycle = task.get("reviewCycle", 0)
@@ -433,11 +458,23 @@ def validate_task(task: Mapping[str, Any], phase: Mapping[str, Any] | None = Non
     if task.get("state") in {"Candidate", "Sol Review", "Accepted", "Integrated"}:
         commits = as_list(task.get("candidateCommits", task.get("candidateCommit")))
         if not commits:
-            result.error("candidate.commit", "Candidate and later states require a candidate commit")
+            if adapter == "autoqa-markdown-v1":
+                result.warn(
+                    "candidate.commit.legacy",
+                    "Legacy AutoQA task omits candidate commit; require it in the handoff",
+                )
+            else:
+                result.error("candidate.commit", "Candidate and later states require a candidate commit")
     if task.get("state") == "Accepted" and task.get("integrated") is True:
         result.error("state.accepted", "Accepted is distinct from Integrated")
     if task.get("state") == "Integrated" and task.get("integrationValidationPassed") is not True:
-        result.error("integration.validation", "Integrated requires successful integration validation")
+        if adapter == "autoqa-markdown-v1":
+            result.warn(
+                "integration.validation.legacy",
+                "Legacy AutoQA task omits structured integration validation evidence",
+            )
+        else:
+            result.error("integration.validation", "Integrated requires successful integration validation")
     if phase:
         phase_sha = phase.get("reviewedBaseSha")
         if phase_sha and task.get("baselineSha") != phase_sha:
@@ -497,10 +534,119 @@ def validate_task_set(tasks: Sequence[Mapping[str, Any]]) -> ValidationResult:
     return result
 
 
+def primary_worktree(repo: Path) -> Path:
+    process = run_git(repo, "worktree", "list", "--porcelain")
+    if process.returncode:
+        raise RuntimeError(process.stderr.strip() or "git worktree list failed")
+    for line in process.stdout.splitlines():
+        if line.startswith("worktree "):
+            return Path(line.removeprefix("worktree ").strip()).resolve()
+    raise RuntimeError("git worktree list did not report a primary worktree")
+
+
+def _resolved_profile_root(repo: Path, profile: Mapping[str, Any]) -> Path:
+    root = Path(str(profile.get("worktreeRoot") or ""))
+    if not root.is_absolute():
+        root = primary_worktree(repo) / root
+    return root.resolve()
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def validate_git_binding(
+    repo: Path,
+    task: Mapping[str, Any],
+    profile: Mapping[str, Any],
+    phase: Mapping[str, Any] | None = None,
+) -> ValidationResult:
+    """Prove worktree, branch, containment, and baseline invariants."""
+
+    result = ValidationResult()
+    task_id = str(task.get("taskId") or "<unknown>")
+    branch = str(task.get("branch") or "")
+    worktree_value = str(task.get("worktree") or "")
+    worktree_path = Path(worktree_value) if worktree_value else None
+    if worktree_path and not worktree_path.is_absolute():
+        worktree_path = repo / worktree_path
+    worktree = worktree_path.resolve() if worktree_path else None
+    root = _resolved_profile_root(repo, profile)
+    result.data.update(
+        {
+            "taskId": task.get("taskId"),
+            "worktreeRoot": str(root),
+            "worktreeExists": bool(worktree and worktree.is_dir()),
+            "branchExists": False,
+            "branchBound": False,
+            "baselineAncestor": False,
+            "contained": bool(worktree and _is_within(worktree, root)),
+        }
+    )
+    if not worktree or not worktree.is_dir():
+        result.error("worktree.missing", f"{task_id} worktree does not exist: {worktree_value}")
+        return result
+    if not _is_within(worktree, root):
+        result.error("worktree.outside_root", f"{task_id} worktree is outside profile worktreeRoot")
+    top = run_git(worktree, "rev-parse", "--show-toplevel")
+    if top.returncode or Path(top.stdout.strip()).resolve() != worktree:
+        result.error("worktree.binding", f"{task_id} path is not the root of the declared Git worktree")
+        return result
+    repo_common = run_git(repo, "rev-parse", "--git-common-dir")
+    worktree_common = run_git(worktree, "rev-parse", "--git-common-dir")
+    repo_common_path = Path(repo_common.stdout.strip())
+    worktree_common_path = Path(worktree_common.stdout.strip())
+    if not repo_common_path.is_absolute():
+        repo_common_path = repo / repo_common_path
+    if not worktree_common_path.is_absolute():
+        worktree_common_path = worktree / worktree_common_path
+    registered = (
+        repo_common.returncode == 0
+        and worktree_common.returncode == 0
+        and repo_common_path.resolve() == worktree_common_path.resolve()
+    )
+    result.data["registeredWorktree"] = registered
+    if not registered:
+        result.error("worktree.binding", f"{task_id} worktree is not registered with the target repository")
+    branch_process = run_git(worktree, "symbolic-ref", "--quiet", "--short", "HEAD")
+    actual_branch = branch_process.stdout.strip() if branch_process.returncode == 0 else None
+    branch_exists = bool(
+        branch and run_git(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
+    )
+    result.data["branchExists"] = branch_exists
+    result.data["actualBranch"] = actual_branch
+    result.data["branchBound"] = bool(branch and actual_branch == branch)
+    if not branch_exists:
+        result.error("branch.missing", f"{task_id} branch does not exist: {branch}")
+    if actual_branch != branch:
+        result.error(
+            "worktree.branch_binding",
+            f"{task_id} worktree branch {actual_branch!r} does not match {branch!r}",
+        )
+    baseline = str(task.get("baselineSha") or "")
+    if phase and phase.get("reviewedBaseSha") and baseline != str(phase["reviewedBaseSha"]):
+        result.error("baseline.drift", f"{task_id} baseline differs from phase reviewed base")
+    baseline_commit = run_git(worktree, "rev-parse", "--verify", f"{baseline}^{{commit}}")
+    if baseline_commit.returncode:
+        result.error("baseline.missing", f"{task_id} baseline commit does not exist: {baseline}")
+    else:
+        ancestor = run_git(worktree, "merge-base", "--is-ancestor", baseline_commit.stdout.strip(), "HEAD")
+        result.data["baselineAncestor"] = ancestor.returncode == 0
+        if ancestor.returncode != 0:
+            result.error("baseline.ancestor", f"{task_id} baseline is not an ancestor of worktree HEAD")
+    return result
+
+
 def validate_dispatch(
     manifest: Mapping[str, Any],
     tasks: Sequence[Mapping[str, Any]],
     phase: Mapping[str, Any] | None = None,
+    profile: Mapping[str, Any] | None = None,
+    repo: Path | None = None,
 ) -> ValidationResult:
     result = ValidationResult()
     if phase:
@@ -542,6 +688,9 @@ def validate_dispatch(
             if isinstance(gate, dict) and gate.get("open") is not True:
                 result.error("dispatch.resource_gate", f"{task_id} has closed resource gate {gate.get('name')}")
     result.extend(validate_task_set(entries))
+    if profile and repo:
+        for entry in entries:
+            result.extend(validate_git_binding(repo, entry, profile, phase))
     max_agents = manifest.get("maxAgents")
     max_writers = manifest.get("maxWriters")
     if isinstance(max_agents, int) and len(entries) > max_agents:
@@ -567,13 +716,91 @@ def validate_cross_artifacts(
     manifests: Sequence[Mapping[str, Any]] = (),
     handoffs: Sequence[Mapping[str, Any]] = (),
     reviews: Sequence[Mapping[str, Any]] = (),
+    integration_evidence: Sequence[Mapping[str, Any]] = (),
     roadmap_text: str | None = None,
     repo: Path | None = None,
+    profile: Mapping[str, Any] | None = None,
+    phase: Mapping[str, Any] | None = None,
+    adapter: str = "generic-markdown-v1",
 ) -> ValidationResult:
     """Validate duplicated execution facts without treating snapshots as live state."""
 
     result = ValidationResult()
     by_id = {str(task.get("taskId")): task for task in tasks if task.get("taskId")}
+    handoffs_by_task = {
+        str(item.get("taskId")): item for item in handoffs if item.get("taskId")
+    }
+    reviews_by_task: dict[str, list[Mapping[str, Any]]] = {}
+    for item in reviews:
+        if item.get("taskId"):
+            reviews_by_task.setdefault(str(item["taskId"]), []).append(item)
+    integrations_by_task: dict[str, list[Mapping[str, Any]]] = {}
+    for item in integration_evidence:
+        ids = as_list(item.get("taskIds", item.get("taskId")))
+        for task_id in ids:
+            integrations_by_task.setdefault(str(task_id), []).append(item)
+
+    def lifecycle_finding(code: str, message: str) -> None:
+        if adapter == "autoqa-markdown-v1":
+            result.warn(code + ".legacy", message + " (legacy AutoQA compatibility)")
+        else:
+            result.error(code, message)
+
+    candidate_plus = {"Candidate", "Sol Review", "Changes Requested", "Accepted", "Integrated"}
+    accepted_plus = {"Accepted", "Integrated"}
+    for task_id, task in by_id.items():
+        state = task.get("state")
+        handoff = handoffs_by_task.get(task_id)
+        if state in candidate_plus:
+            if not handoff:
+                lifecycle_finding("lifecycle.handoff", f"{task_id} {state} requires a handoff")
+            evidence = (
+                task.get("validationEvidence")
+                or task.get("validationPassed") is True
+                or (handoff or {}).get("validationEvidence")
+                or (handoff or {}).get("validation")
+            )
+            if not evidence and not as_list(task.get("validationDebt")):
+                lifecycle_finding(
+                    "lifecycle.validation",
+                    f"{task_id} {state} requires validation evidence or owned validation debt",
+                )
+        if state in accepted_plus and not reviews_by_task.get(task_id):
+            lifecycle_finding("lifecycle.review", f"{task_id} {state} requires a Sol review")
+        if state == "Integrated":
+            evidence_items = integrations_by_task.get(task_id, [])
+            if not evidence_items:
+                lifecycle_finding(
+                    "lifecycle.integration",
+                    f"{task_id} Integrated requires merge/integration evidence",
+                )
+            else:
+                latest = evidence_items[-1]
+                if not _commit_values(latest, "mergeCommit", "mergeCommits"):
+                    lifecycle_finding(
+                        "lifecycle.merge_commit",
+                        f"{task_id} integration evidence requires a merge commit",
+                    )
+                elif repo:
+                    for merge_commit in _commit_values(latest, "mergeCommit", "mergeCommits"):
+                        if run_git(repo, "rev-parse", "--verify", f"{merge_commit}^{{commit}}").returncode:
+                            lifecycle_finding(
+                                "lifecycle.merge_commit",
+                                f"{task_id} merge commit does not exist: {merge_commit}",
+                            )
+                if latest.get("integrationValidationPassed") is not True:
+                    lifecycle_finding(
+                        "lifecycle.integration_validation",
+                        f"{task_id} integration evidence requires integrationValidationPassed",
+                    )
+                phase_passed = latest.get("phaseValidationPassed") is True or (
+                    phase and phase.get("phaseValidationPassed") is True
+                )
+                if not phase_passed:
+                    lifecycle_finding(
+                        "lifecycle.phase_validation",
+                        f"{task_id} Integrated requires successful phase validation",
+                    )
     if roadmap_text is not None:
         for task_id in sorted(by_id):
             if not re.search(rf"(?<![A-Za-z0-9_.-]){re.escape(task_id)}(?![A-Za-z0-9_.-])", roadmap_text):
@@ -645,20 +872,50 @@ def validate_cross_artifacts(
             *_commit_values(task, "fixCommit", "fixCommits"),
         ]
         expected_head = commits[-1] if commits else None
+        latest_review = reviews_by_task.get(task_id, [])[-1] is review
         explicit_range = task.get("reviewCommitRange") or task.get("commitRange")
         if not commit_range:
             result.error("review.commit_range", f"{task_id} review requires the actual commit range")
-        elif explicit_range and commit_range != explicit_range:
+        elif latest_review and explicit_range and commit_range != explicit_range:
             result.error("review.commit_drift", f"{task_id} review commit range differs from task")
-        elif expected_head and commit_range.split("..")[-1].strip() != expected_head:
+        elif latest_review and expected_head and not repo and commit_range.split("..")[-1].strip() != expected_head:
             result.error("review.commit_drift", f"{task_id} review range head is not the latest candidate/fix commit")
+        if latest_review and repo and commit_range:
+            range_parts = [part.strip() for part in commit_range.split("..")]
+            if len(range_parts) != 2 or not all(range_parts):
+                result.error("review.commit_range", f"{task_id} review range must be base..head")
+            else:
+                base_process = run_git(repo, "rev-parse", "--verify", f"{range_parts[0]}^{{commit}}")
+                head_process = run_git(repo, "rev-parse", "--verify", f"{range_parts[1]}^{{commit}}")
+                task_base = run_git(
+                    repo,
+                    "rev-parse",
+                    "--verify",
+                    f"{task.get('baselineSha')}^{{commit}}",
+                )
+                task_head = (
+                    run_git(repo, "rev-parse", "--verify", f"{expected_head}^{{commit}}")
+                    if expected_head
+                    else None
+                )
+                if base_process.returncode or head_process.returncode:
+                    result.error("review.commit_range", f"{task_id} review range references missing commits")
+                else:
+                    if task_base.returncode or base_process.stdout.strip() != task_base.stdout.strip():
+                        result.error("review.commit_drift", f"{task_id} review range base differs from task baseline")
+                    if (
+                        task_head is None
+                        or task_head.returncode
+                        or head_process.stdout.strip() != task_head.stdout.strip()
+                    ):
+                        result.error("review.commit_drift", f"{task_id} review range head differs from task commits")
         verdict = review.get("verdict", review.get("reviewVerdict"))
         task_verdict = task.get("reviewVerdict")
         if not verdict:
             result.error("review.verdict", f"{task_id} review requires a verdict")
-        elif task_verdict and str(verdict).casefold() != str(task_verdict).casefold():
+        elif latest_review and task_verdict and str(verdict).casefold() != str(task_verdict).casefold():
             result.error("review.verdict_drift", f"{task_id} review verdict differs from task")
-        elif task.get("state") in {"Accepted", "Integrated"} and str(verdict).casefold() not in {
+        elif latest_review and task.get("state") in {"Accepted", "Integrated"} and str(verdict).casefold() not in {
             "accepted",
             "approve",
             "approved",
@@ -671,9 +928,17 @@ def validate_cross_artifacts(
     for task_id, task in by_id.items():
         branch = str(task.get("branch") or "")
         worktree_value = str(task.get("worktree") or "")
-        worktree = Path(worktree_value).resolve() if worktree_value else None
+        worktree_path = Path(worktree_value) if worktree_value else None
+        if worktree_path and repo and not worktree_path.is_absolute():
+            worktree_path = repo / worktree_path
+        worktree = worktree_path.resolve() if worktree_path else None
         branch_exists: bool | None = None
-        if repo and branch:
+        binding_result: ValidationResult | None = None
+        if repo and profile:
+            binding_result = validate_git_binding(repo, task, profile, phase)
+            result.extend(binding_result)
+            branch_exists = binding_result.data.get("branchExists")
+        elif repo and branch:
             branch_exists = run_git(repo, "rev-parse", "--verify", "--quiet", branch).returncode == 0
         worktree_exists = worktree.exists() if worktree else False
         terminal = task.get("state") in TERMINAL_STATES or task.get("state") == "Accepted"
@@ -681,7 +946,7 @@ def validate_cross_artifacts(
             if branch in seen_branches:
                 result.error("branch.duplicate", f"{task_id} and {seen_branches[branch]} share branch {branch}")
             seen_branches[branch] = task_id
-            if branch_exists is False:
+            if branch_exists is False and not binding_result:
                 (result.warn if terminal else result.error)(
                     "branch.missing", f"{task_id} branch does not exist: {branch}"
                 )
@@ -693,19 +958,20 @@ def validate_cross_artifacts(
                     f"{task_id} and {seen_worktrees[worktree_key]} share worktree {worktree}",
                 )
             seen_worktrees[worktree_key] = task_id
-            if not worktree_exists:
+            if not worktree_exists and not binding_result:
                 (result.warn if terminal else result.error)(
                     "worktree.missing", f"{task_id} worktree does not exist: {worktree}"
                 )
-        bindings.append(
-            {
+        binding = {
                 "taskId": task_id,
                 "branch": branch or None,
                 "branchExists": branch_exists,
                 "worktree": str(worktree) if worktree else None,
                 "worktreeExists": worktree_exists,
             }
-        )
+        if binding_result:
+            binding.update(binding_result.data)
+        bindings.append(binding)
     result.data["bindings"] = bindings
     return result
 
@@ -829,9 +1095,10 @@ def routing_scorecard(tasks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 "acceptedOrIntegrated": 0,
                 "replans": 0,
                 "fixCycles": 0,
-                "tokens": 0,
-                "latencyMs": 0,
-                "paidCost": 0.0,
+                "tokens": None,
+                "latencyMs": None,
+                "paidCost": None,
+                "observationCounts": {"tokens": 0, "latencyMs": 0, "paidCost": 0},
                 "validationFailures": 0,
                 "escapedDefects": 0,
                 "findings": {"P0": 0, "P1": 0, "P2": 0, "P3": 0},
@@ -841,9 +1108,16 @@ def routing_scorecard(tasks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         bucket["acceptedOrIntegrated"] += task.get("state") in {"Accepted", "Integrated"}
         bucket["replans"] += task.get("state") == "Replan Required"
         bucket["fixCycles"] += int(task.get("reviewCycle", 0) or 0)
-        bucket["tokens"] += int(task.get("tokens", 0) or 0)
-        bucket["latencyMs"] += int(task.get("latencyMs", 0) or 0)
-        bucket["paidCost"] += float(task.get("paidCost", 0) or 0)
+        for metric, converter in (
+            ("tokens", int),
+            ("latencyMs", int),
+            ("paidCost", float),
+        ):
+            observation = task.get(metric)
+            if observation is None or observation == "":
+                continue
+            bucket["observationCounts"][metric] += 1
+            bucket[metric] = (bucket[metric] or 0) + converter(observation)
         bucket["validationFailures"] += int(task.get("validationFailures", 0) or 0)
         bucket["escapedDefects"] += int(task.get("escapedDefects", 0) or 0)
         for priority, count in (task.get("findings") or {}).items():

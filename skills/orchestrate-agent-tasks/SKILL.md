@@ -45,6 +45,12 @@ Use the artifacts in [templates](references/templates.md) and enforcement rules 
 
 An implementation worker must create a candidate commit and handoff. Repairs remain with the original worker as separate fix commits. The handoff records the actual model, commit range, validations, validation debt, loaded context, cost, latency, assumptions, and risks.
 
+Treat artifact gates as state-indexed: `Candidate` and later require a handoff
+plus validation evidence or owned debt; `Accepted` and later require the latest
+Sol review of the actual range; `Integrated` requires merge evidence and passed
+integration and phase validation. Record `previousState` or ordered state
+history for every non-`Planned` generic task.
+
 Give Sol High the packet, baseline/contracts, actual candidate/fix commit range, diff, concise evidence, and direct interfaces/tests. Findings P0–P2 block acceptance unless a P2 follow-up has an owner. The reviewer must not patch worker code.
 
 Integrate accepted commits only in dependency order using the profile integration strategy (normally `--no-ff`), then run phase validation. Record integration evidence, cleanup inventory, deferred validation, and routing scorecard. Inspect cleanup safely; do not delete worktrees automatically.
@@ -55,6 +61,9 @@ Integrate accepted commits only in dependency order using the profile integratio
 - Keep hooks inactive until `orchestration_cli runtime activate --state <json>`
   creates the worktree-specific Git marker. Deactivate it after the task; hook
   installation alone is not an active task contract.
+- Allocate a writer worktree only with the consumer profile and accepted phase
+  baseline. Prove root containment, exact branch binding, unique allocation,
+  and baseline ancestry before spawn.
 - Stop on scope/ownership drift, unapproved paid actions, missing mandatory external gate, or public-contract changes outside the shared-contract owner.
 - Map every acceptance criterion and material risk to a narrow falsifying check, then widen at integration.
 - Record unavailable runtime validation as validation debt with a reason, owner, blocking policy, and future gate; never hide it as a pass.

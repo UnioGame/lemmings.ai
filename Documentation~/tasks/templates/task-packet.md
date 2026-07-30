@@ -5,6 +5,8 @@
 | Field | Value |
 | --- | --- |
 | Phase / wave / state | `<phase> / <wave> / Planned>` |
+| Previous state | `<previous>` |
+| State history | `["Planned", "Ready", "<current>"]` |
 | Base SHA / branch / absolute worktree | `<sha> / <branch> / <path>` |
 | Preferred / approved fallback / selected / actual | `<model> / <model> / <model> / pending>` |
 | Role and rationale | `<role/reason>` |
@@ -34,6 +36,9 @@
 | Risk / criterion | Narrow validation | Evidence | Integration rerun |
 | --- | --- | --- | --- |
 | `<risk>` | `<command/environment>` | `<expected>` | `yes/no` |
+
+Record structured `validationEvidence`, or structured validation debt with
+reason, owner, blocking policy, and future gate, before `Candidate`.
 
 ## Failure and control
 

@@ -15,6 +15,7 @@ from orchestration_core import (
     cleanup_inventory,
     git_worktrees,
     load_artifact,
+    primary_worktree,
     routing_scorecard,
     run_git,
     validate_dispatch,
@@ -102,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--manifest", action="append", default=[])
     status.add_argument("--handoff", action="append", default=[])
     status.add_argument("--review", action="append", default=[])
+    status.add_argument("--integration-evidence", action="append", default=[])
     status.add_argument("--json", action="store_true")
 
     worktree = sub.add_parser("worktree")
@@ -109,7 +111,9 @@ def build_parser() -> argparse.ArgumentParser:
     wt_allocate = worktree_sub.add_parser("allocate")
     wt_allocate.add_argument("path")
     wt_allocate.add_argument("branch")
-    wt_allocate.add_argument("--base", default="HEAD")
+    wt_allocate.add_argument("--profile", required=True)
+    wt_allocate.add_argument("--phase", required=True)
+    wt_allocate.add_argument("--base")
     wt_allocate.add_argument("--create-branch", action="store_true")
     worktree_sub.add_parser("status")
     wt_release = worktree_sub.add_parser("release")
@@ -179,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             adapter = adapter_from(profile)
             task = load_artifact(args.task, adapter)
             phase = load_artifact(args.phase, adapter) if args.phase else None
-            result = validate_task(task, phase)
+            result = validate_task(task, phase, adapter)
             if args.all_task:
                 result.extend(validate_task_set(load_many(args.all_task, adapter)))
             return result_exit(result)
@@ -200,7 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             manifest = load_artifact(args.manifest, adapter)
             phase = load_artifact(args.phase, adapter) if args.phase else None
             tasks = load_many(args.task, adapter)
-            return result_exit(validate_dispatch(manifest, tasks, phase))
+            return result_exit(validate_dispatch(manifest, tasks, phase, profile, repo))
         if args.group == "status":
             profile = load_profile(args.profile)
             adapter = adapter_from(profile)
@@ -209,11 +213,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             manifests = load_many(args.manifest, adapter)
             handoffs = load_many(args.handoff, adapter)
             reviews = load_many(args.review, adapter)
+            integration_evidence = load_many(args.integration_evidence, adapter)
             result = validate_profile(profile)
             if phase:
                 result.extend(validate_phase(phase))
             for task in tasks:
-                result.extend(validate_task(task, phase))
+                result.extend(validate_task(task, phase, adapter))
             result.extend(validate_task_set(tasks))
             roadmap_path = Path(str(profile["roadmap"]))
             if not roadmap_path.is_absolute():
@@ -229,8 +234,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     manifests=manifests,
                     handoffs=handoffs,
                     reviews=reviews,
+                    integration_evidence=integration_evidence,
                     roadmap_text=roadmap_text,
                     repo=repo,
+                    profile=profile,
+                    phase=phase,
+                    adapter=adapter,
                 )
             )
             payload = result.as_dict()
@@ -241,6 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "manifests": manifests,
                     "handoffs": handoffs,
                     "reviews": reviews,
+                    "integrationEvidence": integration_evidence,
                     "tasks": [
                         {
                             "taskId": task.get("taskId"),
@@ -260,14 +270,69 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.action == "status":
                 emit({"ok": True, "worktrees": git_worktrees(repo)})
                 return 0
-            target = Path(args.path).resolve()
+            target_path = Path(args.path)
+            if not target_path.is_absolute():
+                target_path = repo / target_path
+            target = target_path.resolve()
             if args.action == "allocate":
+                profile = load_profile(args.profile)
+                adapter = adapter_from(profile)
+                phase = load_artifact(args.phase, adapter)
+                phase_result = validate_phase(phase)
+                if not phase_result.ok:
+                    return result_exit(phase_result)
+                worktree_root = Path(str(profile["worktreeRoot"]))
+                if not worktree_root.is_absolute():
+                    worktree_root = primary_worktree(repo) / worktree_root
+                worktree_root = worktree_root.resolve()
+                try:
+                    target.relative_to(worktree_root)
+                except ValueError:
+                    emit(
+                        {
+                            "ok": False,
+                            "error": f"target is outside profile worktreeRoot: {worktree_root}",
+                        }
+                    )
+                    return 1
                 if target.exists():
                     emit({"ok": False, "error": f"target already exists: {target}"})
                     return 1
+                expected_base = str(phase["reviewedBaseSha"])
+                requested_base = args.base or expected_base
+                expected_process = run_git(repo, "rev-parse", "--verify", f"{expected_base}^{{commit}}")
+                requested_process = run_git(repo, "rev-parse", "--verify", f"{requested_base}^{{commit}}")
+                if expected_process.returncode or requested_process.returncode:
+                    emit({"ok": False, "error": "phase or requested base commit does not exist"})
+                    return 1
+                if expected_process.stdout.strip() != requested_process.stdout.strip():
+                    emit({"ok": False, "error": "requested base differs from phase reviewedBaseSha"})
+                    return 1
+                branch_process = run_git(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{args.branch}")
+                if args.create_branch and branch_process.returncode == 0:
+                    emit({"ok": False, "error": "cannot create an already existing branch"})
+                    return 1
+                if not args.create_branch:
+                    if branch_process.returncode != 0:
+                        emit({"ok": False, "error": "existing-branch allocation requires an existing branch"})
+                        return 1
+                    if run_git(
+                        repo,
+                        "merge-base",
+                        "--is-ancestor",
+                        expected_process.stdout.strip(),
+                        args.branch,
+                    ).returncode:
+                        emit({"ok": False, "error": "phase base is not an ancestor of the existing branch"})
+                        return 1
+                for item in git_worktrees(repo):
+                    existing_branch = str(item.get("branch") or "").removeprefix("refs/heads/")
+                    if Path(str(item["worktree"])).resolve() == target or existing_branch == args.branch:
+                        emit({"ok": False, "error": "branch or worktree is already allocated"})
+                        return 1
                 command = ["worktree", "add"]
                 command.extend(["-b", args.branch] if args.create_branch else [])
-                command.extend([str(target), args.base if args.create_branch else args.branch])
+                command.extend([str(target), requested_base if args.create_branch else args.branch])
                 process = run_git(repo, *command)
                 emit(
                     {
