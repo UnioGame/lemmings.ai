@@ -1,6 +1,6 @@
 # lemmings
 
-lemmings coordinates Codex agents with the lightest workflow that is safe for a task. It ships as a Unity package, a Codex plugin, and a Python CLI. The project name in documentation, commands, skills, and plugin UI is always `lemmings`.
+lemmings coordinates Codex agents with the lightest workflow that is safe for a task. It ships as a Codex plugin and a Python CLI. The project name in documentation, commands, skills, and plugin UI is always `lemmings`.
 
 ## What is included
 
