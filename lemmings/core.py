@@ -37,6 +37,7 @@ DEFAULT_MODELS = {
     "reviewer": "gpt-5.6-sol:high",
     "complex-worker": "gpt-5.6-sol:medium",
 }
+ORCHESTRATOR_EFFORTS = {"high", "xhigh", "max", "ultra"}
 
 
 @dataclass
@@ -177,7 +178,37 @@ def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     fallback = profile.get("fallback", {})
     if fallback and not isinstance(fallback, dict):
         result.error("profile.fallback", "fallback must be an object")
+    for field_name in ("requestedModels", "taskModels"):
+        value = profile.get(field_name, {})
+        if value and not isinstance(value, dict):
+            result.error("profile.model_pins", f"{field_name} must be an object")
+    requested_models = profile.get("requestedModels") or {}
+    if isinstance(requested_models, dict):
+        for role, model in requested_models.items():
+            violation = model_pin_violation(str(role), str(model))
+            if violation:
+                result.error("model.pin_policy", violation)
+    task_models = profile.get("taskModels") or {}
+    if isinstance(task_models, dict):
+        for task_id, pins in task_models.items():
+            if not isinstance(pins, dict):
+                result.error("profile.task_models", f"taskModels.{task_id} must be an object")
+                continue
+            for role, model in pins.items():
+                violation = model_pin_violation(str(role), str(model))
+                if violation:
+                    result.error("model.pin_policy", f"taskModels.{task_id}: {violation}")
     return result
+
+
+def model_pin_violation(role: str, model: str) -> str | None:
+    if role == "reviewer" and model != DEFAULT_MODELS["reviewer"]:
+        return f"reviewer must remain {DEFAULT_MODELS['reviewer']}"
+    if role == "orchestrator":
+        name, separator, effort = model.rpartition(":")
+        if not separator or name != "gpt-5.6-sol" or effort not in ORCHESTRATOR_EFFORTS:
+            return "orchestrator pin must use gpt-5.6-sol at high or higher effort"
+    return None
 
 
 def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None = None) -> ValidationResult:
@@ -189,19 +220,33 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
     requested, assigned, actual = (models.get(name) for name in ("requested", "assigned", "actual"))
     if not assigned:
         result.error("model.assigned", "models.assigned is required before dispatch")
-    if requested and assigned != requested:
+    role = str(task.get("role", "worker"))
+    task_id = str(task.get("taskId", ""))
+    profile = profile or {}
+    task_pins = (profile.get("taskModels") or {}).get(task_id, {})
+    task_pin = task_pins.get(role) if isinstance(task_pins, dict) else None
+    global_pin = (profile.get("requestedModels") or {}).get(role)
+    effective_pin = task_pin or global_pin
+    if effective_pin:
+        if requested != effective_pin:
+            result.error("model.pin_requested", f"models.requested must equal effective pin {effective_pin}")
+        if assigned != effective_pin:
+            result.error("model.pin_assigned", f"models.assigned must equal effective pin {effective_pin}")
+    elif requested and assigned != requested:
         result.error("model.pin", "models.requested must take priority over assignment")
+    pin_violation = model_pin_violation(role, str(requested)) if requested else None
+    if pin_violation:
+        result.error("model.pin_policy", pin_violation)
+    default_assignment = (profile.get("models") or {}).get(role) or DEFAULT_MODELS.get(role)
+    if not effective_pin and not requested and default_assignment and assigned != default_assignment:
+        result.error("model.default_assignment", f"models.assigned must equal role default {default_assignment}")
     if actual and actual != assigned:
         fallback_reason = models.get("fallbackReason")
-        allowed = as_list((profile or {}).get("fallback", {}).get("allowed"))
+        allowed = as_list(profile.get("fallback", {}).get("allowed"))
         if actual not in allowed:
             result.error("model.actual", "models.actual differs from assigned and is not an allowed fallback")
         if not fallback_reason:
             result.error("model.fallback_reason", "fallback requires models.fallbackReason")
-    role = str(task.get("role", "worker"))
-    expected = DEFAULT_MODELS.get(role)
-    if expected and assigned != expected and not requested:
-        result.error("model.fixed", f"{role} must use {expected} unless user-pinned")
     return result
 
 
@@ -289,7 +334,7 @@ def validate_review(review: Mapping[str, Any], task: Mapping[str, Any]) -> Valid
     return result
 
 
-def validate_wave(tasks: Iterable[Mapping[str, Any]], phase: Mapping[str, Any]) -> ValidationResult:
+def validate_wave(tasks: Iterable[Mapping[str, Any]], phase: Mapping[str, Any], profile: Mapping[str, Any] | None = None) -> ValidationResult:
     result = validate_phase(phase)
     tasks = list(tasks)
     worktrees: set[str] = set()
@@ -305,7 +350,7 @@ def validate_wave(tasks: Iterable[Mapping[str, Any]], phase: Mapping[str, Any]) 
             result.error("lease.conflict", f"resource {resource} is leased to multiple owners")
         lease_owners[resource] = owner
     for task in tasks:
-        result.extend(validate_task(task))
+        result.extend(validate_task(task, profile))
         worktree = str(task.get("worktree") or "")
         if not worktree:
             result.error("worktree.required", f"Strict task {task.get('taskId')} requires worktree")
@@ -351,17 +396,20 @@ def check_repository(
         result.extend(validate_profile(profile))
     mode = detect_mode(profile, task, phase)
     result.data["mode"] = mode
-    if mode == "simple" and not check_all:
-        return result
     if not task:
-        result.error("task.required", f"{mode.title()} mode requires a task packet")
+        result.data["idle"] = True
+        if phase:
+            result.extend(validate_phase(phase))
+        if review:
+            result.error("review.task_required", "review evidence cannot be validated without its task packet")
         return result
+    result.data["idle"] = False
     result.extend(validate_task(task, profile))
     if mode == "strict" or check_all:
         if not phase:
             result.error("phase.required", "Strict lifecycle requires a phase artifact")
         else:
-            result.extend(validate_wave([task], phase))
+            result.extend(validate_wave([task], phase, profile))
         worktree_value = task.get("worktree")
         if worktree_value:
             info = inspect_worktree(repo, resolve_path(repo, str(worktree_value)) or repo)

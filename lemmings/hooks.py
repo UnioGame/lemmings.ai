@@ -6,24 +6,34 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.core import as_list, candidate_head, paths_overlap, read_object, runtime_marker
+    from lemmings.core import as_list, candidate_head, paths_overlap, read_object, runtime_marker, validate_models
 else:
-    from .core import as_list, candidate_head, paths_overlap, read_object, runtime_marker
+    from .core import as_list, candidate_head, paths_overlap, read_object, runtime_marker, validate_models
 
 READ_ONLY_COMMANDS = {
     "rg", "grep", "find", "ls", "dir", "pwd", "type", "cat", "head", "tail",
     "get-content", "get-childitem", "get-location", "select-string", "select-object",
+    "where-object", "foreach-object", "sort-object", "group-object", "measure-object",
+    "convertfrom-json",
 }
 READ_ONLY_GIT = {
-    "status", "diff", "log", "show", "branch", "rev-parse", "merge-base", "ls-files",
-    "worktree", "remote", "tag", "describe",
+    "status", "diff", "log", "show", "rev-parse", "merge-base", "ls-files", "describe",
 }
+GIT_LIST_FLAGS = {
+    "--list", "--contains", "--no-contains", "--merged", "--no-merged", "--points-at",
+    "--format", "--sort", "--column", "--ignore-case", "--all", "--remotes", "-a", "-r", "-v", "-vv",
+}
+SHELL_WRITE_PATTERN = re.compile(
+    r"(?:^|\s)(?:>|>>|2>|&>|tee|set-content|add-content|out-file|remove-item|move-item|copy-item|new-item|rename-item)(?:\s|$)",
+    re.I,
+)
 
 
 def decision(action: str, reason: str, **extra: Any) -> dict[str, Any]:
@@ -32,6 +42,20 @@ def decision(action: str, reason: str, **extra: Any) -> dict[str, Any]:
 
 def event_name(payload: Mapping[str, Any]) -> str:
     return str(payload.get("hook_event_name") or payload.get("event") or "")
+
+
+def requested_role(payload: Mapping[str, Any]) -> str | None:
+    tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+    explicit = payload.get("requestedRole")
+    if isinstance(tool_input, dict):
+        explicit = explicit or tool_input.get("role") or tool_input.get("agent_type") or tool_input.get("subagent_type")
+    if not explicit:
+        return None
+    value = str(explicit).lower()
+    for role in ("reviewer", "explorer", "validator", "orchestrator", "complex-worker", "worker"):
+        if role in value:
+            return role
+    return value
 
 
 def changed_paths(payload: Mapping[str, Any]) -> list[str]:
@@ -53,8 +77,28 @@ def shell_command(payload: Mapping[str, Any]) -> str:
     return str(tool_input.get("command", "")) if isinstance(tool_input, dict) else str(tool_input)
 
 
+def _git_read_only(tokens: list[str]) -> bool:
+    positional = [token.lower() for token in tokens[1:] if not token.startswith("-")]
+    subcommand = positional[0] if positional else ""
+    arguments = [token.lower() for token in tokens[2:]]
+    if subcommand in READ_ONLY_GIT:
+        return not any(token.startswith("--output") for token in arguments)
+    if subcommand == "worktree":
+        return not arguments or arguments[0] == "list"
+    if subcommand == "remote":
+        return not arguments or arguments[0] in {"-v", "--verbose", "show", "get-url"}
+    if subcommand in {"branch", "tag"}:
+        if not arguments:
+            return True
+        mutation_flags = {"-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move", "--copy", "--edit-description", "--set-upstream-to", "--unset-upstream", "-f", "--force"}
+        if any(token in mutation_flags for token in tokens[2:]):
+            return False
+        return any(token.split("=", 1)[0] in GIT_LIST_FLAGS or token == "--show-current" for token in arguments)
+    return False
+
+
 def is_read_only_shell(command: str) -> bool:
-    if not command.strip() or re.search(r"(?:^|\s)(?:>|>>|2>|&>|tee|set-content|add-content|out-file)(?:\s|$)", command, re.I):
+    if not command.strip() or SHELL_WRITE_PATTERN.search(command):
         return False
     segments = re.split(r"\s*(?:\||&&|;|\r?\n)\s*", command)
     for segment in segments:
@@ -66,17 +110,19 @@ def is_read_only_shell(command: str) -> bool:
             continue
         name = Path(tokens[0].strip('"\'')).name.lower().replace("-", "")
         if name == "git":
-            subcommand = next((token.lower() for token in tokens[1:] if not token.startswith("-")), "")
-            if subcommand not in READ_ONLY_GIT:
+            if not _git_read_only(tokens):
                 return False
-            if subcommand == "worktree" and any(token.lower() in {"add", "remove", "move", "prune", "repair", "lock", "unlock"} for token in tokens):
-                return False
-        elif name not in {item.replace("-", "") for item in READ_ONLY_COMMANDS}:
+        elif name not in {item.replace("-", "") for item in READ_ONLY_COMMANDS} and not name.startswith("format"):
             return False
     return True
 
 
-def ownership_violation(task: Mapping[str, Any], paths: list[str]) -> str | None:
+def repository_root(cwd: Path) -> Path:
+    process = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+    return Path(process.stdout.strip()).resolve() if not process.returncode else cwd.resolve()
+
+
+def ownership_violation(task: Mapping[str, Any], paths: list[str], cwd: str | Path | None = None) -> str | None:
     role = str(task.get("role", "worker"))
     if role == "reviewer":
         return "reviewer is read-only"
@@ -84,7 +130,16 @@ def ownership_violation(task: Mapping[str, Any], paths: list[str]) -> str | None
     owned = as_list(ownership.get("owned"))
     forbidden = as_list(ownership.get("forbidden"))
     shared = as_list(ownership.get("shared"))
-    for path in paths:
+    root = repository_root(Path(cwd or os.getcwd()).resolve())
+    for raw_path in paths:
+        candidate = Path(raw_path)
+        if candidate.is_absolute():
+            try:
+                path = candidate.resolve().relative_to(root).as_posix()
+            except ValueError:
+                return f"absolute path is outside repository: {raw_path}"
+        else:
+            path = candidate.as_posix()
         if any(paths_overlap(path, str(rule)) for rule in forbidden):
             return f"path is forbidden: {path}"
         if any(paths_overlap(path, str(rule)) for rule in shared) and role not in {"orchestrator", "shared-contract-owner"}:
@@ -103,13 +158,36 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
     tool = str(payload.get("tool_name") or payload.get("toolName") or "")
     if event == "PreToolUse":
         if tool in {"Agent", "spawn_agent"}:
-            if task.get("state") != "Ready":
-                return decision("block", "task must be Ready before dispatch")
-            requested = payload.get("requestedModel") or (payload.get("tool_input") or {}).get("model")
+            role = requested_role(payload)
+            if not role:
+                if mode == "strict":
+                    return decision("block", "Strict spawn requires an explicit writer, reviewer, explorer, or validator role")
+                role = str(task.get("role", "worker"))
+            tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+            requested = payload.get("requestedModel") or (tool_input.get("model") if isinstance(tool_input, dict) else None)
             assigned = (task.get("models") or {}).get("assigned")
+            writer = role not in {"reviewer", "explorer", "validator"}
+            if role == "reviewer":
+                if task.get("state") != "Candidate":
+                    return decision("block", "reviewer requires a Candidate task")
+                if requested != "gpt-5.6-sol:high":
+                    return decision("block", "reviewer must use gpt-5.6-sol:high")
+                head = candidate_head(task)
+                review_head = (tool_input.get("head") if isinstance(tool_input, dict) else None) or payload.get("reviewHead")
+                if not head or (review_head and str(review_head) != head):
+                    return decision("block", "reviewer must inspect the current candidate/fix head")
+                return decision("allow", "reviewer dispatch invariants satisfied")
+            if role in {"explorer", "validator"}:
+                if task.get("state") not in {"Ready", "Active", "Candidate"}:
+                    return decision("block", f"{role} requires Ready, Active, or Candidate task")
+                return decision("allow", f"bounded {role} dispatch accepted")
+            if task.get("state") != "Ready":
+                return decision("block", "writer requires a Ready task")
+            model_result = validate_models(task, payload.get("profile") or {})
+            if not model_result.ok:
+                return decision("block", model_result.findings[0].message)
             if requested and requested != assigned:
-                return decision("block", "spawn model differs from models.assigned")
-            writer = str(task.get("role", "worker")) not in {"reviewer", "explorer", "validator"}
+                return decision("block", "writer spawn model differs from models.assigned")
             isolated = mode == "strict" or payload.get("parallelWriters") or payload.get("dirtyPrimary")
             if writer and isolated:
                 declared = task.get("worktree")
@@ -126,7 +204,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             if tool != "apply_patch" and is_read_only_shell(shell_command(payload)):
                 return decision("allow", "known read-only shell command")
             paths = changed_paths(payload)
-            violation = ownership_violation(task, paths)
+            violation = ownership_violation(task, paths, payload.get("_repoRoot") or payload.get("cwd"))
             if violation:
                 return decision("block", violation)
             if tool != "apply_patch" and not paths:
@@ -134,9 +212,31 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             return decision("allow", "write invariants satisfied")
     if event == "SubagentStart":
         context = payload.get("contextPacket") or {}
+        if not context and task:
+            phase = payload.get("phase") or {}
+            profile = payload.get("profile") or {}
+            context = {
+                "taskPacket": {
+                    key: task.get(key)
+                    for key in ("taskId", "state", "role", "plan", "ownership", "models")
+                    if task.get(key) is not None
+                },
+                "agentsInstructions": {"mode": payload.get("mode") or task.get("mode") or profile.get("mode", "auto")},
+            }
+            if phase.get("contractsFrozen") and phase.get("contracts"):
+                context["frozenContracts"] = phase.get("contracts")
+            execution = task.get("execution") or {}
+            for key in ("interfaces", "tests", "dependencyHandoffs"):
+                if execution.get(key):
+                    context[key] = execution[key]
         allowed = {"taskPacket", "agentsInstructions", "frozenContracts", "interfaces", "tests", "dependencyHandoffs"}
         extras = sorted(set(context) - allowed)
-        return decision("warn" if extras else "allow", "unbounded context: " + ", ".join(extras) if extras else "bounded context accepted")
+        if extras:
+            return decision("warn", "unbounded context: " + ", ".join(extras))
+        expansion = payload.get("contextExpansion") or {}
+        if expansion and (int(payload.get("expansionsUsed", 0)) >= 1 or expansion.get("broad") or not expansion.get("symbolOrDecision")):
+            return decision("warn", "focused context expansion budget is exhausted or unbounded")
+        return decision("allow", "bounded context accepted", contextPacket=context)
     if event == "SubagentStop":
         execution = task.get("execution") or {}
         if task.get("implementationTask", True) and not candidate_head(task):
@@ -154,22 +254,22 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
     if event == "PostToolUse":
         paths = changed_paths(payload)
         if not paths:
-            cwd = Path(str(payload.get("cwd") or os.getcwd())).resolve()
+            cwd = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve()
             discovered: set[str] = set()
             for args in (("diff", "--name-only"), ("diff", "--cached", "--name-only"), ("ls-files", "--others", "--exclude-standard")):
-                import subprocess
                 process = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False)
                 if process.returncode:
                     return decision("warn", "actual diff could not be inspected")
                 discovered.update(line.strip() for line in process.stdout.splitlines() if line.strip())
             paths = sorted(discovered)
-        violation = ownership_violation(task, paths)
+        violation = ownership_violation(task, paths, payload.get("_repoRoot") or payload.get("cwd"))
         return decision("warn", violation + "; candidate is unsuitable until corrected") if violation else decision("allow", "observed diff respects ownership")
     return decision("allow", "event is not enforced")
 
 
 def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
-    repo = Path(str(payload.get("cwd") or os.getcwd())).resolve()
+    cwd = Path(str(payload.get("cwd") or os.getcwd())).resolve()
+    repo = repository_root(cwd)
     try:
         marker = runtime_marker(repo)
     except ValueError:
@@ -177,8 +277,8 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
     if not marker.is_file():
         return {**payload, "_lemmingsActive": False}
     state = read_object(marker)
-    combined = {**state, **payload, "_lemmingsActive": True}
-    for name in ("task", "phase", "review"):
+    combined = {**state, **payload, "_lemmingsActive": True, "_repoRoot": str(repo)}
+    for name in ("profile", "task", "phase", "review"):
         value = state.get(name + "Path")
         if value:
             path = Path(value)
@@ -193,7 +293,7 @@ def host_output(result: Mapping[str, Any], event: str, payload: Mapping[str, Any
     action, reason = result.get("decision"), str(result.get("reason", ""))
     if action == "allow":
         if event == "SubagentStart":
-            context = payload.get("contextPacket") or {}
+            context = result.get("contextPacket") or payload.get("contextPacket") or {}
             lines = [f"{name}: {value}" for name, value in context.items()]
             return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "Lemmings context\n" + "\n".join(lines)}}
         return {}

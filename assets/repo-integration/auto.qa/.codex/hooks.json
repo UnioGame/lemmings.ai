@@ -1,8 +1,0 @@
-{
-  "hooks": {
-    "PreToolUse": [{ "matcher": "Agent|spawn_agent|apply_patch|Bash|exec_command|shell_command", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/plugins/lemmings/lemmings/hooks.py\"", "commandWindows": "powershell -NoProfile -Command \"$root = git rev-parse --show-toplevel; py -3 (Join-Path $root 'plugins/lemmings/lemmings/hooks.py')\"" }] }],
-    "PostToolUse": [{ "matcher": "apply_patch|Bash|exec_command|shell_command", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/plugins/lemmings/lemmings/hooks.py\"", "commandWindows": "powershell -NoProfile -Command \"$root = git rev-parse --show-toplevel; py -3 (Join-Path $root 'plugins/lemmings/lemmings/hooks.py')\"" }] }],
-    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/plugins/lemmings/lemmings/hooks.py\"", "commandWindows": "powershell -NoProfile -Command \"$root = git rev-parse --show-toplevel; py -3 (Join-Path $root 'plugins/lemmings/lemmings/hooks.py')\"" }] }],
-    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/plugins/lemmings/lemmings/hooks.py\"", "commandWindows": "powershell -NoProfile -Command \"$root = git rev-parse --show-toplevel; py -3 (Join-Path $root 'plugins/lemmings/lemmings/hooks.py')\"" }] }]
-  }
-}

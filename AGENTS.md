@@ -12,7 +12,7 @@
 - `skills/lemmings/SKILL.md` owns the concise agent workflow and command contract.
 - `skills/lemmings/references/` owns compact advanced workflow references.
 - `Documentation~/tasks/ROADMAP.md` owns orchestration-tooling priorities.
-- `Documentation~/tasks/templates/` owns reusable phase, task, review, and integration schemas.
+- `Documentation~/tasks/templates/` owns reusable phase, task, and immutable review contracts; close evidence remains embedded in the phase or task contract.
 
 Avoid duplicating detailed policy across these files. Keep the skill compact and link it to the guide for advanced cases.
 

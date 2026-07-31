@@ -10,3 +10,5 @@ All JSON artifacts use `schemaVersion: 1`.
 Do not create tracked dispatch, separate handoff, separate integration evidence, adapters, or compatibility fields. Generate a scorecard only for a benchmark or at least two comparable observations.
 
 Model fields live under `models`: `requested` is an optional user pin, `assigned` is fixed before spawn, `actual` records execution, and `fallbackReason` is required only when actual differs from assigned.
+
+Consumer defaults live in `profile.models`. Explicit repo pins live in `profile.requestedModels`; task-role pins live in `profile.taskModels`. Resolve assignment as task pin, then repo pin, then role default. Copy an effective pin into both task `models.requested` and `models.assigned`. Reviewer remains `gpt-5.6-sol:high`; an explicit orchestrator pin may raise Sol effort above High but may not downgrade it.

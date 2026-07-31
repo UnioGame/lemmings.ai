@@ -5,8 +5,8 @@
   "author": {
     "name": "Lemmings Maintainers"
   },
-  "repository": "https://github.com/lemmings/lemmings",
-  "homepage": "https://github.com/lemmings/lemmings",
+  "repository": "https://github.com/UnioGame/lemmings",
+  "homepage": "https://github.com/UnioGame/lemmings",
   "skills": "./skills/",
   "interface": {
     "displayName": "Lemmings",

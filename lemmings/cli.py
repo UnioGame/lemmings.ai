@@ -26,7 +26,7 @@ def load_optional(repo: Path, value: str | None, fallback: str | None = None) ->
     return read_object(path) if path and path.is_file() else None
 
 
-def paths_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+def paths_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     repo = Path(args.repo).resolve()
     profile = load_optional(repo, getattr(args, "profile", None), ".codex/lemmings.json")
     marker_data = None
@@ -38,19 +38,33 @@ def paths_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | No
     task = load_optional(repo, getattr(args, "task", None), (marker_data or {}).get("taskPath"))
     phase = load_optional(repo, getattr(args, "phase", None), (marker_data or {}).get("phasePath"))
     review = load_optional(repo, getattr(args, "review", None), (marker_data or {}).get("reviewPath"))
-    return repo, profile, task, phase, review
+    return repo, profile, task, phase, review, marker_data
+
+
+def runtime_reference_findings(repo: Path, marker: dict[str, Any] | None) -> ValidationResult:
+    result = ValidationResult()
+    if not marker:
+        return result
+    task_reference = marker.get("taskPath")
+    if task_reference:
+        task_path = resolve_path(repo, str(task_reference))
+        if not task_path or not task_path.is_file():
+            result.error("runtime.task_missing", f"active runtime task does not exist: {task_reference}")
+    return result
 
 
 def command_check(args: argparse.Namespace) -> int:
-    repo, profile, task, phase, review = paths_from_args(args)
+    repo, profile, task, phase, review, marker = paths_from_args(args)
     result = check_repository(repo, profile, task, phase, review, args.all)
+    result.extend(runtime_reference_findings(repo, marker))
     emit(result.as_dict())
     return 0 if result.ok else 1
 
 
 def command_status(args: argparse.Namespace) -> int:
-    repo, profile, task, phase, review = paths_from_args(args)
+    repo, profile, task, phase, review, marker_data = paths_from_args(args)
     result = check_repository(repo, profile, task, phase, review)
+    result.extend(runtime_reference_findings(repo, marker_data))
     marker = runtime_marker(repo)
     result.data.update({
         "active": marker.is_file(),
@@ -165,9 +179,10 @@ def command_phase(args: argparse.Namespace) -> int:
 
 def command_wave(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
+    profile = load_optional(repo, args.profile, ".codex/lemmings.json")
     phase = read_object(resolve_path(repo, args.phase))
     tasks = [read_object(resolve_path(repo, value)) for value in args.task]
-    result = validate_wave(tasks, phase)
+    result = validate_wave(tasks, phase, profile)
     result.data["dispatch"] = [
         {"taskId": task.get("taskId"), "branch": task.get("branch"), "worktree": task.get("worktree"), "model": (task.get("models") or {}).get("assigned")}
         for task in tasks
@@ -211,10 +226,11 @@ def command_models(args: argparse.Namespace) -> int:
     path = resolve_path(repo, args.profile) or repo / ".codex/lemmings.json"
     profile = read_object(path) if path.is_file() else {"schemaVersion": 1, "mode": "auto"}
     if args.models_command == "status":
-        emit({"ok": True, "models": profile.get("models", DEFAULT_MODELS), "taskModels": profile.get("taskModels", {})})
+        emit({"ok": True, "models": profile.get("models", DEFAULT_MODELS), "requestedModels": profile.get("requestedModels", {}), "taskModels": profile.get("taskModels", {})})
         return 0
     if args.models_command == "reset":
         profile["models"] = dict(DEFAULT_MODELS)
+        profile.pop("requestedModels", None)
         profile.pop("taskModels", None)
     else:
         role, separator, model = args.assignment.partition("=")
@@ -224,7 +240,7 @@ def command_models(args: argparse.Namespace) -> int:
         if args.models_command == "task":
             profile.setdefault("taskModels", {}).setdefault(args.task_id, {})[role] = model
         else:
-            profile.setdefault("models", {})[role] = model
+            profile.setdefault("requestedModels", {})[role] = model
     write_object(path, profile)
     emit({"ok": True, "path": str(path), "profile": profile})
     return 0

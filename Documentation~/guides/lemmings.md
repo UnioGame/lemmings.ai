@@ -20,6 +20,8 @@ The orchestrator and reviewer use `gpt-5.6-sol:high`. Complex workers use `gpt-5
 
 PreToolUse validates dispatch/model/worktree binding and path ownership. Reviewer writes are denied. Known read-only shell commands are allowed. An unknown shell write-set warns in Standard and blocks in Strict. SubagentStart injects bounded context; SubagentStop requires embedded handoff, candidate/fix commit, actual model, and validation or owned debt. PostToolUse inspects actual paths and advises on violations. There is no Stop continuation.
 
+Repo consumers install the Lemmings plugin through their marketplace. The plugin auto-discovers `hooks/hooks.json`; do not copy the hook configuration into consumer `.codex` state because duplicate registration executes every hook twice.
+
 ## CLI
 
 Use `lemmings status` and `lemmings check` for routine work. Worktrees are managed through `lemmings worktree allocate|inspect|release`. Strict preparation uses `lemmings phase prepare` and `lemmings wave plan`; final integration uses `lemmings close`. `lemmings scorecard` creates output only for a benchmark or at least two observations.

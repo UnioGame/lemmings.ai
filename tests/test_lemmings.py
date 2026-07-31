@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 from lemmings.core import (  # noqa: E402
     DEFAULT_MODELS, check_repository, detect_mode, runtime_marker, validate_task, validate_wave,
 )
-from lemmings.hooks import handle, host_output, is_read_only_shell  # noqa: E402
+from lemmings.hooks import handle, host_output, hydrate, is_read_only_shell  # noqa: E402
 
 
 def task(**changes):
@@ -62,7 +62,20 @@ class IdentityAndCliTests(unittest.TestCase):
         plugin = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual("com.unigame.lemmings", unity["name"])
         self.assertEqual("Lemmings", unity["displayName"])
+        self.assertEqual("https://github.com/UnioGame/lemmings.git", unity["repository"]["url"])
         self.assertEqual("lemmings", plugin["name"])
+        self.assertEqual("https://github.com/UnioGame/lemmings", plugin["repository"])
+
+    def test_autoqa_marketplace_installs_single_lemmings_plugin_hook_source(self):
+        integration = ROOT / "assets" / "repo-integration" / "auto.qa"
+        marketplace = json.loads((integration / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
+        self.assertEqual("autoqa", marketplace["name"])
+        self.assertEqual(1, len(marketplace["plugins"]))
+        entry = marketplace["plugins"][0]
+        self.assertEqual("lemmings", entry["name"])
+        self.assertEqual("./plugins/lemmings", entry["source"]["path"])
+        self.assertEqual("INSTALLED_BY_DEFAULT", entry["policy"]["installation"])
+        self.assertFalse((integration / ".codex" / "hooks.json").exists())
 
     def test_runtime_marker_uses_git_common_lemmings_path(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -89,6 +102,17 @@ class IdentityAndCliTests(unittest.TestCase):
             self.assertEqual(0, process.returncode)
             self.assertFalse(json.loads(process.stdout)["created"])
 
+    def test_models_set_preserves_defaults_and_records_explicit_pin(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            config = repo / "profile.json"
+            config.write_text(json.dumps(profile()), encoding="utf-8")
+            process = run_cli("models", "--repo", str(repo), "--profile", "profile.json", "set", "worker=custom:high")
+            self.assertEqual(0, process.returncode, process.stdout + process.stderr)
+            saved = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual(DEFAULT_MODELS, saved["models"])
+            self.assertEqual("custom:high", saved["requestedModels"]["worker"])
+
     def test_check_all_validates_full_strict_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
@@ -107,6 +131,33 @@ class IdentityAndCliTests(unittest.TestCase):
             process = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", "review.json", "--all")
             self.assertEqual(0, process.returncode, process.stdout + process.stderr)
             self.assertTrue(json.loads(process.stdout)["ok"])
+
+    def test_idle_strict_profile_check_all_is_valid(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            (repo / "profile.json").write_text(json.dumps(profile("strict")), encoding="utf-8")
+            process = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--all")
+            output = json.loads(process.stdout)
+            self.assertEqual(0, process.returncode, process.stdout + process.stderr)
+            self.assertTrue(output["ok"])
+            self.assertTrue(output["data"]["idle"])
+            self.assertEqual("strict", output["data"]["mode"])
+
+    def test_active_runtime_missing_task_is_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            config_path = repo / ".codex" / "lemmings.json"
+            config_path.parent.mkdir()
+            config_path.write_text(json.dumps(profile("strict")), encoding="utf-8")
+            marker = runtime_marker(repo)
+            marker.parent.mkdir(parents=True)
+            marker.write_text(json.dumps({"schemaVersion": 1, "enabled": True, "mode": "strict", "profilePath": ".codex/lemmings.json", "taskPath": "docs/tasks/missing.json"}), encoding="utf-8")
+            process = run_cli("status", "--repo", str(repo))
+            output = json.loads(process.stdout)
+            self.assertNotEqual(0, process.returncode)
+            self.assertIn("runtime.task_missing", {item["code"] for item in output["findings"]})
 
     def test_worktree_allocate_inspect_and_dry_release(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -155,6 +206,31 @@ class ContractTests(unittest.TestCase):
         value = task(models={"requested": "gpt-custom:high", "assigned": DEFAULT_MODELS["complex-worker"], "actual": None})
         self.assertIn("model.pin", {f.code for f in validate_task(value, profile()).findings})
 
+    def test_task_role_pin_overrides_repo_default_and_mismatch_fails(self):
+        configured = profile()
+        configured["models"]["worker"] = "global-default:medium"
+        configured["requestedModels"] = {"worker": "repo-pin:high"}
+        configured["taskModels"] = {"TASK-1": {"worker": "task-pin:high"}}
+        pinned = task(role="worker", models={"requested": "task-pin:high", "assigned": "task-pin:high", "actual": None})
+        self.assertTrue(validate_task(pinned, configured).ok)
+        mismatch = task(role="worker", models={"requested": "repo-pin:high", "assigned": "repo-pin:high", "actual": None})
+        codes = {f.code for f in validate_task(mismatch, configured).findings}
+        self.assertIn("model.pin_requested", codes)
+        self.assertIn("model.pin_assigned", codes)
+
+    def test_repo_pin_overrides_global_default(self):
+        configured = profile()
+        configured["models"]["worker"] = "global-default:medium"
+        configured["requestedModels"] = {"worker": "repo-pin:high"}
+        pinned = task(role="worker", models={"requested": "repo-pin:high", "assigned": "repo-pin:high", "actual": None})
+        self.assertTrue(validate_task(pinned, configured).ok)
+
+    def test_orchestrator_pin_allows_only_explicit_high_or_higher_sol(self):
+        allowed = task(role="orchestrator", models={"requested": "gpt-5.6-sol:xhigh", "assigned": "gpt-5.6-sol:xhigh", "actual": None})
+        self.assertTrue(validate_task(allowed, profile()).ok)
+        downgraded = task(role="orchestrator", models={"requested": "gpt-5.6-sol:medium", "assigned": "gpt-5.6-sol:medium", "actual": None})
+        self.assertIn("model.pin_policy", {f.code for f in validate_task(downgraded, profile()).findings})
+
     def test_fallback_requires_reason(self):
         value = task(models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": "fallback"})
         configured = profile(); configured["fallback"] = {"allowed": ["fallback"]}
@@ -198,6 +274,19 @@ class HookTests(unittest.TestCase):
         output = handle({"event": "PreToolUse", "toolName": "shell_command", "mode": "strict", "task": task(), "toolInput": {"command": "git diff --check"}})
         self.assertEqual("allow", output["decision"])
 
+    def test_mutating_git_queries_are_not_read_only(self):
+        self.assertFalse(is_read_only_shell("git branch -D stale"))
+        self.assertFalse(is_read_only_shell("git remote add origin https://example.invalid/repo"))
+        self.assertFalse(is_read_only_shell("git tag -d old"))
+        self.assertTrue(is_read_only_shell("git branch --show-current"))
+        self.assertTrue(is_read_only_shell("git remote -v"))
+        self.assertTrue(is_read_only_shell("git tag --list release-*"))
+
+    def test_common_powershell_read_pipeline_is_allowed(self):
+        command = "Get-Content data.json | ConvertFrom-Json | Where-Object active | ForEach-Object name | Sort-Object | Group-Object | Measure-Object | Format-Table"
+        self.assertTrue(is_read_only_shell(command))
+        self.assertFalse(is_read_only_shell("Get-Content data.json | ForEach-Object { Remove-Item $_ }"))
+
     def test_unknown_shell_warns_standard_and_blocks_strict(self):
         payload = {"event": "PreToolUse", "toolName": "shell_command", "task": task(), "toolInput": {"command": "custom-tool run"}}
         warned = handle(payload)
@@ -206,12 +295,62 @@ class HookTests(unittest.TestCase):
         payload["mode"] = "strict"
         self.assertEqual("block", handle(payload)["decision"])
 
+    def test_spawn_blocks_profile_task_pin_mismatch(self):
+        configured = profile()
+        configured["taskModels"] = {"TASK-1": {"worker": "pinned:high"}}
+        value = task(role="worker", models={"requested": None, "assigned": "other:medium", "actual": None})
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "profile": configured})
+        self.assertEqual("block", output["decision"])
+        self.assertIn("effective pin", output["reason"])
+
+    def test_writer_and_reviewer_dispatch_are_role_aware(self):
+        worker = task(role="worker", models={"requested": None, "assigned": "worker-model:medium", "actual": None})
+        configured = profile(); configured["models"]["worker"] = "worker-model:medium"
+        writer = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "profile": configured, "toolInput": {"role": "worker", "model": "worker-model:medium"}})
+        self.assertEqual("allow", writer["decision"])
+        candidate = task(state="Candidate", previousState="Active", commits={"candidate": "abc", "fix": []})
+        reviewer = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"agent_type": "lemmings-reviewer", "model": "gpt-5.6-sol:high", "head": "abc"}})
+        self.assertEqual("allow", reviewer["decision"])
+        wrong_model = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"role": "reviewer", "model": "gpt-5.6-sol:medium", "head": "abc"}})
+        self.assertEqual("block", wrong_model["decision"])
+        wrong_state = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "toolInput": {"role": "reviewer", "model": "gpt-5.6-sol:high"}})
+        self.assertEqual("block", wrong_state["decision"])
+
+    def test_strict_spawn_requires_explicit_role(self):
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": task(), "toolInput": {"model": DEFAULT_MODELS["complex-worker"]}})
+        self.assertEqual("block", output["decision"])
+
     def test_ownership_and_reviewer_are_blocked(self):
         outside = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": task(), "changedPaths": ["README.md"]})
         self.assertEqual("block", outside["decision"])
         review_task = task(role="reviewer")
         reviewer = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": review_task, "changedPaths": ["lemmings/core.py"]})
         self.assertEqual("block", reviewer["decision"])
+
+    def test_absolute_owned_path_is_repo_relative_and_external_path_is_blocked(self):
+        allowed = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": task(), "changedPaths": [str(ROOT / "lemmings" / "core.py")]})
+        self.assertEqual("allow", allowed["decision"])
+        with tempfile.TemporaryDirectory() as temp:
+            blocked = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": task(), "changedPaths": [str(Path(temp) / "outside.py")]})
+        self.assertEqual("block", blocked["decision"])
+        self.assertIn("outside repository", blocked["reason"])
+
+    def test_hydrate_resolves_runtime_artifacts_from_nested_cwd(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            nested = repo / "src" / "nested"
+            nested.mkdir(parents=True)
+            task_path = repo / "docs" / "tasks" / "TASK-1.json"
+            task_path.parent.mkdir(parents=True)
+            task_path.write_text(json.dumps(task()), encoding="utf-8")
+            marker = runtime_marker(repo)
+            marker.parent.mkdir(parents=True)
+            marker.write_text(json.dumps({"schemaVersion": 1, "taskPath": "docs/tasks/TASK-1.json"}), encoding="utf-8")
+            payload = hydrate({"cwd": str(nested), "hook_event_name": "SubagentStart"})
+            self.assertTrue(payload["_lemmingsActive"])
+            self.assertEqual("TASK-1", payload["task"]["taskId"])
+            self.assertEqual(str(repo.resolve()), payload["_repoRoot"])
 
     def test_stop_has_no_continuation_behavior(self):
         output = handle({"event": "Stop", "task": task(state="Accepted")})
@@ -222,6 +361,16 @@ class HookTests(unittest.TestCase):
         value = task(state="Candidate", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]})
         output = handle({"event": "SubagentStop", "task": value})
         self.assertEqual("block", output["decision"])
+
+    def test_subagent_start_derives_bounded_nonempty_context(self):
+        value = task(secretLogs=["must-not-leak"])
+        value["execution"]["interfaces"] = ["lemmings/core.py"]
+        result = handle({"event": "SubagentStart", "task": value, "profile": profile()})
+        output = host_output(result, "SubagentStart", {"task": value})
+        context = output["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("TASK-1", context)
+        self.assertIn("lemmings/core.py", context)
+        self.assertNotIn("must-not-leak", context)
 
 
 if __name__ == "__main__":
