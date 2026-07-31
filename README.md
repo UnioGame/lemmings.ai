@@ -1,27 +1,117 @@
 # lemmings
 
-lemmings coordinates Codex agents with the lightest workflow that is safe for a task. It ships as a Codex plugin and a Python CLI. The project name in documentation, commands, skills, and plugin UI is always `lemmings`.
+> Proportional orchestration for Codex agents: start with one lightweight skill and add automation only when the repository needs it.
 
-## What is included
+The default installation is intentionally small. The `$lemmings` skill works without Python, hooks, a CLI, or generated task files.
 
-- `$lemmings` skill for enabling, disabling, and configuring orchestration per task.
-- Hooks for model assignments, write ownership, bounded context, candidate evidence, and read-only review.
-- Agent profiles for the orchestrator, reviewer, complex worker, worker, explorer, validator, and summarizer.
-- `lemmings` CLI for repository runtime, validation, worktrees, phases, waves, model pins, and close evidence.
-- Reusable task, phase, review, and roadmap templates.
+## Choose your setup
 
-## Requirements
+| Setup | What you get | Python |
+|---|---|---:|
+| **Skill only** | `$lemmings`, mode selection, model routing, planning and review guidance | **No** |
+| **Plugin** | Skill discovery plus packaged agent resources | **No** |
+| **Plugin + hooks** | Automatic ownership, model, context, and evidence checks | **Yes** |
+| **CLI** | `lemmings check`, runtime state, worktrees, phases, waves, and model pins | **Yes** |
 
-- Git repository.
-- Python 3.10 or newer.
-- Codex with workspace plugins and hooks enabled.
-- One local checkout of this package that is visible from the consuming repository.
+> [!TIP]
+> Start with **Skill only**. Add hooks when policy must be enforced automatically. Add the CLI when deterministic repository checks are useful in local development or CI.
 
-## Install in a repository
+## Quick start: install only the skill
 
-### 1. Register the existing package checkout
+This is the recommended installation. It exposes `$lemmings` to Codex and has no runtime dependencies.
 
-Create `.agents/plugins/marketplace.json`. Point `source.path` at the package checkout already used by the repository; do not add a second copy solely for the plugin.
+### 1. Reuse the existing checkout
+
+Keep one checkout of this repository. Do not create a second copy solely to expose the skill.
+
+### 2. Link the skill into the consumer repository
+
+Codex discovers repository skills under `.agents/skills/`. Link the existing `skills/lemmings` directory there.
+
+**Windows PowerShell**
+
+```powershell
+New-Item -ItemType Directory -Force .agents/skills | Out-Null
+New-Item -ItemType Junction `
+  -Path .agents/skills/lemmings `
+  -Target (Resolve-Path GameClient/Game.Packages/lemmings/skills/lemmings)
+```
+
+**macOS or Linux**
+
+```bash
+mkdir -p .agents/skills
+ln -s ../../GameClient/Game.Packages/lemmings/skills/lemmings .agents/skills/lemmings
+```
+
+Adjust the source path when the checkout lives elsewhere. If links are unavailable, copy the directory instead:
+
+```powershell
+Copy-Item GameClient/Game.Packages/lemmings/skills/lemmings `
+  .agents/skills/lemmings -Recurse
+```
+
+> [!NOTE]
+> A link follows future package updates automatically. A copied skill must be refreshed manually.
+
+### 3. Open a new Codex task
+
+Skills are discovered when a task starts. Verify the installation in a new task:
+
+```text
+$lemmings status
+```
+
+Use proportional mode selection by default:
+
+```text
+$lemmings auto
+```
+
+That is the complete skill-only installation. Python is not involved.
+
+## Skill commands
+
+```text
+$lemmings on
+$lemmings off
+$lemmings auto
+$lemmings status
+```
+
+- `on` forces orchestration for the current task.
+- `off` prevents new orchestration artifacts and delegation for the current task.
+- `auto` chooses the lightest safe mode from the current risks.
+- `status` reports the effective task and repository mode.
+
+Model pins remain under user control:
+
+```text
+$lemmings models set worker=gpt-5.6-sol:medium
+$lemmings models task TASK-17 worker=gpt-5.6-sol:medium
+$lemmings models status
+$lemmings models reset
+```
+
+## Modes
+
+| Mode | Use when | Required evidence |
+|---|---|---|
+| **Simple** | One agent, local bounded change | Focused validation |
+| **Standard** | One writer with sequential exploration or validation | Task packet, candidate commit, independent review |
+| **Strict** | Parallel writers, shared contracts, submodules, code generation, or external resources | Frozen baseline, isolated worktrees, ownership, leases, review and integration evidence |
+
+The core lifecycle is:
+
+```text
+Prepare -> Dispatch -> Execute/Candidate -> Review/Repair -> Integrate/Close
+```
+
+## Optional: install the full plugin
+
+Use the plugin when the workspace should load packaged resources from the existing checkout. The plugin itself does not require Python while hooks remain disabled.
+
+Create `.agents/plugins/marketplace.json` in the consumer repository:
 
 ```json
 {
@@ -46,23 +136,11 @@ Create `.agents/plugins/marketplace.json`. Point `source.path` at the package ch
 }
 ```
 
-### 2. Enable workspace hooks and agents
+Point `source.path` at the checkout already used by the repository. Open a new Codex task after adding or updating the plugin.
 
-Create `.codex/config.toml`:
+### Repository profile
 
-```toml
-[agents]
-max_concurrent_threads_per_session = 3
-
-[features]
-hooks = true
-```
-
-Copy the required role profiles from `assets/repo-integration/auto.qa/.codex/agents/` into the consumer's `.codex/agents/` directory, or define equivalent profiles using the same model assignments.
-
-### 3. Add a repository profile
-
-Create `.codex/lemmings.json`:
+Hooks and the CLI use `.codex/lemmings.json` as their deterministic repository contract. A minimal profile is:
 
 ```json
 {
@@ -75,11 +153,7 @@ Create `.codex/lemmings.json`:
   "models": {
     "orchestrator": "gpt-5.6-sol:high",
     "reviewer": "gpt-5.6-sol:high",
-    "complex-worker": "gpt-5.6-sol:medium",
-    "worker": "gpt-5.6-terra:medium",
-    "explorer": "gpt-5.6-terra:low",
-    "validator": "gpt-5.6-terra:medium",
-    "summarizer": "gpt-5.6-terra:low"
+    "complex-worker": "gpt-5.6-sol:medium"
   },
   "fallback": {
     "allowed": []
@@ -88,9 +162,69 @@ Create `.codex/lemmings.json`:
 }
 ```
 
-### 4. Install the CLI
+## Optional: hooks
 
-Install the Python package from the same checkout:
+Hooks turn written policy into automatic checks around agent and tool execution.
+
+### What hooks enforce
+
+- A spawned worker matches its assigned model and task role.
+- Strict or parallel writers use isolated worktrees.
+- Writers stay inside declared owned paths.
+- Reviewers remain read-only and inspect the actual candidate range.
+- Subagents receive bounded task context.
+- Candidate completion includes commit, validation or owned debt, actual model, and embedded handoff.
+- Post-tool inspection warns when the real diff violates ownership.
+
+### Why hooks need Python
+
+Codex invokes the hook entrypoint from `lemmings/hooks.py`. Python runs that policy engine, reads the repository profile and runtime marker, and returns an allow, warn, or block decision.
+
+Python is only the hook runtime:
+
+- Python 3.10 or newer is required.
+- `pip install` is **not** required for hooks.
+- Windows uses `py -3`; other platforms use `python3`.
+- The hook imports its modules directly from the plugin checkout.
+
+Enable hooks in `.codex/config.toml`:
+
+```toml
+[agents]
+max_concurrent_threads_per_session = 3
+
+[features]
+hooks = true
+```
+
+Verify the interpreter before enabling them:
+
+```text
+py -3 --version
+python3 --version
+```
+
+Only the command appropriate for the current platform needs to succeed.
+
+### How to work without Python
+
+Leave hooks disabled and use the skill-only workflow. The orchestration guidance, mode selection, task contracts, model routing, and review process remain available.
+
+Without hooks, enforce these boundaries through agent profiles and normal repository tools:
+
+1. Give each writer explicit owned paths.
+2. Use `git worktree` for parallel writers.
+3. Keep reviewers in read-only sandboxes.
+4. Validate the exact candidate commit range.
+5. Record missing validation as debt with an owner and future gate.
+
+The difference is enforcement: the skill guides the workflow, while hooks can block invalid actions automatically.
+
+## Optional: CLI
+
+The CLI is a separate convenience layer. It requires Python because the `lemmings` executable is implemented by the Python package.
+
+Install it from the existing checkout:
 
 ```text
 python -m pip install --user -e GameClient/Game.Packages/lemmings
@@ -99,51 +233,27 @@ lemmings --help
 
 If the executable is not found, add the Python user Scripts directory to `PATH` and open a new terminal.
 
-### 5. Reload Codex
-
-Open a new Codex task after adding or updating the plugin. Skills, hooks, and agent profiles are loaded when a task starts.
-
-## Enable or disable orchestration
-
-Task-scoped skill commands:
+Common commands:
 
 ```text
-$lemmings on
-$lemmings off
-$lemmings auto
-$lemmings status
-```
-
-Repository runtime commands:
-
-```text
+lemmings check
+lemmings check --all
+lemmings status
 lemmings runtime on
 lemmings runtime off
-lemmings runtime status
+lemmings worktree inspect
+lemmings models status
 ```
 
-`auto` is the recommended default. A local single-agent change stays Simple. Standard adds a task packet, candidate commit, and independent review. Strict additionally requires frozen contracts, isolated writer worktrees, ownership checks, and integration evidence.
+The skill works normally when the CLI is not installed. In that setup, use Git and repository test commands directly instead of `lemmings check` and worktree helpers.
 
-## Assign models
+## Recommended rollout
 
-The orchestrator and reviewer use Sol High. Complex implementation uses Sol Medium by default. Users can pin worker models globally or per task:
-
-```text
-$lemmings models set worker=gpt-5.6-sol:medium
-$lemmings models task TASK-17 worker=gpt-5.6-sol:medium
-$lemmings models status
-$lemmings models reset
-```
-
-## Typical workflow
-
-1. Describe the goal, acceptance criteria, risks, dependencies, and files in scope.
-2. Let `auto` select Simple, Standard, or Strict.
-3. For Standard or Strict, execute bounded task packets and create candidate commits.
-4. Run focused validation before broad checks.
-5. Review the actual candidate or fix commit range with the read-only Sol High reviewer.
-6. Integrate only Accepted candidates, rerun integration validation, and record remaining debt.
-7. Finish with `lemmings check`; use `lemmings check --all` for a complete Strict lifecycle audit.
+1. Install the skill without Python.
+2. Use `$lemmings auto` on real tasks.
+3. Add agent profiles when role-specific models and sandboxes become useful.
+4. Add hooks only when automatic policy enforcement justifies the Python dependency.
+5. Add the CLI for repeatable local or CI validation.
 
 ## More documentation
 
