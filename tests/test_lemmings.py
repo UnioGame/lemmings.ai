@@ -406,6 +406,11 @@ class HookTests(unittest.TestCase):
         self.assertTrue(is_read_only_shell('Get-Content "notes (final).md"'))
         self.assertTrue(is_read_only_shell("Get-Content 'it''s (final).md'"))
 
+    def test_powershell_quote_fragments_cannot_hide_options(self):
+        self.assertFalse(is_read_only_shell("rg --pr'e' processor TODO .", dialect="windows"))
+        self.assertFalse(is_read_only_shell('rg --pr"e" processor TODO .', dialect="windows"))
+        self.assertTrue(is_read_only_shell("Get-Content 'fully quoted notes.md'", dialect="windows"))
+
     def test_unclosed_powershell_quotes_are_unknown(self):
         self.assertFalse(is_read_only_shell("Get-Content 'notes (final).md"))
         self.assertFalse(is_read_only_shell('Get-Content "notes (final).md'))
@@ -470,12 +475,21 @@ class HookTests(unittest.TestCase):
             "rg `generator` .",
             "rg TODO >out",
             "rg TODO & git status",
-            "rg TODO | head",
             "rg 'unterminated",
+            "| rg TODO .",
+            "rg TODO . |",
+            "rg TODO . || | head",
         )
         for command in rejected:
             with self.subTest(command=command):
                 self.assertFalse(is_read_only_shell(command, dialect="posix"))
+
+    def test_posix_control_operators_validate_every_nonempty_segment(self):
+        self.assertTrue(is_read_only_shell("rg TODO lemmings | head", dialect="posix"))
+        self.assertTrue(is_read_only_shell("rg TODO lemmings || head", dialect="posix"))
+        self.assertTrue(is_read_only_shell("rg TODO lemmings && git status", dialect="posix"))
+        self.assertFalse(is_read_only_shell("rg TODO lemmings | git reset --hard", dialect="posix"))
+        self.assertFalse(is_read_only_shell("rg TODO lemmings && custom-tool run", dialect="posix"))
 
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})

@@ -143,6 +143,8 @@ def _powershell_read_segments(command: str) -> list[str] | None:
                     executable.append(" ")
                     index += 1
                 else:
+                    if following and not following.isspace() and following not in ";|&\r\n":
+                        return None
                     state = "normal"
             index += 1
             continue
@@ -152,14 +154,20 @@ def _powershell_read_segments(command: str) -> list[str] | None:
             if character == "`" or (character == "$" and following == "("):
                 return None
             if character == '"':
+                if following and not following.isspace() and following not in ";|&\r\n":
+                    return None
                 state = "normal"
             index += 1
             continue
         if character == "'":
+            if current and not current[-1].isspace():
+                return None
             state = "single"
             current.append(character)
             executable.append(" ")
         elif character == '"':
+            if current and not current[-1].isspace():
+                return None
             state = "double"
             current.append(character)
             executable.append(" ")
@@ -193,17 +201,21 @@ def _powershell_read_segments(command: str) -> list[str] | None:
 def _posix_read_segments(command: str) -> list[str] | None:
     if not command.strip():
         return None
+    segments: list[str] = []
+    current: list[str] = []
     state = "normal"
     index = 0
     while index < len(command):
         character = command[index]
         following = command[index + 1] if index + 1 < len(command) else ""
         if state == "single":
+            current.append(character)
             if character == "'":
                 state = "normal"
             index += 1
             continue
         if state == "double":
+            current.append(character)
             if character == '"':
                 state = "normal"
             elif character in "`$":
@@ -211,21 +223,43 @@ def _posix_read_segments(command: str) -> list[str] | None:
             elif character == "\\":
                 if not following:
                     return None
+                current.append(following)
                 index += 1
             index += 1
             continue
         if character == "'":
             state = "single"
+            current.append(character)
         elif character == '"':
             state = "double"
+            current.append(character)
         elif character == "\\":
             if not following:
                 return None
+            current.extend((character, following))
             index += 1
-        elif character in "`$<>&;|\r\n(){}":
+        elif character in "`$<>(){}":
             return None
+        elif character == "&" and following != "&":
+            return None
+        elif character in ";\r\n|" or (character == "&" and following == "&"):
+            segment = "".join(current).strip()
+            if not segment:
+                return None
+            segments.append(segment)
+            current = []
+            if (character == "|" and following == "|") or (character == "&" and following == "&") or (character == "\r" and following == "\n"):
+                index += 1
+        else:
+            current.append(character)
         index += 1
-    return [command] if state == "normal" else None
+    if state != "normal":
+        return None
+    segment = "".join(current).strip()
+    if not segment:
+        return None
+    segments.append(segment)
+    return segments
 
 
 def _shell_dialect(dialect: str | None = None) -> str:
