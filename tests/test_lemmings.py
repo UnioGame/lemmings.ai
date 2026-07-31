@@ -410,6 +410,11 @@ class HookTests(unittest.TestCase):
         self.assertFalse(is_read_only_shell("Get-Content 'notes (final).md"))
         self.assertFalse(is_read_only_shell('Get-Content "notes (final).md'))
 
+    def test_unquoted_background_ampersand_is_not_read_only(self):
+        self.assertFalse(is_read_only_shell("Get-Content package.json & git reset --hard"))
+        self.assertTrue(is_read_only_shell("Get-Content 'research & notes.md'"))
+        self.assertTrue(is_read_only_shell("Get-Content package.json && git status"))
+
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})
         allowed = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": value, "changedPaths": ["src/deep/module.py"]})

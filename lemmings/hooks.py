@@ -164,6 +164,8 @@ def _powershell_read_segments(command: str) -> list[str] | None:
             executable.append(" ")
         elif character in "(){}" or character == "`":
             return None
+        elif character == "&" and following != "&":
+            return None
         elif character in ";\r\n" or character == "|" or (character == "&" and following == "&"):
             segment = "".join(current).strip()
             if segment:
