@@ -386,7 +386,7 @@ class HookTests(unittest.TestCase):
         self.assertTrue(is_read_only_shell("git tag --list release-*"))
 
     def test_common_powershell_read_pipeline_is_allowed(self):
-        command = "Get-Content data.json | ConvertFrom-Json | Where-Object active | ForEach-Object name | Sort-Object | Group-Object | Measure-Object | Format-Table"
+        command = "Get-Content data.json | ConvertFrom-Json | Where-Object active | Sort-Object name | Group-Object active | Measure-Object | Format-Table"
         self.assertTrue(is_read_only_shell(command))
         self.assertFalse(is_read_only_shell("Get-Content data.json | ForEach-Object { Remove-Item $_ }"))
         self.assertFalse(is_read_only_shell("ForEach-Object { git reset --hard }"))
@@ -430,6 +430,26 @@ class HookTests(unittest.TestCase):
                 self.assertFalse(is_read_only_shell(command))
 
         self.assertTrue(is_read_only_shell("Get-Content 'research <draft> notes.md'"))
+
+    def test_non_git_allowlist_rejects_execution_and_destructive_options(self):
+        rejected = (
+            "find . -delete",
+            "find . -exec git reset --hard",
+            "Format-Volume",
+            "format D:",
+            "rg --pre processor TODO .",
+            "rg --pre=processor TODO .",
+            "rg --pre-glob '*.zip' TODO .",
+            "rg --pre-glob=*.zip TODO .",
+            "rg --hostname-bin=hostname-helper TODO .",
+            "ForEach-Object -MemberName Delete",
+        )
+        for command in rejected:
+            with self.subTest(command=command):
+                self.assertFalse(is_read_only_shell(command))
+
+        self.assertTrue(is_read_only_shell("rg TODO lemmings"))
+        self.assertTrue(is_read_only_shell("Get-Content data.json | Format-Table"))
 
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})

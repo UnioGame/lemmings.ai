@@ -18,10 +18,10 @@ else:
     from .core import as_list, candidate_head, path_matches, read_object, runtime_marker, validate_models
 
 READ_ONLY_COMMANDS = {
-    "rg", "grep", "find", "ls", "dir", "pwd", "type", "cat", "head", "tail",
+    "rg", "grep", "ls", "dir", "pwd", "type", "cat", "head", "tail",
     "get-content", "get-childitem", "get-location", "select-string", "select-object",
-    "where-object", "foreach-object", "sort-object", "group-object", "measure-object",
-    "convertfrom-json",
+    "where-object", "sort-object", "group-object", "measure-object", "convertfrom-json",
+    "format-table", "format-list", "format-wide", "format-custom",
 }
 READ_ONLY_GIT = {
     "status", "diff", "log", "show", "rev-parse", "merge-base", "ls-files", "describe",
@@ -30,6 +30,7 @@ GIT_LIST_FLAGS = {
     "--list", "--contains", "--no-contains", "--merged", "--no-merged", "--points-at",
     "--format", "--sort", "--column", "--ignore-case", "--all", "--remotes", "-a", "-r", "-v", "-vv",
 }
+RG_EXECUTION_OPTIONS = ("--pre", "--pre-glob", "--hostname-bin")
 SHELL_WRITE_PATTERN = re.compile(
     r"(?:^|\s)(?:>|>>|2>|&>|tee|set-content|add-content|out-file|remove-item|move-item|copy-item|new-item|rename-item)(?:\s|$)",
     re.I,
@@ -204,8 +205,16 @@ def is_read_only_shell(command: str) -> bool:
         if name == "git":
             if not _git_read_only(tokens):
                 return False
-        elif name not in {item.replace("-", "") for item in READ_ONLY_COMMANDS} and not name.startswith("format"):
-            return False
+        else:
+            if name not in {item.replace("-", "") for item in READ_ONLY_COMMANDS}:
+                return False
+            arguments = [token.strip('"\'').lower() for token in tokens[1:]]
+            if name == "rg" and any(
+                argument == option or argument.startswith(f"{option}=")
+                for argument in arguments
+                for option in RG_EXECUTION_OPTIONS
+            ):
+                return False
     return True
 
 
