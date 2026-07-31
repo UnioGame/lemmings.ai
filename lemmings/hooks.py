@@ -190,13 +190,61 @@ def _powershell_read_segments(command: str) -> list[str] | None:
     return segments or None
 
 
-def is_read_only_shell(command: str) -> bool:
-    segments = _powershell_read_segments(command)
+def _posix_read_segments(command: str) -> list[str] | None:
+    if not command.strip():
+        return None
+    state = "normal"
+    index = 0
+    while index < len(command):
+        character = command[index]
+        following = command[index + 1] if index + 1 < len(command) else ""
+        if state == "single":
+            if character == "'":
+                state = "normal"
+            index += 1
+            continue
+        if state == "double":
+            if character == '"':
+                state = "normal"
+            elif character in "`$":
+                return None
+            elif character == "\\":
+                if not following:
+                    return None
+                index += 1
+            index += 1
+            continue
+        if character == "'":
+            state = "single"
+        elif character == '"':
+            state = "double"
+        elif character == "\\":
+            if not following:
+                return None
+            index += 1
+        elif character in "`$<>&;|\r\n(){}":
+            return None
+        index += 1
+    return [command] if state == "normal" else None
+
+
+def _shell_dialect(dialect: str | None = None) -> str:
+    return dialect or ("windows" if os.name == "nt" else "posix")
+
+
+def is_read_only_shell(command: str, dialect: str | None = None) -> bool:
+    selected_dialect = _shell_dialect(dialect)
+    if selected_dialect == "windows":
+        segments = _powershell_read_segments(command)
+    elif selected_dialect == "posix":
+        segments = _posix_read_segments(command)
+    else:
+        return False
     if not segments:
         return False
     for segment in segments:
         try:
-            tokens = shlex.split(segment, posix=False)
+            tokens = shlex.split(segment, posix=selected_dialect == "posix")
         except ValueError:
             return False
         if not tokens:

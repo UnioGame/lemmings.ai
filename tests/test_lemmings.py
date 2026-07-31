@@ -451,6 +451,32 @@ class HookTests(unittest.TestCase):
         self.assertTrue(is_read_only_shell("rg TODO lemmings"))
         self.assertTrue(is_read_only_shell("Get-Content data.json | Format-Table"))
 
+    def test_posix_tokenization_normalizes_fragmented_rg_options(self):
+        bypasses = (
+            r"rg --pre\=processor TODO .",
+            r"rg --p\re processor TODO .",
+            "rg --pr'e' processor TODO .",
+        )
+        for command in bypasses:
+            with self.subTest(command=command):
+                self.assertFalse(is_read_only_shell(command, dialect="posix"))
+
+        self.assertTrue(is_read_only_shell("rg '(TODO|FIXME)$' lemmings", dialect="posix"))
+        self.assertTrue(is_read_only_shell(r"rg --p\re TODO .", dialect="windows"))
+
+    def test_posix_scanner_rejects_dynamic_or_control_syntax(self):
+        rejected = (
+            "rg $(generator) .",
+            "rg `generator` .",
+            "rg TODO >out",
+            "rg TODO & git status",
+            "rg TODO | head",
+            "rg 'unterminated",
+        )
+        for command in rejected:
+            with self.subTest(command=command):
+                self.assertFalse(is_read_only_shell(command, dialect="posix"))
+
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})
         allowed = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": value, "changedPaths": ["src/deep/module.py"]})
