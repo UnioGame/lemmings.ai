@@ -13,9 +13,9 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.core import as_list, candidate_head, paths_overlap, read_object, runtime_marker, validate_models
+    from lemmings.core import as_list, candidate_head, path_matches, read_object, runtime_marker, validate_models
 else:
-    from .core import as_list, candidate_head, paths_overlap, read_object, runtime_marker, validate_models
+    from .core import as_list, candidate_head, path_matches, read_object, runtime_marker, validate_models
 
 READ_ONLY_COMMANDS = {
     "rg", "grep", "find", "ls", "dir", "pwd", "type", "cat", "head", "tail",
@@ -46,16 +46,37 @@ def event_name(payload: Mapping[str, Any]) -> str:
 
 def requested_role(payload: Mapping[str, Any]) -> str | None:
     tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
-    explicit = payload.get("requestedRole")
+    candidates = [payload.get("requestedRole"), payload.get("agent_name"), payload.get("profile_name"), payload.get("task_name"), payload.get("agent_type")]
     if isinstance(tool_input, dict):
-        explicit = explicit or tool_input.get("role") or tool_input.get("agent_type") or tool_input.get("subagent_type")
-    if not explicit:
+        candidates.extend(tool_input.get(key) for key in ("role", "agent_type", "subagent_type", "task_name", "profile"))
+        message = str(tool_input.get("message") or "").lower()
+        match = re.search(r"(?:role\s*[:=]\s*|as\s+|lemmings[-_])(reviewer|explorer|validator|summarizer|orchestrator|complex-worker|worker)\b", message)
+        if match:
+            candidates.append(match.group(1))
+    for explicit in candidates:
+        if not explicit:
+            continue
+        value = str(explicit).lower().replace(" ", "-")
+        for role in ("reviewer", "explorer", "validator", "summarizer", "orchestrator", "complex-worker", "worker"):
+            token = role.replace("-", "[-_]")
+            if re.search(rf"(?:^|[-_]){token}(?:$|[-_])", value):
+                return role
+        if re.search(r"(?:^|[-_])review(?:$|[-_])", value):
+            return "reviewer"
+    return None
+
+
+def requested_model(payload: Mapping[str, Any]) -> str | None:
+    tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+    model = payload.get("requestedModel")
+    effort = payload.get("reasoning_effort")
+    if isinstance(tool_input, dict):
+        model = model or tool_input.get("model")
+        effort = effort or tool_input.get("reasoning_effort")
+    if not model:
         return None
-    value = str(explicit).lower()
-    for role in ("reviewer", "explorer", "validator", "orchestrator", "complex-worker", "worker"):
-        if role in value:
-            return role
-    return value
+    value = str(model)
+    return value if ":" in value or not effort else f"{value}:{effort}"
 
 
 def changed_paths(payload: Mapping[str, Any]) -> list[str]:
@@ -98,7 +119,7 @@ def _git_read_only(tokens: list[str]) -> bool:
 
 
 def is_read_only_shell(command: str) -> bool:
-    if not command.strip() or SHELL_WRITE_PATTERN.search(command):
+    if not command.strip() or SHELL_WRITE_PATTERN.search(command) or any(character in command for character in "{}"):
         return False
     segments = re.split(r"\s*(?:\||&&|;|\r?\n)\s*", command)
     for segment in segments:
@@ -140,11 +161,11 @@ def ownership_violation(task: Mapping[str, Any], paths: list[str], cwd: str | Pa
                 return f"absolute path is outside repository: {raw_path}"
         else:
             path = candidate.as_posix()
-        if any(paths_overlap(path, str(rule)) for rule in forbidden):
+        if any(path_matches(path, str(rule)) for rule in forbidden):
             return f"path is forbidden: {path}"
-        if any(paths_overlap(path, str(rule)) for rule in shared) and role not in {"orchestrator", "shared-contract-owner"}:
+        if any(path_matches(path, str(rule)) for rule in shared) and role not in {"orchestrator", "shared-contract-owner"}:
             return f"shared path requires its owner: {path}"
-        if owned and not any(paths_overlap(path, str(rule)) for rule in owned + shared):
+        if owned and not any(path_matches(path, str(rule)) for rule in owned + shared):
             return f"path is outside task ownership: {path}"
     return None
 
@@ -164,9 +185,9 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "Strict spawn requires an explicit writer, reviewer, explorer, or validator role")
                 role = str(task.get("role", "worker"))
             tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
-            requested = payload.get("requestedModel") or (tool_input.get("model") if isinstance(tool_input, dict) else None)
+            requested = requested_model(payload)
             assigned = (task.get("models") or {}).get("assigned")
-            writer = role not in {"reviewer", "explorer", "validator"}
+            writer = role not in {"reviewer", "explorer", "validator", "summarizer"}
             if role == "reviewer":
                 if task.get("state") != "Candidate":
                     return decision("block", "reviewer requires a Candidate task")
@@ -174,10 +195,12 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "reviewer must use gpt-5.6-sol:high")
                 head = candidate_head(task)
                 review_head = (tool_input.get("head") if isinstance(tool_input, dict) else None) or payload.get("reviewHead")
+                if not (task.get("models") or {}).get("actual") or not (task.get("execution") or {}).get("handoff"):
+                    return decision("block", "reviewer requires Candidate actual-model and embedded handoff evidence")
                 if not head or (review_head and str(review_head) != head):
                     return decision("block", "reviewer must inspect the current candidate/fix head")
                 return decision("allow", "reviewer dispatch invariants satisfied")
-            if role in {"explorer", "validator"}:
+            if role in {"explorer", "validator", "summarizer"}:
                 if task.get("state") not in {"Ready", "Active", "Candidate"}:
                     return decision("block", f"{role} requires Ready, Active, or Candidate task")
                 return decision("allow", f"bounded {role} dispatch accepted")
@@ -188,6 +211,8 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("block", model_result.findings[0].message)
             if requested and requested != assigned:
                 return decision("block", "writer spawn model differs from models.assigned")
+            if mode == "strict" and not as_list((task.get("ownership") or {}).get("owned")):
+                return decision("block", "Strict writer requires non-empty ownership.owned")
             isolated = mode == "strict" or payload.get("parallelWriters") or payload.get("dirtyPrimary")
             if writer and isolated:
                 declared = task.get("worktree")
@@ -201,8 +226,14 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "writer cwd differs from its declared worktree")
             return decision("allow", "dispatch invariants satisfied")
         if tool in {"apply_patch", "Bash", "exec_command", "shell_command"}:
+            identity_role = requested_role(payload)
+            if identity_role == "reviewer":
+                return decision("block", "reviewer identity is read-only")
             if tool != "apply_patch" and is_read_only_shell(shell_command(payload)):
                 return decision("allow", "known read-only shell command")
+            effective_role = identity_role or str(task.get("role", "worker"))
+            if mode == "strict" and effective_role not in {"reviewer", "explorer", "validator", "summarizer"} and not as_list((task.get("ownership") or {}).get("owned")):
+                return decision("block", "Strict writer cannot write without ownership.owned")
             paths = changed_paths(payload)
             violation = ownership_violation(task, paths, payload.get("_repoRoot") or payload.get("cwd"))
             if violation:
@@ -238,6 +269,21 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             return decision("warn", "focused context expansion budget is exhausted or unbounded")
         return decision("allow", "bounded context accepted", contextPacket=context)
     if event == "SubagentStop":
+        role = requested_role(payload)
+        if not role:
+            if mode == "strict":
+                return decision("warn", "Strict subagent stop has no safely inferred role; evidence was not accepted")
+            role = str(task.get("role", "worker"))
+        if role == "reviewer":
+            head = candidate_head(task)
+            evidence = payload.get("reviewEvidence") or payload.get("verdict")
+            if not evidence or (payload.get("reviewHead") and str(payload.get("reviewHead")) != str(head)):
+                return decision("block", "reviewer stop requires verdict/range evidence for current candidate head")
+            return decision("allow", "review evidence complete")
+        if role == "validator":
+            return decision("allow", "validation evidence complete") if payload.get("validationEvidence") else decision("block", "validator stop requires validation evidence")
+        if role in {"explorer", "summarizer"}:
+            return decision("allow", "bounded read-only output complete") if payload.get("boundedOutput") or payload.get("output") else decision("block", f"{role} stop requires bounded output")
         execution = task.get("execution") or {}
         if task.get("implementationTask", True) and not candidate_head(task):
             return decision("block", "implementation task requires candidate/fix commit")

@@ -9,8 +9,9 @@
   "ownership": { "owned": [], "shared": [], "forbidden": [] },
   "models": { "requested": null, "assigned": "gpt-5.6-sol:medium", "actual": null },
   "execution": { "handoff": null, "validationEvidence": [] },
+  "baseSha": null,
   "commits": { "candidate": null, "fix": [] },
   "validation": { "riskToTest": [], "debt": [] },
-  "review": { "status": "Pending", "cycle": 0, "head": null, "evidence": null },
+  "review": { "taskId": "TASK-17", "base": null, "status": "Pending", "cycle": 0, "head": null, "evidence": null },
   "close": { "mergeCommit": null, "integrationValidationPassed": false }
 }

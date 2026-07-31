@@ -37,7 +37,10 @@ def paths_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | No
         pass
     task = load_optional(repo, getattr(args, "task", None), (marker_data or {}).get("taskPath"))
     phase = load_optional(repo, getattr(args, "phase", None), (marker_data or {}).get("phasePath"))
-    review = load_optional(repo, getattr(args, "review", None), (marker_data or {}).get("reviewPath"))
+    review_reference = getattr(args, "review", None) or (marker_data or {}).get("reviewPath")
+    review = load_optional(repo, review_reference)
+    if review is not None and review_reference:
+        review["_evidencePath"] = str(review_reference)
     return repo, profile, task, phase, review, marker_data
 
 
@@ -162,7 +165,20 @@ def command_worktree(args: argparse.Namespace) -> int:
 def command_phase(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
     output = resolve_path(repo, args.output) or repo / "docs/tasks/phase.json"
-    baseline = args.baseline or git(repo, "rev-parse", "HEAD").stdout.strip()
+    if args.baseline:
+        baseline = args.baseline
+    else:
+        head = git(repo, "rev-parse", "--verify", "HEAD^{commit}")
+        if head.returncode:
+            emit({"ok": False, "error": "phase prepare requires an existing baseline commit"})
+            return 1
+        baseline = head.stdout.strip()
+    baseline_review = {"status": "Planned", "reviewerModel": None, "evidence": args.baseline_review_evidence}
+    evidence_path = resolve_path(repo, args.baseline_review_evidence)
+    if evidence_path and evidence_path.is_file():
+        evidence = read_object(evidence_path)
+        if evidence.get("status") == "Accepted" and evidence.get("reviewerModel") == "gpt-5.6-sol:high" and evidence.get("baselineSha") == baseline:
+            baseline_review = {"status": "Accepted", "reviewerModel": "gpt-5.6-sol:high", "evidence": args.baseline_review_evidence}
     phase = {
         "schemaVersion": SCHEMA_VERSION,
         "phaseId": args.phase_id,
@@ -170,6 +186,7 @@ def command_phase(args: argparse.Namespace) -> int:
         "integrationBranch": args.integration_branch,
         "contractsFrozen": True,
         "contracts": args.contract,
+        "baselineReview": baseline_review,
         "close": {"mergeCommits": [], "phaseValidation": []},
     }
     write_object(output, phase)
@@ -276,7 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     release = worktree_sub.add_parser("release"); release.add_argument("--task", required=True); release.add_argument("--path"); release.add_argument("--execute", action="store_true"); release.set_defaults(run=command_worktree)
     phase = sub.add_parser("phase", help="prepare a Strict phase")
     add_common(phase); phase_sub = phase.add_subparsers(dest="phase_command", required=True)
-    prepare = phase_sub.add_parser("prepare"); prepare.add_argument("--phase-id", required=True); prepare.add_argument("--integration-branch", required=True); prepare.add_argument("--baseline"); prepare.add_argument("--contract", action="append", default=[]); prepare.add_argument("--output"); prepare.set_defaults(run=command_phase)
+    prepare = phase_sub.add_parser("prepare"); prepare.add_argument("--phase-id", required=True); prepare.add_argument("--integration-branch", required=True); prepare.add_argument("--baseline"); prepare.add_argument("--contract", action="append", default=[]); prepare.add_argument("--baseline-review-evidence"); prepare.add_argument("--output"); prepare.set_defaults(run=command_phase)
     wave = sub.add_parser("wave", help="derive and validate a Strict dispatch wave")
     add_common(wave); wave_sub = wave.add_subparsers(dest="wave_command", required=True)
     plan = wave_sub.add_parser("plan"); plan.add_argument("--phase", required=True); plan.add_argument("--task", action="append", required=True); plan.set_defaults(run=command_wave)

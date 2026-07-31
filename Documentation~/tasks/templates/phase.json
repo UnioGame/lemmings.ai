@@ -5,6 +5,11 @@
   "integrationBranch": "codex/phase-1",
   "contractsFrozen": true,
   "contracts": [],
+  "baselineReview": {
+    "status": "Planned",
+    "reviewerModel": null,
+    "evidence": null
+  },
   "leases": [],
   "close": { "mergeCommits": [], "phaseValidation": [] }
 }

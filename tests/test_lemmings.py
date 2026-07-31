@@ -117,20 +117,80 @@ class IdentityAndCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
+            base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            (repo / "candidate.txt").write_text("candidate\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "candidate.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "candidate"], check=True, capture_output=True)
+            candidate = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
             current = task(
-                state="Accepted", previousState="Candidate", worktree=str(repo),
+                state="Accepted", previousState="Candidate", worktree=str(repo), baseSha=base,
                 models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]},
-                commits={"candidate": "candidate", "fix": []},
+                commits={"candidate": candidate, "fix": []},
                 execution={"handoff": "done", "validationEvidence": ["python -m unittest"]},
-                review={"status": "Accepted", "cycle": 0, "head": "candidate", "evidence": "review.json"},
+                review={"taskId": "TASK-1", "base": base, "status": "Accepted", "cycle": 0, "head": candidate, "evidence": "review.json"},
             )
-            phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "base", "integrationBranch": "main", "contractsFrozen": True}
-            review = {"schemaVersion": 1, "taskId": "TASK-1", "base": "base", "head": "candidate", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
+            phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": base, "integrationBranch": "main", "contractsFrozen": True, "baselineReview": {"status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "evidence": "baseline-review.json"}}
+            review = {"schemaVersion": 1, "taskId": "TASK-1", "base": base, "head": candidate, "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
             for name, value in (("profile.json", profile()), ("task.json", current), ("phase.json", phase), ("review.json", review)):
                 (repo / name).write_text(json.dumps(value), encoding="utf-8")
+            (repo / "baseline-review.json").write_text(json.dumps({"status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
             process = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", "review.json", "--all")
             self.assertEqual(0, process.returncode, process.stdout + process.stderr)
             self.assertTrue(json.loads(process.stdout)["ok"])
+            absolute = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", str(repo / "review.json"), "--all")
+            self.assertEqual(0, absolute.returncode, absolute.stdout + absolute.stderr)
+            missing_task = json.loads(json.dumps(current))
+            missing_task["review"]["evidence"] = "reviews/missing.json"
+            missing_review = {**review, "_evidencePath": "review.json"}
+            missing_result = check_repository(repo, profile(), missing_task, phase, missing_review, True)
+            self.assertIn("review.evidence_missing", {item.code for item in missing_result.findings})
+            missing_phase = json.loads(json.dumps(phase))
+            missing_phase["baselineReview"]["evidence"] = "reviews/missing-baseline.json"
+            phase_result = check_repository(repo, profile(), current, missing_phase, {**review, "_evidencePath": "review.json"}, True)
+            self.assertIn("phase.baseline_evidence_path", {item.code for item in phase_result.findings})
+
+    def test_candidate_on_sibling_task_branch_need_not_be_current_head(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
+            base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            subprocess.run(["git", "-C", str(repo), "checkout", "-b", "task"], check=True, capture_output=True)
+            (repo / "candidate.txt").write_text("candidate\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "candidate.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "candidate"], check=True, capture_output=True)
+            candidate = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            subprocess.run(["git", "-C", str(repo), "checkout", "master"], check=True, capture_output=True)
+            value = task(state="Candidate", previousState="Active", baseSha=base, commits={"candidate": candidate, "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+            result = check_repository(repo, profile("standard"), value)
+            self.assertTrue(result.ok, result.as_dict())
+
+    def test_phase_prepare_does_not_claim_unreviewed_baseline(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
+            baseline = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            unreviewed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P1", "--integration-branch", "main", "--output", "phase.json")
+            self.assertEqual("Planned", json.loads(unreviewed.stdout)["phase"]["baselineReview"]["status"])
+            evidence = repo / "reviews" / "base.json"
+            evidence.parent.mkdir()
+            evidence.write_text(json.dumps({"status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
+            reviewed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P2", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "reviewed.json")
+            self.assertEqual("Accepted", json.loads(reviewed.stdout)["phase"]["baselineReview"]["status"])
 
     def test_idle_strict_profile_check_all_is_valid(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -201,6 +261,8 @@ class ContractTests(unittest.TestCase):
         codes = {finding.code for finding in result.findings}
         self.assertIn("commit.candidate", codes)
         self.assertIn("validation.evidence", codes)
+        self.assertIn("model.actual_required", codes)
+        self.assertIn("execution.handoff", codes)
 
     def test_user_pin_has_priority(self):
         value = task(models={"requested": "gpt-custom:high", "assigned": DEFAULT_MODELS["complex-worker"], "actual": None})
@@ -266,6 +328,10 @@ class ContractTests(unittest.TestCase):
         value = task(mode="strict", worktree="C:/wt/one", risks=["externalResources"])
         self.assertIn("lease.required", {f.code for f in validate_wave([value], phase).findings})
 
+    def test_ready_strict_writer_requires_owned_paths(self):
+        value = task(mode="strict", ownership={"owned": [], "shared": [], "forbidden": []})
+        self.assertIn("ownership.required", {f.code for f in validate_task(value, profile()).findings})
+
 
 class HookTests(unittest.TestCase):
     def test_read_only_shell_is_allowed(self):
@@ -286,6 +352,14 @@ class HookTests(unittest.TestCase):
         command = "Get-Content data.json | ConvertFrom-Json | Where-Object active | ForEach-Object name | Sort-Object | Group-Object | Measure-Object | Format-Table"
         self.assertTrue(is_read_only_shell(command))
         self.assertFalse(is_read_only_shell("Get-Content data.json | ForEach-Object { Remove-Item $_ }"))
+        self.assertFalse(is_read_only_shell("ForEach-Object { git reset --hard }"))
+
+    def test_exact_ownership_glob_matches_only_expected_files(self):
+        value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})
+        allowed = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": value, "changedPaths": ["src/deep/module.py"]})
+        rejected = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": value, "changedPaths": ["src/secret.json"]})
+        self.assertEqual("allow", allowed["decision"])
+        self.assertEqual("block", rejected["decision"])
 
     def test_unknown_shell_warns_standard_and_blocks_strict(self):
         payload = {"event": "PreToolUse", "toolName": "shell_command", "task": task(), "toolInput": {"command": "custom-tool run"}}
@@ -306,19 +380,31 @@ class HookTests(unittest.TestCase):
     def test_writer_and_reviewer_dispatch_are_role_aware(self):
         worker = task(role="worker", models={"requested": None, "assigned": "worker-model:medium", "actual": None})
         configured = profile(); configured["models"]["worker"] = "worker-model:medium"
-        writer = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "profile": configured, "toolInput": {"role": "worker", "model": "worker-model:medium"}})
+        writer = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "profile": configured, "toolInput": {"task_name": "lemmings_worker", "message": "Implement the Ready task.", "model": "worker-model", "reasoning_effort": "medium"}})
         self.assertEqual("allow", writer["decision"])
-        candidate = task(state="Candidate", previousState="Active", commits={"candidate": "abc", "fix": []})
-        reviewer = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"agent_type": "lemmings-reviewer", "model": "gpt-5.6-sol:high", "head": "abc"}})
+        candidate = task(state="Candidate", previousState="Active", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+        reviewer = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "high", "head": "abc"}})
         self.assertEqual("allow", reviewer["decision"])
-        wrong_model = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"role": "reviewer", "model": "gpt-5.6-sol:medium", "head": "abc"}})
+        wrong_model = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "medium", "head": "abc"}})
         self.assertEqual("block", wrong_model["decision"])
-        wrong_state = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "toolInput": {"role": "reviewer", "model": "gpt-5.6-sol:high"}})
+        wrong_state = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review current candidate.", "model": "gpt-5.6-sol", "reasoning_effort": "high"}})
         self.assertEqual("block", wrong_state["decision"])
+
+    def test_actual_shaped_summarizer_is_bounded_read_only_role(self):
+        value = task(state="Active", previousState="Ready")
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": value, "toolInput": {"task_name": "lemmings_summarizer", "message": "Summarize supplied evidence.", "model": "gpt-5.6-terra", "reasoning_effort": "low"}})
+        self.assertEqual("allow", output["decision"])
 
     def test_strict_spawn_requires_explicit_role(self):
         output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": task(), "toolInput": {"model": DEFAULT_MODELS["complex-worker"]}})
         self.assertEqual("block", output["decision"])
+
+    def test_strict_writer_spawn_and_patch_require_owned_paths(self):
+        value = task(mode="strict", ownership={"owned": [], "shared": [], "forbidden": []})
+        spawn = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_complex-worker", "message": "Implement.", "model": "gpt-5.6-sol", "reasoning_effort": "medium"}})
+        write = handle({"event": "PreToolUse", "toolName": "apply_patch", "mode": "strict", "task": value, "changedPaths": ["lemmings/core.py"]})
+        self.assertEqual("block", spawn["decision"])
+        self.assertEqual("block", write["decision"])
 
     def test_ownership_and_reviewer_are_blocked(self):
         outside = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": task(), "changedPaths": ["README.md"]})
@@ -326,6 +412,8 @@ class HookTests(unittest.TestCase):
         review_task = task(role="reviewer")
         reviewer = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": review_task, "changedPaths": ["lemmings/core.py"]})
         self.assertEqual("block", reviewer["decision"])
+        identified = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": task(), "task_name": "lemmings_reviewer", "changedPaths": ["lemmings/core.py"]})
+        self.assertEqual("block", identified["decision"])
 
     def test_absolute_owned_path_is_repo_relative_and_external_path_is_blocked(self):
         allowed = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": task(), "changedPaths": [str(ROOT / "lemmings" / "core.py")]})
@@ -361,6 +449,14 @@ class HookTests(unittest.TestCase):
         value = task(state="Candidate", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]})
         output = handle({"event": "SubagentStop", "task": value})
         self.assertEqual("block", output["decision"])
+
+    def test_subagent_stop_is_role_aware_for_read_only_roles(self):
+        candidate = task(state="Candidate", previousState="Active", commits={"candidate": "abc", "fix": []})
+        reviewer = handle({"event": "SubagentStop", "task": candidate, "task_name": "lemmings_reviewer", "reviewHead": "abc", "verdict": "Accepted"})
+        validator = handle({"event": "SubagentStop", "task": candidate, "task_name": "lemmings_validator", "validationEvidence": ["tests pass"]})
+        explorer = handle({"event": "SubagentStop", "task": candidate, "task_name": "lemmings_explorer", "boundedOutput": True})
+        summarizer = handle({"event": "SubagentStop", "task": candidate, "task_name": "lemmings_summarizer", "output": "summary"})
+        self.assertTrue(all(item["decision"] == "allow" for item in (reviewer, validator, explorer, summarizer)))
 
     def test_subagent_start_derives_bounded_nonempty_context(self):
         value = task(secretLogs=["must-not-leak"])

@@ -121,6 +121,36 @@ def paths_overlap(left: str, right: str) -> bool:
     return not a or not b or a == b or a.startswith(b + "/") or b.startswith(a + "/")
 
 
+def path_matches(path: str, rule: str) -> bool:
+    value = normalize_path(path)
+    pattern = normalize_path(rule)
+    if not value or not pattern:
+        return False
+    if not any(character in pattern for character in "*?"):
+        return value == pattern or value.startswith(pattern.rstrip("/") + "/")
+    expression: list[str] = ["^"]
+    index = 0
+    while index < len(pattern):
+        character = pattern[index]
+        if character == "*":
+            if index + 1 < len(pattern) and pattern[index + 1] == "*":
+                index += 2
+                if index < len(pattern) and pattern[index] == "/":
+                    expression.append("(?:.*/)?")
+                    index += 1
+                else:
+                    expression.append(".*")
+                continue
+            expression.append("[^/]*")
+        elif character == "?":
+            expression.append("[^/]")
+        else:
+            expression.append(re.escape(character))
+        index += 1
+    expression.append("$")
+    return re.fullmatch("".join(expression), value) is not None
+
+
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
@@ -279,6 +309,11 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("state.transition", f"illegal transition: {previous} -> {state}")
     result.extend(validate_models(task, profile))
     result.extend(validate_debt(task))
+    mode = detect_mode(profile, task)
+    role = str(task.get("role", "worker"))
+    ownership = task.get("ownership") or {}
+    if mode == "strict" and role not in {"reviewer", "explorer", "validator"} and state == "Ready" and not as_list(ownership.get("owned")):
+        result.error("ownership.required", "Ready Strict writer requires non-empty ownership.owned")
     review = task.get("review") or {}
     cycle = review.get("cycle", 0) if isinstance(review, dict) else -1
     if not isinstance(cycle, int) or isinstance(cycle, bool) or cycle < 0 or cycle > 2:
@@ -286,6 +321,8 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     if cycle >= 2 and review.get("status") == "ChangesRequested" and state != "Replan Required":
         result.error("review.replan", "second failed review requires Replan Required")
     if state in {"Candidate", "Accepted", "Integrated"}:
+        if not task.get("baseSha"):
+            result.error("commit.base_required", f"{state} requires baseSha")
         head = candidate_head(task)
         if not head:
             result.error("commit.candidate", f"{state} requires a candidate or fix commit")
@@ -293,6 +330,10 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         debt = (task.get("validation") or {}).get("debt")
         if not evidence and not debt:
             result.error("validation.evidence", "candidate requires validation evidence or owned debt")
+        if not (task.get("models") or {}).get("actual"):
+            result.error("model.actual_required", f"{state} requires models.actual")
+        if not (task.get("execution") or {}).get("handoff"):
+            result.error("execution.handoff", f"{state} requires embedded execution.handoff")
     if state in {"Accepted", "Integrated"}:
         if review.get("status") != "Accepted":
             result.error("review.accepted", f"{state} requires an Accepted review")
@@ -316,10 +357,17 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
             result.error("phase.missing", f"missing phase field: {name}")
     if phase.get("contractsFrozen") is not True:
         result.error("phase.contracts", "Strict phase requires frozen contracts")
+    baseline_review = phase.get("baselineReview") or {}
+    if baseline_review.get("status") != "Accepted":
+        result.error("phase.baseline_review", "Strict phase requires an Accepted baselineReview")
+    if baseline_review.get("reviewerModel") != DEFAULT_MODELS["reviewer"]:
+        result.error("phase.baseline_reviewer", f"baseline review must use {DEFAULT_MODELS['reviewer']}")
+    if not baseline_review.get("evidence"):
+        result.error("phase.baseline_evidence", "accepted baseline review requires immutable evidence")
     return result
 
 
-def validate_review(review: Mapping[str, Any], task: Mapping[str, Any]) -> ValidationResult:
+def validate_review(review: Mapping[str, Any], task: Mapping[str, Any], phase: Mapping[str, Any] | None = None) -> ValidationResult:
     result = ValidationResult()
     if review.get("schemaVersion") != SCHEMA_VERSION:
         result.error("review.schema", "schemaVersion must be 1")
@@ -331,6 +379,82 @@ def validate_review(review: Mapping[str, Any], task: Mapping[str, Any]) -> Valid
         result.error("review.stale", "review head must equal latest candidate/fix head")
     if review.get("reviewerModel") != DEFAULT_MODELS["reviewer"]:
         result.error("review.model", f"reviewer must use {DEFAULT_MODELS['reviewer']}")
+    embedded = task.get("review") or {}
+    for field_name in ("taskId", "base", "head", "status"):
+        if embedded.get(field_name) != review.get(field_name):
+            result.error("review.binding", f"task review {field_name} differs from immutable evidence")
+    if not embedded.get("evidence"):
+        result.error("review.evidence_path", "task review must reference immutable review evidence")
+    if phase and review.get("base") != phase.get("baselineSha"):
+        result.error("review.base", "review base must equal phase baselineSha")
+    if task.get("state") in {"Accepted", "Integrated"} and review.get("status") != "Accepted":
+        result.error("review.verdict", "Accepted and Integrated tasks require Accepted immutable review")
+    return result
+
+
+def validate_repository_commits(repo: Path, task: Mapping[str, Any], phase: Mapping[str, Any] | None = None) -> ValidationResult:
+    result = ValidationResult()
+    commits = task.get("commits") or {}
+    values = [commits.get("candidate"), *as_list(commits.get("fix"))] if isinstance(commits, dict) else []
+    resolved: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        process = git(repo, "rev-parse", "--verify", f"{value}^{{commit}}")
+        if process.returncode:
+            result.error("commit.missing", f"commit does not resolve: {value}")
+        else:
+            resolved.append(process.stdout.strip())
+    for parent, child in zip(resolved, resolved[1:]):
+        if git(repo, "merge-base", "--is-ancestor", parent, child).returncode:
+            result.error("commit.sequence", "each fix commit must descend from the preceding candidate/fix commit")
+    head = candidate_head(task)
+    baseline = task.get("baseSha") or (phase or {}).get("baselineSha")
+    if phase and task.get("baseSha") and task.get("baseSha") != phase.get("baselineSha"):
+        result.error("commit.phase_base", "Strict task baseSha must equal phase baselineSha")
+    if baseline and head:
+        baseline_process = git(repo, "rev-parse", "--verify", f"{baseline}^{{commit}}")
+        if baseline_process.returncode:
+            result.error("commit.baseline_missing", f"declared base commit does not resolve: {baseline}")
+        elif git(repo, "merge-base", "--is-ancestor", str(baseline), str(head)).returncode:
+            result.error("commit.lineage", "candidate head must descend from phase baseline")
+    return result
+
+
+def canonical_evidence_path(repo: Path, value: Any) -> tuple[str | None, Path | None]:
+    if not value:
+        return None, None
+    path = Path(str(value))
+    target = path.resolve() if path.is_absolute() else (repo / path).resolve()
+    try:
+        relative = target.relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return None, target
+    return normalize_path(relative), target
+
+
+def validate_repository_evidence(
+    repo: Path,
+    task: Mapping[str, Any],
+    phase: Mapping[str, Any] | None,
+    review: Mapping[str, Any] | None,
+) -> ValidationResult:
+    result = ValidationResult()
+    if phase:
+        value = (phase.get("baselineReview") or {}).get("evidence")
+        relative, target = canonical_evidence_path(repo, value)
+        if not relative or not target or not target.is_file():
+            result.error("phase.baseline_evidence_path", "baseline review evidence must be an existing file inside the repository")
+    if review:
+        embedded = (task.get("review") or {}).get("evidence")
+        embedded_relative, embedded_target = canonical_evidence_path(repo, embedded)
+        actual_relative, actual_target = canonical_evidence_path(repo, review.get("_evidencePath"))
+        if not embedded_relative or not embedded_target or not embedded_target.is_file():
+            result.error("review.evidence_missing", "task review evidence must be an existing file inside the repository")
+        if not actual_relative or not actual_target or not actual_target.is_file():
+            result.error("review.evidence_missing", "immutable review artifact must exist inside the repository")
+        elif embedded_relative != actual_relative:
+            result.error("review.evidence_path", "task review evidence path differs from the validated review artifact")
     return result
 
 
@@ -400,11 +524,14 @@ def check_repository(
         result.data["idle"] = True
         if phase:
             result.extend(validate_phase(phase))
+            result.extend(validate_repository_evidence(repo, {}, phase, None))
         if review:
             result.error("review.task_required", "review evidence cannot be validated without its task packet")
         return result
     result.data["idle"] = False
     result.extend(validate_task(task, profile))
+    if task.get("state") in {"Candidate", "Accepted", "Integrated"}:
+        result.extend(validate_repository_commits(repo, task, phase))
     if mode == "strict" or check_all:
         if not phase:
             result.error("phase.required", "Strict lifecycle requires a phase artifact")
@@ -419,7 +546,9 @@ def check_repository(
             elif not info["registered"]:
                 result.error("worktree.unregistered", f"declared path is not an exact Git worktree: {worktree_value}")
     if review:
-        result.extend(validate_review(review, task))
+        result.extend(validate_review(review, task, phase))
     elif task.get("state") in {"Accepted", "Integrated"}:
         result.error("review.required", "Accepted and Integrated tasks require immutable review evidence")
+    if phase or review:
+        result.extend(validate_repository_evidence(repo, task, phase, review))
     return result

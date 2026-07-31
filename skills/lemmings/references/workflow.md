@@ -6,6 +6,8 @@ Simple uses no artifacts. Standard requires a task packet, candidate/fix commits
 
 Strict activates for parallel writers, shared contracts, Unity serialized assets, submodules, code generation, or external resources.
 
+Before a Strict wave, require `baselineReview.status: Accepted`, reviewer model `gpt-5.6-sol:high`, and immutable evidence. Preparing a phase must not claim acceptance without supplied review evidence.
+
 Require independent plan review only for a Strict phase, a frozen public contract, or an explicit user request.
 
 ## Lifecycle
