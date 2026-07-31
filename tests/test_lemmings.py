@@ -62,9 +62,9 @@ class IdentityAndCliTests(unittest.TestCase):
         plugin = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual("com.unigame.lemmings", unity["name"])
         self.assertEqual("Lemmings", unity["displayName"])
-        self.assertEqual("https://github.com/UnioGame/lemmings.git", unity["repository"]["url"])
+        self.assertEqual("https://github.com/UnioGame/unigame.ai.tools.git", unity["repository"]["url"])
         self.assertEqual("lemmings", plugin["name"])
-        self.assertEqual("https://github.com/UnioGame/lemmings", plugin["repository"])
+        self.assertEqual("https://github.com/UnioGame/unigame.ai.tools", plugin["repository"])
 
     def test_autoqa_marketplace_installs_single_lemmings_plugin_hook_source(self):
         integration = ROOT / "assets" / "repo-integration" / "auto.qa"
