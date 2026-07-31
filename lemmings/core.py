@@ -460,6 +460,7 @@ def validate_repository_evidence(
                 result.error("phase.baseline_evidence_parse", f"invalid baseline review evidence: {error}")
             else:
                 expected = {
+                    "schemaVersion": SCHEMA_VERSION,
                     "phaseId": phase.get("phaseId"),
                     "baselineSha": phase.get("baselineSha"),
                     "status": "Accepted",

@@ -139,7 +139,7 @@ class IdentityAndCliTests(unittest.TestCase):
             review = {"schemaVersion": 1, "taskId": "TASK-1", "base": base, "head": candidate, "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
             for name, value in (("profile.json", profile()), ("task.json", current), ("phase.json", phase), ("review.json", review)):
                 (repo / name).write_text(json.dumps(value), encoding="utf-8")
-            (repo / "baseline-review.json").write_text(json.dumps({"phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
+            (repo / "baseline-review.json").write_text(json.dumps({"schemaVersion": 1, "phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
             process = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", "review.json", "--all")
             self.assertEqual(0, process.returncode, process.stdout + process.stderr)
             self.assertTrue(json.loads(process.stdout)["ok"])
@@ -158,6 +158,10 @@ class IdentityAndCliTests(unittest.TestCase):
             wrong_phase["phaseId"] = "P2"
             binding_result = check_repository(repo, profile(), current, wrong_phase, {**review, "_evidencePath": "review.json"}, True)
             self.assertIn("phase.baseline_binding", {item.code for item in binding_result.findings})
+            (repo / "baseline-review.json").write_text(json.dumps({"schemaVersion": 999, "phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
+            schema_result = check_repository(repo, profile(), current, phase, {**review, "_evidencePath": "review.json"}, True)
+            self.assertIn("phase.baseline_binding", {item.code for item in schema_result.findings})
+            (repo / "baseline-review.json").write_text(json.dumps({"schemaVersion": 1, "phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
             outside_task = json.loads(json.dumps(current))
             outside_task["ownership"]["owned"] = ["src/**"]
             outside_result = check_repository(repo, profile(), outside_task, phase, {**review, "_evidencePath": "review.json"}, True)
@@ -205,9 +209,12 @@ class IdentityAndCliTests(unittest.TestCase):
             self.assertEqual("Planned", json.loads(unreviewed.stdout)["phase"]["baselineReview"]["status"])
             evidence = repo / "reviews" / "base.json"
             evidence.parent.mkdir()
-            evidence.write_text(json.dumps({"phaseId": "P2", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
+            evidence.write_text(json.dumps({"schemaVersion": 1, "phaseId": "P2", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
             reviewed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P2", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "reviewed.json")
             self.assertEqual("Accepted", json.loads(reviewed.stdout)["phase"]["baselineReview"]["status"])
+            evidence.write_text(json.dumps({"schemaVersion": 999, "phaseId": "P2", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
+            wrong_schema = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P2", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "wrong-schema.json")
+            self.assertEqual("Planned", json.loads(wrong_schema.stdout)["phase"]["baselineReview"]["status"])
             evidence.write_text("{", encoding="utf-8")
             malformed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P3", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "malformed.json")
             self.assertEqual("Planned", json.loads(malformed.stdout)["phase"]["baselineReview"]["status"])
@@ -389,6 +396,8 @@ class HookTests(unittest.TestCase):
     def test_dynamic_powershell_evaluation_is_not_read_only(self):
         self.assertFalse(is_read_only_shell("Invoke-Expression 'Get-Content data.json'"))
         self.assertFalse(is_read_only_shell("[scriptblock]::Create('Get-Content data.json')"))
+        self.assertFalse(is_read_only_shell("Get-Content (git reset --hard)"))
+        self.assertFalse(is_read_only_shell("[System.Management.Automation.ScriptBlock]::Create('git reset --hard')"))
 
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})

@@ -180,7 +180,7 @@ def command_phase(args: argparse.Namespace) -> int:
             evidence = read_object(evidence_path)
         except (OSError, ValueError, json.JSONDecodeError):
             evidence = {}
-        if evidence.get("phaseId") == args.phase_id and evidence.get("status") == "Accepted" and evidence.get("reviewerModel") == "gpt-5.6-sol:high" and evidence.get("baselineSha") == baseline:
+        if evidence.get("schemaVersion") == SCHEMA_VERSION and evidence.get("phaseId") == args.phase_id and evidence.get("status") == "Accepted" and evidence.get("reviewerModel") == "gpt-5.6-sol:high" and evidence.get("baselineSha") == baseline:
             baseline_review = {"status": "Accepted", "reviewerModel": "gpt-5.6-sol:high", "evidence": args.baseline_review_evidence}
     phase = {
         "schemaVersion": SCHEMA_VERSION,

@@ -123,7 +123,7 @@ def _git_read_only(tokens: list[str]) -> bool:
 
 
 def is_read_only_shell(command: str) -> bool:
-    if not command.strip() or SHELL_WRITE_PATTERN.search(command) or SHELL_EVALUATION_PATTERN.search(command) or any(character in command for character in "{}"):
+    if not command.strip() or SHELL_WRITE_PATTERN.search(command) or SHELL_EVALUATION_PATTERN.search(command) or any(character in command for character in "{}()"):
         return False
     segments = re.split(r"\s*(?:\||&&|;|\r?\n)\s*", command)
     for segment in segments:
