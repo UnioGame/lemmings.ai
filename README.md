@@ -1,50 +1,16 @@
-# AI Tools
+# Lemmings
 
-UPM-compatible, documentation-only package with a reusable Codex orchestration skill, phase/wave delivery artifacts, and validation contracts.
+Lemmings is a Unity package and Codex plugin for proportional repository orchestration. The Unity package identifier is `com.unigame.lemmings`; everywhere else the product name is Lemmings.
 
-## Included
+## Install and run
 
-- `skills/orchestrate-agent-tasks` — canonical skill: baseline, wave dispatch, candidate commits, Sol review, and integration gates.
-- `Documentation~/guides/subagent-task-orchestration.md` — полный русский delivery-пайплайн.
-- `Documentation~/tasks/templates/` — phase, dispatch, task, handoff, review, integration, scorecard и profile contracts.
-- `Documentation~/tasks/ROADMAP.md` — delivery-приоритеты ORCH-005…012.
-
-## Quick Start
-
-From this repository, invoke:
+Install the Python package in editable mode to expose the single CLI executable:
 
 ```text
-$orchestrate-agent-tasks auto
+python -m pip install -e .
+lemmings --help
 ```
 
-Thread controls:
+Use `$lemmings` from `skills/lemmings/SKILL.md`. A consumer stores its profile at `.codex/lemmings.json`; runtime activation is repository-scoped under the Git common directory at `lemmings/active.json`.
 
-```text
-$orchestrate-agent-tasks on
-$orchestrate-agent-tasks off
-$orchestrate-agent-tasks auto
-$orchestrate-agent-tasks status
-```
-
-Pin subagent models:
-
-```text
-$orchestrate-agent-tasks models set explorer=gpt-5.6-terra:low workers=gpt-5.6-sol:medium
-```
-
-Validate tracked lifecycle artifacts together:
-
-```text
-python scripts/orchestration_cli.py status --repo <repo> --profile <profile.json> \
-  --phase <phase> --task <task> --manifest <manifest> --handoff <handoff> \
-  --review <review> --integration-evidence <integration-evidence> --json
-```
-
-Safe allocation requires both the consumer profile and accepted phase baseline:
-
-```text
-python scripts/orchestration_cli.py worktree allocate --repo <repo> <path> <branch> \
-  --profile <profile.json> --phase <phase> --create-branch
-```
-
-The package contains no Unity Runtime or Editor assemblies and does not need to be added to a Unity project's `Packages/manifest.json`.
+The normal completion check is `lemmings check`. Use `lemmings check --all` for the full Strict lifecycle. See [the guide](Documentation~/guides/lemmings.md) for contracts and examples.

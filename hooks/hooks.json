@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent|spawn_agent|apply_patch|Bash|exec_command|shell_command",
+        "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/lemmings/hooks.py\"", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\lemmings\\hooks.py\"" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Bash|exec_command|shell_command",
+        "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/lemmings/hooks.py\"", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\lemmings\\hooks.py\"" }]
+      }
+    ],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/lemmings/hooks.py\"", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\lemmings\\hooks.py\"" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/lemmings/hooks.py\"", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\lemmings\\hooks.py\"" }] }]
+  }
+}

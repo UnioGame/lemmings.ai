@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lemmings"
+  short_description: "Coordinate proportional repository delivery"
+  default_prompt: "Use $lemmings to choose the lightest safe mode and deliver this repository task."

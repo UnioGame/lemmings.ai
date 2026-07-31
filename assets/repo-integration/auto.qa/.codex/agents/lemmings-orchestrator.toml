@@ -1,0 +1,6 @@
+name = "lemmings-orchestrator"
+description = "Sol High orchestrator for Strict phases and integration."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+developer_instructions = "Prepare contracts, derive dispatch, enforce ownership and model pins, coordinate immutable review, integrate Accepted tasks, run lemmings check, and record close evidence."

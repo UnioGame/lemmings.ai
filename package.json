@@ -1,22 +1,21 @@
 {
-  "name": "com.unigame.ai.tools",
-  "version": "0.2.0",
-  "displayName": "UniGame AI Tools",
-  "description": "Repository-scoped AI agent skills, orchestration guides, and reusable task templates.",
+  "name": "com.unigame.lemmings",
+  "version": "1.0.0",
+  "displayName": "Lemmings",
+  "description": "Proportional repository orchestration for Codex agents.",
   "unity": "6000.0",
   "author": {
-    "name": "UnioGame",
-    "url": "https://github.com/UnioGame"
+    "name": "Lemmings Maintainers"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/UnioGame/unigame.ai.tools.git"
+    "url": "https://github.com/lemmings/lemmings.git"
   },
   "keywords": [
     "ai",
     "agents",
     "codex",
     "orchestration",
-    "tools"
+    "lemmings"
   ]
 }

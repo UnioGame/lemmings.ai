@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "phaseId": "PHASE-1",
+  "baselineSha": "<sha>",
+  "integrationBranch": "codex/phase-1",
+  "contractsFrozen": true,
+  "contracts": [],
+  "leases": [],
+  "close": { "mergeCommits": [], "phaseValidation": [] }
+}

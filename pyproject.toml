@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lemmings"
+version = "1.0.0"
+description = "Repository orchestration with proportional lifecycle contracts"
+requires-python = ">=3.10"
+
+[project.scripts]
+lemmings = "lemmings.cli:main"
+
+[tool.setuptools]
+packages = ["lemmings"]
