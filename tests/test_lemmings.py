@@ -96,14 +96,19 @@ class IdentityAndCliTests(unittest.TestCase):
             config = repo / ".codex" / "lemmings.json"
             config.parent.mkdir()
             config.write_text(json.dumps(profile()), encoding="utf-8")
-            on = run_cli("runtime", "--repo", str(repo), "on")
+            on = run_cli("on", "--repo", str(repo))
             self.assertEqual(0, on.returncode, on.stdout + on.stderr)
             marker = runtime_marker(repo)
             self.assertTrue(marker.is_file())
             self.assertEqual("lemmings", marker.parent.name)
-            off = run_cli("runtime", "--repo", str(repo), "off")
+            status = run_cli("status", "--repo", str(repo))
+            self.assertEqual(0, status.returncode, status.stdout + status.stderr)
+            self.assertTrue(json.loads(status.stdout)["data"]["active"])
+            off = run_cli("off", "--repo", str(repo))
             self.assertEqual(0, off.returncode)
             self.assertFalse(marker.exists())
+            removed = run_cli("runtime", "status")
+            self.assertNotEqual(0, removed.returncode)
 
     def test_scorecard_is_conditional(self):
         with tempfile.TemporaryDirectory() as temp:

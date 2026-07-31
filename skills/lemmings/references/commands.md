@@ -18,12 +18,12 @@ The skill commands control Lemmings usage in the current task/thread:
 - `auto` is the default and selects Simple, Standard, or Strict proportionally from current risk.
 - `status` reports the effective thread and repository mode, including whether repo runtime is active.
 
-These thread-scoped commands are not CLI aliases. Persist repository runtime state only with `lemmings runtime on|off|status`; `auto` remains skill-level mode selection.
+The `$` distinguishes task-scoped skill commands from the executable. Persist repository hook state with `lemmings on|off`; inspect it with the unified `lemmings status`. The `auto` command remains skill-only.
 
 Use the CLI where repository persistence or deterministic validation is required:
 
 ```text
-lemmings runtime on|off|status
+lemmings on|off
 lemmings models set|task|status|reset
 lemmings check [--all]
 lemmings status

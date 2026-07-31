@@ -259,11 +259,13 @@ Common commands:
 lemmings check
 lemmings check --all
 lemmings status
-lemmings runtime on
-lemmings runtime off
+lemmings on
+lemmings off
 lemmings worktree inspect
 lemmings models status
 ```
+
+`lemmings on` and `lemmings off` persist hook enforcement for the repository. The `$lemmings on` and `$lemmings off` skill commands affect only the current task.
 
 The skill works normally when the CLI is not installed. In that setup, use Git and repository test commands directly instead of `lemmings check` and worktree helpers.
 

@@ -79,10 +79,10 @@ def command_status(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
-def command_runtime(args: argparse.Namespace) -> int:
+def command_activation(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
     marker = runtime_marker(repo)
-    if args.runtime_command == "on":
+    if args.command == "on":
         profile = load_optional(repo, args.profile, ".codex/lemmings.json") or {"schemaVersion": 1, "mode": "auto"}
         task = load_optional(repo, args.task)
         phase = load_optional(repo, args.phase)
@@ -99,7 +99,7 @@ def command_runtime(args: argparse.Namespace) -> int:
         write_object(marker, value)
         emit({"ok": True, "active": True, "marker": str(marker), "mode": value["mode"]})
         return 0
-    if args.runtime_command == "off":
+    if args.command == "off":
         existed = marker.is_file()
         if existed:
             marker.unlink()
@@ -107,8 +107,7 @@ def command_runtime(args: argparse.Namespace) -> int:
             marker.parent.rmdir()
         emit({"ok": True, "active": False, "removed": existed, "marker": str(marker)})
         return 0
-    emit({"ok": True, "active": marker.is_file(), "marker": str(marker), "state": read_object(marker) if marker.is_file() else None})
-    return 0
+    raise ValueError(f"unsupported activation command: {args.command}")
 
 
 def _worktree_root(repo: Path, profile: dict[str, Any] | None) -> Path:
@@ -282,13 +281,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(check, True); check.add_argument("--all", action="store_true"); check.set_defaults(run=command_check)
     status = sub.add_parser("status", help="show runtime and contract status")
     add_common(status, True); status.set_defaults(run=command_status)
-    runtime = sub.add_parser("runtime", help="manage repo-scoped runtime")
-    add_common(runtime); runtime_sub = runtime.add_subparsers(dest="runtime_command", required=True)
-    for name in ("on", "off", "status"):
-        item = runtime_sub.add_parser(name)
-        if name == "on":
-            item.add_argument("--task"); item.add_argument("--phase"); item.add_argument("--review")
-        item.set_defaults(run=command_runtime)
+    on = sub.add_parser("on", help="enable repo-scoped hook enforcement")
+    add_common(on); on.add_argument("--task"); on.add_argument("--phase"); on.add_argument("--review"); on.set_defaults(run=command_activation)
+    off = sub.add_parser("off", help="disable repo-scoped hook enforcement")
+    add_common(off); off.set_defaults(run=command_activation)
     worktree = sub.add_parser("worktree", help="manage isolated writer worktrees")
     add_common(worktree); worktree_sub = worktree.add_subparsers(dest="worktree_command", required=True)
     allocate = worktree_sub.add_parser("allocate"); allocate.add_argument("--task", required=True); allocate.add_argument("--branch", required=True); allocate.add_argument("--base"); allocate.add_argument("--path"); allocate.set_defaults(run=command_worktree)
