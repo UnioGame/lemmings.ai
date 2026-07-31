@@ -398,6 +398,17 @@ class HookTests(unittest.TestCase):
         self.assertFalse(is_read_only_shell("[scriptblock]::Create('Get-Content data.json')"))
         self.assertFalse(is_read_only_shell("Get-Content (git reset --hard)"))
         self.assertFalse(is_read_only_shell("[System.Management.Automation.ScriptBlock]::Create('git reset --hard')"))
+        self.assertFalse(is_read_only_shell('Get-Content "$(git reset --hard)"'))
+
+    def test_quote_aware_powershell_literals_are_read_only(self):
+        self.assertTrue(is_read_only_shell("Get-Content 'notes (final).md'"))
+        self.assertTrue(is_read_only_shell("rg '(TODO|FIXME)' lemmings"))
+        self.assertTrue(is_read_only_shell('Get-Content "notes (final).md"'))
+        self.assertTrue(is_read_only_shell("Get-Content 'it''s (final).md'"))
+
+    def test_unclosed_powershell_quotes_are_unknown(self):
+        self.assertFalse(is_read_only_shell("Get-Content 'notes (final).md"))
+        self.assertFalse(is_read_only_shell('Get-Content "notes (final).md'))
 
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})

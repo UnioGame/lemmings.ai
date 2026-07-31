@@ -122,10 +122,75 @@ def _git_read_only(tokens: list[str]) -> bool:
     return False
 
 
+def _powershell_read_segments(command: str) -> list[str] | None:
+    if not command.strip():
+        return None
+    segments: list[str] = []
+    current: list[str] = []
+    executable: list[str] = []
+    state = "normal"
+    index = 0
+    while index < len(command):
+        character = command[index]
+        following = command[index + 1] if index + 1 < len(command) else ""
+        if state == "single":
+            current.append(character)
+            executable.append(" ")
+            if character == "'":
+                if following == "'":
+                    current.append(following)
+                    executable.append(" ")
+                    index += 1
+                else:
+                    state = "normal"
+            index += 1
+            continue
+        if state == "double":
+            current.append(character)
+            executable.append(" ")
+            if character == "`" or (character == "$" and following == "("):
+                return None
+            if character == '"':
+                state = "normal"
+            index += 1
+            continue
+        if character == "'":
+            state = "single"
+            current.append(character)
+            executable.append(" ")
+        elif character == '"':
+            state = "double"
+            current.append(character)
+            executable.append(" ")
+        elif character in "(){}" or character == "`":
+            return None
+        elif character in ";\r\n" or character == "|" or (character == "&" and following == "&"):
+            segment = "".join(current).strip()
+            if segment:
+                segments.append(segment)
+            current = []
+            executable.append(" ")
+            if (character == "|" and following == "|") or (character == "&" and following == "&") or (character == "\r" and following == "\n"):
+                index += 1
+        else:
+            current.append(character)
+            executable.append(character)
+        index += 1
+    if state != "normal":
+        return None
+    segment = "".join(current).strip()
+    if segment:
+        segments.append(segment)
+    executable_text = "".join(executable)
+    if SHELL_WRITE_PATTERN.search(executable_text) or SHELL_EVALUATION_PATTERN.search(executable_text):
+        return None
+    return segments or None
+
+
 def is_read_only_shell(command: str) -> bool:
-    if not command.strip() or SHELL_WRITE_PATTERN.search(command) or SHELL_EVALUATION_PATTERN.search(command) or any(character in command for character in "{}()"):
+    segments = _powershell_read_segments(command)
+    if not segments:
         return False
-    segments = re.split(r"\s*(?:\||&&|;|\r?\n)\s*", command)
     for segment in segments:
         try:
             tokens = shlex.split(segment, posix=False)
