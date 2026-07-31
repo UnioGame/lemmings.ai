@@ -38,4 +38,4 @@ Repo consumers install the Lemmings plugin through their marketplace. The plugin
 
 ## CLI
 
-Use `lemmings status` and `lemmings check` for routine work. Worktrees are managed through `lemmings worktree allocate|inspect|release`. Strict preparation uses `lemmings phase prepare` and `lemmings wave plan`; final integration uses `lemmings close`. `lemmings scorecard` creates output only for a benchmark or at least two observations.
+Use `lemmings mode auto|simple|standard|strict` to persist the repository mode and `lemmings mode status` to compare its configured and effective values. Use `lemmings status` and `lemmings check` for routine work. Worktrees are managed through `lemmings worktree allocate|inspect|release`. Strict preparation uses `lemmings phase prepare` and `lemmings wave plan`; final integration uses `lemmings close`. `lemmings scorecard` creates output only for a benchmark or at least two observations.

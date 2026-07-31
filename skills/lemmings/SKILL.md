@@ -11,6 +11,8 @@ Choose the lightest safe mode:
 - Use Standard for one writer with sequential exploration or validation. Maintain one task packet and one immutable review.
 - Use Strict for parallel writers, shared contracts, Unity serialized assets, submodules, code generation, or external resources. Add a phase baseline, isolated worktrees, leases, and integration evidence.
 
+Persist the repository selection with `lemmings mode auto|simple|standard|strict`; inspect the configured and effective values with `lemmings mode status`. Preserve an explicit mode until the user selects another one.
+
 Preserve valid user model pins. The reviewer always uses `gpt-5.6-sol:high`. The orchestrator defaults to `gpt-5.6-sol:high` and may use higher Sol effort only when the user explicitly requests it. The complex worker defaults to `gpt-5.6-sol:medium`; users may pin worker roles. Record `requested`, `assigned`, and `actual`; record a fallback reason only when fallback occurs.
 
 The orchestrator must follow `Discover -> Plan -> Refine -> Implement -> Verify`:

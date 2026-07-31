@@ -265,6 +265,38 @@ def command_models(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_mode(args: argparse.Namespace) -> int:
+    repo, profile, task, phase, _, marker_data = paths_from_args(args)
+    path = resolve_path(repo, args.profile) or repo / ".codex/lemmings.json"
+    exists = path.is_file()
+    profile = profile or {"schemaVersion": SCHEMA_VERSION, "mode": "auto"}
+
+    if args.mode_command != "status":
+        profile["mode"] = args.mode_command
+        write_object(path, profile)
+        exists = True
+
+    configured = str(profile.get("mode", "auto")).lower()
+    effective = detect_mode(profile, task, phase)
+    marker = runtime_marker(repo) if marker_data is not None else None
+    if marker is not None and args.mode_command != "status":
+        marker_profile = resolve_path(repo, str(marker_data.get("profilePath", ".codex/lemmings.json")))
+        if marker_profile == path:
+            marker_data["mode"] = effective
+            write_object(marker, marker_data)
+
+    emit({
+        "ok": True,
+        "profile": str(path),
+        "exists": exists,
+        "configured": configured,
+        "effective": effective,
+        "active": marker_data is not None,
+        "runtimeMode": (marker_data or {}).get("mode"),
+    })
+    return 0
+
+
 def add_common(parser: argparse.ArgumentParser, artifacts: bool = False) -> None:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--profile")
@@ -285,6 +317,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(on); on.add_argument("--task"); on.add_argument("--phase"); on.add_argument("--review"); on.set_defaults(run=command_activation)
     off = sub.add_parser("off", help="disable repo-scoped hook enforcement")
     add_common(off); off.set_defaults(run=command_activation)
+    mode = sub.add_parser("mode", help="manage the repository orchestration mode")
+    mode_sub = mode.add_subparsers(dest="mode_command", required=True)
+    for name in ("auto", "simple", "standard", "strict", "status"):
+        item = mode_sub.add_parser(name)
+        add_common(item)
+        item.set_defaults(run=command_mode)
     worktree = sub.add_parser("worktree", help="manage isolated writer worktrees")
     add_common(worktree); worktree_sub = worktree.add_subparsers(dest="worktree_command", required=True)
     allocate = worktree_sub.add_parser("allocate"); allocate.add_argument("--task", required=True); allocate.add_argument("--branch", required=True); allocate.add_argument("--base"); allocate.add_argument("--path"); allocate.set_defaults(run=command_worktree)

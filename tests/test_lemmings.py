@@ -110,6 +110,41 @@ class IdentityAndCliTests(unittest.TestCase):
             removed = run_cli("runtime", "status")
             self.assertNotEqual(0, removed.returncode)
 
+    def test_mode_commands_persist_report_and_sync_active_runtime(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            config = repo / ".codex" / "lemmings.json"
+            config.parent.mkdir()
+            configured = profile()
+            configured["requestedModels"] = {"worker": "custom:medium"}
+            config.write_text(json.dumps(configured), encoding="utf-8")
+
+            standard = run_cli("mode", "standard", "--repo", str(repo))
+            self.assertEqual(0, standard.returncode, standard.stdout + standard.stderr)
+            saved = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual("standard", saved["mode"])
+            self.assertEqual({"worker": "custom:medium"}, saved["requestedModels"])
+
+            on = run_cli("on", "--repo", str(repo))
+            self.assertEqual(0, on.returncode, on.stdout + on.stderr)
+            strict = run_cli("mode", "strict", "--repo", str(repo))
+            self.assertEqual(0, strict.returncode, strict.stdout + strict.stderr)
+            self.assertEqual("strict", json.loads(runtime_marker(repo).read_text(encoding="utf-8"))["mode"])
+
+            status = run_cli("mode", "status", "--repo", str(repo))
+            self.assertEqual(0, status.returncode, status.stdout + status.stderr)
+            result = json.loads(status.stdout)
+            self.assertEqual("strict", result["configured"])
+            self.assertEqual("strict", result["effective"])
+            self.assertEqual("strict", result["runtimeMode"])
+            self.assertTrue(result["active"])
+
+            automatic = run_cli("mode", "auto", "--repo", str(repo))
+            self.assertEqual(0, automatic.returncode, automatic.stdout + automatic.stderr)
+            self.assertEqual("auto", json.loads(config.read_text(encoding="utf-8"))["mode"])
+            self.assertEqual("simple", json.loads(runtime_marker(repo).read_text(encoding="utf-8"))["mode"])
+
     def test_scorecard_is_conditional(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

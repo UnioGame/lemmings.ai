@@ -24,6 +24,7 @@ Use the CLI where repository persistence or deterministic validation is required
 
 ```text
 lemmings on|off
+lemmings mode auto|simple|standard|strict|status
 lemmings models set|task|status|reset
 lemmings check [--all]
 lemmings status
@@ -33,5 +34,7 @@ lemmings wave plan
 lemmings close
 lemmings scorecard
 ```
+
+`mode auto|simple|standard|strict` persists the repository selection in `.codex/lemmings.json` without replacing other profile settings. `mode status` reports the configured value, the effective risk-adjusted mode, hook activity, and the active runtime mode.
 
 `models set` records an explicit repo-role pin in `requestedModels`; `models task` records the higher-priority task-role pin in `taskModels`. Neither command rewrites immutable role defaults in `models`.

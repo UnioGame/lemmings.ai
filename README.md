@@ -261,11 +261,18 @@ lemmings check --all
 lemmings status
 lemmings on
 lemmings off
+lemmings mode auto
+lemmings mode simple
+lemmings mode standard
+lemmings mode strict
+lemmings mode status
 lemmings worktree inspect
 lemmings models status
 ```
 
 `lemmings on` and `lemmings off` persist hook enforcement for the repository. The `$lemmings on` and `$lemmings off` skill commands affect only the current task.
+
+`lemmings mode` persists the repository default in `.codex/lemmings.json`. Use `auto` for proportional selection, or pin `simple`, `standard`, or `strict`; `mode status` reports both the configured and effective mode.
 
 The skill works normally when the CLI is not installed. In that setup, use Git and repository test commands directly instead of `lemmings check` and worktree helpers.
 
