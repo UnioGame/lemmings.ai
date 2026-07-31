@@ -415,6 +415,22 @@ class HookTests(unittest.TestCase):
         self.assertTrue(is_read_only_shell("Get-Content 'research & notes.md'"))
         self.assertTrue(is_read_only_shell("Get-Content package.json && git status"))
 
+    def test_unquoted_redirection_metacharacters_are_not_read_only(self):
+        redirections = (
+            "Get-Content package.json>out",
+            "Get-Content package.json>>out",
+            "Get-Content package.json 2>err",
+            "Get-Content package.json *>all",
+            "Get-Content package.json 2>&1",
+            "Get-Content <in",
+            "Get-Content <<<input",
+        )
+        for command in redirections:
+            with self.subTest(command=command):
+                self.assertFalse(is_read_only_shell(command))
+
+        self.assertTrue(is_read_only_shell("Get-Content 'research <draft> notes.md'"))
+
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})
         allowed = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": value, "changedPaths": ["src/deep/module.py"]})

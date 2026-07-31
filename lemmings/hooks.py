@@ -162,7 +162,7 @@ def _powershell_read_segments(command: str) -> list[str] | None:
             state = "double"
             current.append(character)
             executable.append(" ")
-        elif character in "(){}" or character == "`":
+        elif character in "(){}<>" or character == "`":
             return None
         elif character == "&" and following != "&":
             return None
