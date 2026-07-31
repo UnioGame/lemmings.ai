@@ -60,7 +60,7 @@ class IdentityAndCliTests(unittest.TestCase):
     def test_package_and_plugin_identity(self):
         unity = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual("com.unigame.lemmings", unity["name"])
+        self.assertEqual("unigame.ai.lemmings", unity["name"])
         self.assertEqual("Lemmings", unity["displayName"])
         self.assertEqual("https://github.com/UnioGame/unigame.ai.tools.git", unity["repository"]["url"])
         self.assertEqual("lemmings", plugin["name"])
