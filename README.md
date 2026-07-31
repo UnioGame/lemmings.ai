@@ -1,6 +1,6 @@
 # Lemmings
 
-Lemmings is a Unity package and Codex plugin for proportional repository orchestration. The Unity package identifier is `com.unigame.lemmings`; everywhere else the product name is Lemmings.
+Lemmings plugin for repository orchestration
 
 ## Install and run
 
