@@ -129,6 +129,7 @@ class IdentityAndCliTests(unittest.TestCase):
             candidate = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
             current = task(
                 state="Accepted", previousState="Candidate", worktree=str(repo), baseSha=base,
+                ownership={"owned": ["candidate.txt"], "shared": [], "forbidden": []},
                 models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]},
                 commits={"candidate": candidate, "fix": []},
                 execution={"handoff": "done", "validationEvidence": ["python -m unittest"]},
@@ -138,7 +139,7 @@ class IdentityAndCliTests(unittest.TestCase):
             review = {"schemaVersion": 1, "taskId": "TASK-1", "base": base, "head": candidate, "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
             for name, value in (("profile.json", profile()), ("task.json", current), ("phase.json", phase), ("review.json", review)):
                 (repo / name).write_text(json.dumps(value), encoding="utf-8")
-            (repo / "baseline-review.json").write_text(json.dumps({"status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
+            (repo / "baseline-review.json").write_text(json.dumps({"phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
             process = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", "review.json", "--all")
             self.assertEqual(0, process.returncode, process.stdout + process.stderr)
             self.assertTrue(json.loads(process.stdout)["ok"])
@@ -153,6 +154,22 @@ class IdentityAndCliTests(unittest.TestCase):
             missing_phase["baselineReview"]["evidence"] = "reviews/missing-baseline.json"
             phase_result = check_repository(repo, profile(), current, missing_phase, {**review, "_evidencePath": "review.json"}, True)
             self.assertIn("phase.baseline_evidence_path", {item.code for item in phase_result.findings})
+            wrong_phase = json.loads(json.dumps(phase))
+            wrong_phase["phaseId"] = "P2"
+            binding_result = check_repository(repo, profile(), current, wrong_phase, {**review, "_evidencePath": "review.json"}, True)
+            self.assertIn("phase.baseline_binding", {item.code for item in binding_result.findings})
+            outside_task = json.loads(json.dumps(current))
+            outside_task["ownership"]["owned"] = ["src/**"]
+            outside_result = check_repository(repo, profile(), outside_task, phase, {**review, "_evidencePath": "review.json"}, True)
+            self.assertIn("ownership.outside", {item.code for item in outside_result.findings})
+            forbidden_task = json.loads(json.dumps(current))
+            forbidden_task["ownership"]["forbidden"] = ["candidate.txt"]
+            forbidden_result = check_repository(repo, profile(), forbidden_task, phase, {**review, "_evidencePath": "review.json"}, True)
+            self.assertIn("ownership.forbidden", {item.code for item in forbidden_result.findings})
+            shared_task = json.loads(json.dumps(current))
+            shared_task["ownership"] = {"owned": ["src/**"], "shared": ["candidate.txt"], "forbidden": []}
+            shared_result = check_repository(repo, profile(), shared_task, phase, {**review, "_evidencePath": "review.json"}, True)
+            self.assertIn("ownership.shared", {item.code for item in shared_result.findings})
 
     def test_candidate_on_sibling_task_branch_need_not_be_current_head(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -188,9 +205,12 @@ class IdentityAndCliTests(unittest.TestCase):
             self.assertEqual("Planned", json.loads(unreviewed.stdout)["phase"]["baselineReview"]["status"])
             evidence = repo / "reviews" / "base.json"
             evidence.parent.mkdir()
-            evidence.write_text(json.dumps({"status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
+            evidence.write_text(json.dumps({"phaseId": "P2", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
             reviewed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P2", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "reviewed.json")
             self.assertEqual("Accepted", json.loads(reviewed.stdout)["phase"]["baselineReview"]["status"])
+            evidence.write_text("{", encoding="utf-8")
+            malformed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P3", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "malformed.json")
+            self.assertEqual("Planned", json.loads(malformed.stdout)["phase"]["baselineReview"]["status"])
 
     def test_idle_strict_profile_check_all_is_valid(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -318,7 +338,7 @@ class ContractTests(unittest.TestCase):
         phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True}
         left = task(mode="strict", worktree="C:/wt/one")
         right = task(taskId="TASK-2", mode="strict", worktree="C:/wt/one")
-        result = validate_wave([left, right], phase)
+        result = validate_wave(ROOT, [left, right], phase)
         codes = {f.code for f in result.findings}
         self.assertIn("worktree.duplicate", codes)
         self.assertIn("ownership.overlap", codes)
@@ -326,11 +346,21 @@ class ContractTests(unittest.TestCase):
     def test_external_resource_requires_unique_lease(self):
         phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "leases": []}
         value = task(mode="strict", worktree="C:/wt/one", risks=["externalResources"])
-        self.assertIn("lease.required", {f.code for f in validate_wave([value], phase).findings})
+        self.assertIn("lease.required", {f.code for f in validate_wave(ROOT, [value], phase).findings})
 
     def test_ready_strict_writer_requires_owned_paths(self):
         value = task(mode="strict", ownership={"owned": [], "shared": [], "forbidden": []})
         self.assertIn("ownership.required", {f.code for f in validate_task(value, profile()).findings})
+        candidate = task(mode="strict", state="Candidate", previousState="Active", baseSha="base", ownership={"owned": [], "shared": [], "forbidden": []})
+        self.assertIn("ownership.required", {f.code for f in validate_task(candidate, profile()).findings})
+
+    def test_embedded_review_base_and_nonempty_range_are_required(self):
+        value = task(state="Accepted", previousState="Candidate", baseSha="base", commits={"candidate": "base", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]}, review={"taskId": "TASK-1", "base": "other", "head": "base", "status": "Accepted", "cycle": 0, "evidence": "review.json"})
+        codes = {item.code for item in validate_task(value, profile()).findings}
+        self.assertIn("review.base", codes)
+        empty = json.loads(json.dumps(value))
+        empty["review"]["base"] = "base"
+        self.assertIn("review.range", {item.code for item in validate_task(empty, profile()).findings})
 
 
 class HookTests(unittest.TestCase):
@@ -353,6 +383,12 @@ class HookTests(unittest.TestCase):
         self.assertTrue(is_read_only_shell(command))
         self.assertFalse(is_read_only_shell("Get-Content data.json | ForEach-Object { Remove-Item $_ }"))
         self.assertFalse(is_read_only_shell("ForEach-Object { git reset --hard }"))
+        self.assertFalse(is_read_only_shell("Get-Content $(Get-Location)/data.json"))
+        self.assertFalse(is_read_only_shell('Get-Content `"dynamic-path`"'))
+
+    def test_dynamic_powershell_evaluation_is_not_read_only(self):
+        self.assertFalse(is_read_only_shell("Invoke-Expression 'Get-Content data.json'"))
+        self.assertFalse(is_read_only_shell("[scriptblock]::Create('Get-Content data.json')"))
 
     def test_exact_ownership_glob_matches_only_expected_files(self):
         value = task(ownership={"owned": ["src/**/*.py"], "shared": [], "forbidden": []})
@@ -414,6 +450,20 @@ class HookTests(unittest.TestCase):
         self.assertEqual("block", reviewer["decision"])
         identified = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": task(), "task_name": "lemmings_reviewer", "changedPaths": ["lemmings/core.py"]})
         self.assertEqual("block", identified["decision"])
+
+    def test_actual_read_only_roles_cannot_patch_or_mutate_shell(self):
+        for role in ("reviewer", "explorer", "summarizer", "validator"):
+            patch = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": task(), "task_name": f"lemmings_{role}", "changedPaths": ["lemmings/core.py"]})
+            self.assertEqual("block", patch["decision"], role)
+        for role in ("reviewer", "explorer", "summarizer"):
+            shell = handle({"event": "PreToolUse", "toolName": "shell_command", "task": task(), "task_name": f"lemmings_{role}", "toolInput": {"command": "git reset --hard"}})
+            self.assertEqual("block", shell["decision"], role)
+        validator_task = task(role="validator")
+        validator_task["validation"]["commands"] = ["python -m unittest"]
+        allowed = handle({"event": "PreToolUse", "toolName": "shell_command", "task": validator_task, "task_name": "lemmings_validator", "toolInput": {"command": "python -m unittest"}})
+        denied = handle({"event": "PreToolUse", "toolName": "shell_command", "task": validator_task, "task_name": "lemmings_validator", "toolInput": {"command": "python arbitrary.py"}})
+        self.assertEqual("allow", allowed["decision"])
+        self.assertEqual("block", denied["decision"])
 
     def test_absolute_owned_path_is_repo_relative_and_external_path_is_blocked(self):
         allowed = handle({"event": "PreToolUse", "toolName": "apply_patch", "cwd": str(ROOT), "task": task(), "changedPaths": [str(ROOT / "lemmings" / "core.py")]})

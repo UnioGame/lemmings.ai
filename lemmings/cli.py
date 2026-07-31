@@ -176,8 +176,11 @@ def command_phase(args: argparse.Namespace) -> int:
     baseline_review = {"status": "Planned", "reviewerModel": None, "evidence": args.baseline_review_evidence}
     evidence_path = resolve_path(repo, args.baseline_review_evidence)
     if evidence_path and evidence_path.is_file():
-        evidence = read_object(evidence_path)
-        if evidence.get("status") == "Accepted" and evidence.get("reviewerModel") == "gpt-5.6-sol:high" and evidence.get("baselineSha") == baseline:
+        try:
+            evidence = read_object(evidence_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            evidence = {}
+        if evidence.get("phaseId") == args.phase_id and evidence.get("status") == "Accepted" and evidence.get("reviewerModel") == "gpt-5.6-sol:high" and evidence.get("baselineSha") == baseline:
             baseline_review = {"status": "Accepted", "reviewerModel": "gpt-5.6-sol:high", "evidence": args.baseline_review_evidence}
     phase = {
         "schemaVersion": SCHEMA_VERSION,
@@ -199,7 +202,7 @@ def command_wave(args: argparse.Namespace) -> int:
     profile = load_optional(repo, args.profile, ".codex/lemmings.json")
     phase = read_object(resolve_path(repo, args.phase))
     tasks = [read_object(resolve_path(repo, value)) for value in args.task]
-    result = validate_wave(tasks, phase, profile)
+    result = validate_wave(repo, tasks, phase, profile)
     result.data["dispatch"] = [
         {"taskId": task.get("taskId"), "branch": task.get("branch"), "worktree": task.get("worktree"), "model": (task.get("models") or {}).get("assigned")}
         for task in tasks

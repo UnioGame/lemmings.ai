@@ -4,7 +4,7 @@ Lemmings applies only the lifecycle needed by the risk. Simple work uses one age
 
 Require an independent plan review only for a Strict phase, a frozen public contract, or an explicit user request.
 
-A Strict phase is dispatchable only after `baselineReview` is Accepted by `gpt-5.6-sol:high` and references immutable evidence. `lemmings phase prepare` leaves that review Planned unless `--baseline-review-evidence` is supplied explicitly.
+A Strict phase is dispatchable only after `baselineReview` is Accepted by `gpt-5.6-sol:high` and references immutable evidence binding `phaseId` and a real `baselineSha`. `lemmings phase prepare` parses that artifact and otherwise leaves the review Planned.
 
 ## Pipeline and states
 
@@ -20,7 +20,7 @@ The orchestrator and reviewer use `gpt-5.6-sol:high`. Complex workers use `gpt-5
 
 ## Hooks
 
-PreToolUse validates dispatch/model/worktree binding and exact path ownership. Reviewer profiles must be configured read-only; hook write denial additionally applies whenever the host payload exposes reviewer identity, but does not replace the sandbox. Known read-only shell commands are allowed. Script blocks and unknown shell write-sets warn in Standard and block in Strict. SubagentStart injects bounded context; SubagentStop requires embedded handoff, candidate/fix commit, actual model, and validation or owned debt. PostToolUse inspects actual paths and advises on violations. There is no Stop continuation.
+PreToolUse validates dispatch/model/worktree binding and exact path ownership. Reviewer, explorer, and summarizer profiles are read-only; validators may run only declared validation commands and may not patch. Hook denial applies whenever the host exposes role identity but does not replace the sandbox. Known static read-only shell commands are allowed; script blocks, substitution, dynamic evaluation, and unknown write-sets warn in Standard and block in Strict. Repository checks compare the actual `baseSha..head` Git diff with owned/shared/forbidden rules. SubagentStart injects bounded context; SubagentStop requires role-appropriate evidence. There is no Stop continuation.
 
 Repo consumers install the Lemmings plugin through their marketplace. The plugin auto-discovers `hooks/hooks.json`; do not copy the hook configuration into consumer `.codex` state because duplicate registration executes every hook twice.
 

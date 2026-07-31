@@ -34,6 +34,10 @@ SHELL_WRITE_PATTERN = re.compile(
     r"(?:^|\s)(?:>|>>|2>|&>|tee|set-content|add-content|out-file|remove-item|move-item|copy-item|new-item|rename-item)(?:\s|$)",
     re.I,
 )
+SHELL_EVALUATION_PATTERN = re.compile(
+    r"\$\(|`|\[\s*scriptblock\s*\]|\binvoke-expression\b|(?:^|\s)iex(?:\s|$)|(?:^|\s)&\s*(?:\$|\(|\{)",
+    re.I,
+)
 
 
 def decision(action: str, reason: str, **extra: Any) -> dict[str, Any]:
@@ -119,7 +123,7 @@ def _git_read_only(tokens: list[str]) -> bool:
 
 
 def is_read_only_shell(command: str) -> bool:
-    if not command.strip() or SHELL_WRITE_PATTERN.search(command) or any(character in command for character in "{}"):
+    if not command.strip() or SHELL_WRITE_PATTERN.search(command) or SHELL_EVALUATION_PATTERN.search(command) or any(character in command for character in "{}"):
         return False
     segments = re.split(r"\s*(?:\||&&|;|\r?\n)\s*", command)
     for segment in segments:
@@ -227,11 +231,17 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             return decision("allow", "dispatch invariants satisfied")
         if tool in {"apply_patch", "Bash", "exec_command", "shell_command"}:
             identity_role = requested_role(payload)
-            if identity_role == "reviewer":
-                return decision("block", "reviewer identity is read-only")
+            effective_role = identity_role or str(task.get("role", "worker"))
+            if tool == "apply_patch" and effective_role in {"reviewer", "explorer", "summarizer", "validator"}:
+                return decision("block", f"{effective_role} identity cannot apply patches")
+            if tool != "apply_patch" and effective_role == "validator":
+                command = shell_command(payload).strip()
+                declared = [str(item).strip() for item in as_list((task.get("validation") or {}).get("commands"))]
+                return decision("allow", "declared validator command") if command in declared else decision("block", "validator shell command is not declared in task.validation.commands")
             if tool != "apply_patch" and is_read_only_shell(shell_command(payload)):
                 return decision("allow", "known read-only shell command")
-            effective_role = identity_role or str(task.get("role", "worker"))
+            if effective_role in {"reviewer", "explorer", "summarizer"}:
+                return decision("block", f"{effective_role} identity cannot run mutating shell commands")
             if mode == "strict" and effective_role not in {"reviewer", "explorer", "validator", "summarizer"} and not as_list((task.get("ownership") or {}).get("owned")):
                 return decision("block", "Strict writer cannot write without ownership.owned")
             paths = changed_paths(payload)
@@ -308,6 +318,12 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("warn", "actual diff could not be inspected")
                 discovered.update(line.strip() for line in process.stdout.splitlines() if line.strip())
             paths = sorted(discovered)
+        identity_role = requested_role(payload) or str(task.get("role", "worker"))
+        if identity_role == "validator" and paths:
+            allowed_outputs = as_list((task.get("validation") or {}).get("allowedOutputs"))
+            unexpected = [path for path in paths if not any(path_matches(path, str(rule)) for rule in allowed_outputs)]
+            if unexpected:
+                return decision("warn", "validator changed undeclared outputs: " + ", ".join(unexpected))
         violation = ownership_violation(task, paths, payload.get("_repoRoot") or payload.get("cwd"))
         return decision("warn", violation + "; candidate is unsuitable until corrected") if violation else decision("allow", "observed diff respects ownership")
     return decision("allow", "event is not enforced")

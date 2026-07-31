@@ -11,7 +11,7 @@
   "execution": { "handoff": null, "validationEvidence": [] },
   "baseSha": null,
   "commits": { "candidate": null, "fix": [] },
-  "validation": { "riskToTest": [], "debt": [] },
+  "validation": { "riskToTest": [], "commands": [], "allowedOutputs": [], "debt": [] },
   "review": { "taskId": "TASK-17", "base": null, "status": "Pending", "cycle": 0, "head": null, "evidence": null },
   "close": { "mergeCommit": null, "integrationValidationPassed": false }
 }
