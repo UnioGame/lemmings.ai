@@ -12,7 +12,27 @@ Require independent plan review only for a Strict phase, a frozen public contrac
 
 ## Lifecycle
 
-`Prepare -> Dispatch -> Execute/Candidate -> Review/Repair -> Integrate/Close`
+The orchestrator-facing lifecycle is:
+
+`Discover -> Plan -> Refine -> Implement -> Verify`
+
+1. **Discover** exits when the relevant code paths, baseline, constraints, dependencies, material risks, and blocking unknowns are known well enough to plan bounded work.
+2. **Plan** exits when goal, non-goals, acceptance criteria, ownership, models, dependencies, integration order, and risk-to-test mapping are explicit at the detail required by the selected mode.
+3. **Refine** exits with `Ready` only after assumptions and blocking unknowns are resolved, required plan review is accepted, shared contracts are frozen when applicable, and the plan is implementable without inventing policy.
+4. **Implement** exits with a real Candidate containing owned changes, focused validation or owned debt, actual model, embedded handoff, and candidate/fix commits.
+5. **Verify** exits with Accepted or Integrated evidence after validation and immutable review of the actual candidate range. Integration requires the merge and integration validation.
+
+Do not dispatch an implementation worker before Refine exits Ready. A bounded verification finding returns to Implement and then Verify. A changed scope, invalid baseline or contract, or second failed review enters Replan Required and restarts at the earliest invalidated lifecycle step.
+
+Internal execution stages remain compatible with the CLI and contracts:
+
+| Orchestrator lifecycle | Internal stages |
+|---|---|
+| Discover, Plan, Refine | Prepare |
+| Implement | Dispatch, Execute/Candidate |
+| Verify | Review/Repair, Integrate/Close |
+
+Simple compresses Discover, Plan, and Refine into bounded reasoning and creates no artifacts. Standard records the cycle in one task packet. Strict adds phase baseline and contract evidence without changing the five orchestrator steps.
 
 Task states are `Planned -> Ready -> Active -> Candidate -> Accepted -> Integrated`, with `Blocked`, `Replan Required`, `Cancelled`, and `Superseded` exceptions. Dispatch is an audit event. Review remains nested in Candidate until Accepted. A second failed review requires Replan Required.
 

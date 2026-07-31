@@ -8,7 +8,19 @@ A Strict phase is dispatchable only after `baselineReview` is Accepted by `gpt-5
 
 ## Pipeline and states
 
-The five stages are Prepare, Dispatch, Execute/Candidate, Review/Repair, and Integrate/Close. Dispatch is derived from Ready tasks and retained only as an audit event. Handoff lives under `task.execution`; integration evidence lives under `task.close` or `phase.close`.
+The orchestrator follows `Discover -> Plan -> Refine -> Implement -> Verify`.
+
+| Step | Orchestrator responsibility | Exit condition |
+|---|---|---|
+| Discover | Bound relevant code, baseline, constraints, dependencies, risks, and unknowns | Enough evidence exists to plan without broad exploration |
+| Plan | Define goal, non-goals, acceptance, ownership, models, dependencies, integration order, and tests | The selected mode has an implementable plan |
+| Refine | Challenge assumptions, resolve blockers, perform required plan review, and freeze shared contracts | The task is Ready |
+| Implement | Dispatch Ready work, make owned changes, validate narrowly, and create candidate/fix commits | Candidate evidence is complete |
+| Verify | Validate, review the actual range, repair findings, integrate, and rerun integration checks | Work is Accepted or Integrated, or explicit debt/replan is recorded |
+
+Do not dispatch an implementation worker before Refine declares the task Ready. A bounded finding loops from Verify to Implement and back. Invalid scope, baseline, or contracts restart the earliest affected step; the second failed review uses Replan Required.
+
+The existing internal stages remain unchanged: Prepare contains Discover, Plan, and Refine; Dispatch plus Execute/Candidate implements; Review/Repair plus Integrate/Close verifies. Dispatch is derived from Ready tasks and retained only as an audit event. Handoff lives under `task.execution`; integration evidence lives under `task.close` or `phase.close`.
 
 States are Planned, Ready, Active, Candidate, Accepted, and Integrated. Exceptions are Blocked, Replan Required, Cancelled, and Superseded. A ChangesRequested review leaves the task Candidate and advances `review.cycle`. After the second failed review, use Replan Required.
 

@@ -66,6 +66,18 @@ class IdentityAndCliTests(unittest.TestCase):
         self.assertEqual("lemmings", plugin["name"])
         self.assertEqual("https://github.com/UnioGame/unigame.ai.tools", plugin["repository"])
 
+    def test_orchestrator_lifecycle_is_consistent(self):
+        lifecycle = "Discover -> Plan -> Refine -> Implement -> Verify"
+        paths = [
+            ROOT / "skills" / "lemmings" / "SKILL.md",
+            ROOT / "skills" / "lemmings" / "references" / "workflow.md",
+            ROOT / "Documentation~" / "guides" / "lemmings.md",
+            ROOT / "README.md",
+            ROOT / "assets" / "repo-integration" / "auto.qa" / ".codex" / "agents" / "lemmings-orchestrator.toml",
+        ]
+        for path in paths:
+            self.assertIn(lifecycle, path.read_text(encoding="utf-8"), str(path))
+
     def test_autoqa_marketplace_installs_single_lemmings_plugin_hook_source(self):
         integration = ROOT / "assets" / "repo-integration" / "auto.qa"
         marketplace = json.loads((integration / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))

@@ -8,7 +8,7 @@ The default installation is intentionally small. The `$lemmings` skill works wit
 
 | Setup | What you get | Python |
 |---|---|---:|
-| **Skill only** | `$lemmings`, mode selection, model routing, planning and review guidance | **No** |
+| **Skill only** | `$lemmings`, discover-to-verify workflow, mode selection, model routing, planning and review guidance | **No** |
 | **Plugin** | Skill discovery plus packaged agent resources | **No** |
 | **Plugin + hooks** | Automatic ownership, model, context, and evidence checks | **Yes** |
 | **CLI** | `lemmings check`, runtime state, worktrees, phases, waves, and model pins | **Yes** |
@@ -101,10 +101,30 @@ $lemmings models reset
 | **Standard** | One writer with sequential exploration or validation | Task packet, candidate commit, independent review |
 | **Strict** | Parallel writers, shared contracts, submodules, code generation, or external resources | Frozen baseline, isolated worktrees, ownership, leases, review and integration evidence |
 
-The core lifecycle is:
+## Orchestrator lifecycle
+
+The orchestrator always follows the same five steps. Mode changes their depth, not their order:
 
 ```text
-Prepare -> Dispatch -> Execute/Candidate -> Review/Repair -> Integrate/Close
+Discover -> Plan -> Refine -> Implement -> Verify
+```
+
+| Step | Outcome |
+|---|---|
+| **Discover** | Relevant code, baseline, constraints, dependencies, risks, and unknowns are bounded |
+| **Plan** | Goal, acceptance, ownership, models, dependencies, and risk-to-test mapping are explicit |
+| **Refine** | Assumptions and blockers are resolved; required contracts are frozen; the task is Ready |
+| **Implement** | Ready work becomes an owned, validated Candidate with commit and handoff evidence |
+| **Verify** | The actual candidate range is validated, reviewed, repaired when needed, integrated, and closed |
+
+Implementation cannot start before Refine makes the task Ready. A bounded verification finding returns to Implement and then Verify. Invalid scope, baseline, or contracts restart the earliest affected step.
+
+The internal CLI stages remain compatible with this workflow:
+
+```text
+Prepare (Discover + Plan + Refine)
+-> Dispatch + Execute/Candidate (Implement)
+-> Review/Repair + Integrate/Close (Verify)
 ```
 
 ## Optional: install the full plugin
