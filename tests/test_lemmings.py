@@ -411,6 +411,20 @@ class HookTests(unittest.TestCase):
         self.assertFalse(is_read_only_shell('rg --pr"e" processor TODO .', dialect="windows"))
         self.assertTrue(is_read_only_shell("Get-Content 'fully quoted notes.md'", dialect="windows"))
 
+    def test_powershell_variable_expansion_is_not_static(self):
+        dynamic_commands = (
+            "rg --pre$null processor TODO .",
+            "rg --pre$null=processor TODO .",
+            'rg "--pre$null=processor" TODO .',
+            "Get-Content $env:TEMP",
+            "Get-Content ${dynamicPath}",
+        )
+        for command in dynamic_commands:
+            with self.subTest(command=command):
+                self.assertFalse(is_read_only_shell(command, dialect="windows"))
+
+        self.assertTrue(is_read_only_shell("Get-Content '$literal (final).txt'", dialect="windows"))
+
     def test_unclosed_powershell_quotes_are_unknown(self):
         self.assertFalse(is_read_only_shell("Get-Content 'notes (final).md"))
         self.assertFalse(is_read_only_shell('Get-Content "notes (final).md'))

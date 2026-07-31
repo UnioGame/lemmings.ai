@@ -151,7 +151,7 @@ def _powershell_read_segments(command: str) -> list[str] | None:
         if state == "double":
             current.append(character)
             executable.append(" ")
-            if character == "`" or (character == "$" and following == "("):
+            if character in "`$":
                 return None
             if character == '"':
                 if following and not following.isspace() and following not in ";|&\r\n":
@@ -171,7 +171,7 @@ def _powershell_read_segments(command: str) -> list[str] | None:
             state = "double"
             current.append(character)
             executable.append(" ")
-        elif character in "(){}<>" or character == "`":
+        elif character in "(){}<>`$":
             return None
         elif character == "&" and following != "&":
             return None
