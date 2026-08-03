@@ -6,31 +6,38 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from lemmings.core import (  # noqa: E402
-    DEFAULT_MODELS, check_repository, detect_mode, runtime_marker, validate_task, validate_wave,
+from lemmings.contracts import (  # noqa: E402
+    DEFAULT_MODELS, DEFAULT_WORKER_POLICY, check_repository, detect_mode, runtime_marker,
+    validate_profile, validate_review, validate_task, validate_wave,
 )
 from lemmings.hooks import handle, host_output, hydrate, is_read_only_shell  # noqa: E402
+from lemmings import workspace as workspace_module  # noqa: E402
+from lemmings.cli import build_parser  # noqa: E402
 
 
 def task(**changes):
     value = {
         "schemaVersion": 1,
         "taskId": "TASK-1",
+        "goal": "change",
+        "acceptance": ["tests pass"],
+        "dependencies": [],
         "mode": "standard",
         "state": "Ready",
         "previousState": "Planned",
-        "role": "complex-worker",
-        "plan": {"goal": "change", "acceptance": [], "dependencies": []},
+        "role": "worker",
         "ownership": {"owned": ["lemmings/**"], "shared": [], "forbidden": ["secrets/**"]},
-        "models": {"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": None},
+        "models": {"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": None},
         "execution": {"handoff": None, "validationEvidence": []},
+        "workspace": {"policy": "auto", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "single writer"},
         "commits": {"candidate": None, "fix": []},
         "validation": {"riskToTest": [], "debt": []},
-        "review": {"status": "Pending", "cycle": 0, "head": None, "evidence": None},
+        "reviewRef": None,
         "close": {"mergeCommit": None, "integrationValidationPassed": False},
     }
     value.update(changes)
@@ -38,7 +45,13 @@ def task(**changes):
 
 
 def profile(mode="auto"):
-    return {"schemaVersion": 1, "mode": mode, "models": dict(DEFAULT_MODELS), "fallback": {"allowed": []}}
+    return {
+        "schemaVersion": 1,
+        "mode": mode,
+        "models": dict(DEFAULT_MODELS),
+        "workerPolicy": dict(DEFAULT_WORKER_POLICY),
+        "fallback": {"allowed": []},
+    }
 
 
 def run_cli(*args: str, cwd: Path | None = None):
@@ -53,9 +66,13 @@ class IdentityAndCliTests(unittest.TestCase):
         process = run_cli("--help")
         self.assertEqual(0, process.returncode, process.stderr)
         self.assertIn("lemmings", process.stdout)
-        self.assertIn("worktree", process.stdout)
-        self.assertIn("scorecard", process.stdout)
+        for command in ("check", "status", "workspace", "metrics"):
+            self.assertIn(command, process.stdout)
+        for removed in ("worktree", "scorecard", "models", "mode", "phase", "wave", "close"):
+            self.assertNotIn("  " + removed, process.stdout)
         self.assertFalse((ROOT / "scripts" / "orchestration_cli.py").exists())
+        parsed = build_parser().parse_args(["check", "--task", "a.json", "--task", "b.json", "--all"])
+        self.assertEqual(["a.json", "b.json"], parsed.task)
 
     def test_package_and_plugin_identity(self):
         unity = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
@@ -67,27 +84,17 @@ class IdentityAndCliTests(unittest.TestCase):
         self.assertEqual("https://github.com/UnioGame/unigame.ai.tools", plugin["repository"])
 
     def test_orchestrator_lifecycle_is_consistent(self):
-        lifecycle = "Discover -> Plan -> Refine -> Implement -> Verify"
+        lifecycle = "Discover → Plan → Refine → Implement → Verify"
         paths = [
             ROOT / "skills" / "lemmings" / "SKILL.md",
-            ROOT / "skills" / "lemmings" / "references" / "workflow.md",
-            ROOT / "Documentation~" / "guides" / "lemmings.md",
             ROOT / "README.md",
-            ROOT / "assets" / "repo-integration" / "auto.qa" / ".codex" / "agents" / "lemmings-orchestrator.toml",
         ]
         for path in paths:
             self.assertIn(lifecycle, path.read_text(encoding="utf-8"), str(path))
 
-    def test_autoqa_marketplace_installs_single_lemmings_plugin_hook_source(self):
-        integration = ROOT / "assets" / "repo-integration" / "auto.qa"
-        marketplace = json.loads((integration / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
-        self.assertEqual("autoqa", marketplace["name"])
-        self.assertEqual(1, len(marketplace["plugins"]))
-        entry = marketplace["plugins"][0]
-        self.assertEqual("lemmings", entry["name"])
-        self.assertEqual("./plugins/lemmings", entry["source"]["path"])
-        self.assertEqual("INSTALLED_BY_DEFAULT", entry["policy"]["installation"])
-        self.assertFalse((integration / ".codex" / "hooks.json").exists())
+    def test_consumer_specific_autoqa_assets_are_absent(self):
+        root = ROOT / "assets" / "repo-integration" / "auto.qa"
+        self.assertFalse(root.exists() and any(path.is_file() for path in root.rglob("*")))
 
     def test_runtime_marker_uses_git_common_lemmings_path(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -96,21 +103,17 @@ class IdentityAndCliTests(unittest.TestCase):
             config = repo / ".codex" / "lemmings.json"
             config.parent.mkdir()
             config.write_text(json.dumps(profile()), encoding="utf-8")
-            on = run_cli("on", "--repo", str(repo))
-            self.assertEqual(0, on.returncode, on.stdout + on.stderr)
             marker = runtime_marker(repo)
+            marker.parent.mkdir(parents=True)
+            marker.write_text(json.dumps({"schemaVersion": 1, "enabled": True}), encoding="utf-8")
             self.assertTrue(marker.is_file())
             self.assertEqual("lemmings", marker.parent.name)
             status = run_cli("status", "--repo", str(repo))
             self.assertEqual(0, status.returncode, status.stdout + status.stderr)
             self.assertTrue(json.loads(status.stdout)["data"]["active"])
-            off = run_cli("off", "--repo", str(repo))
-            self.assertEqual(0, off.returncode)
-            self.assertFalse(marker.exists())
-            removed = run_cli("runtime", "status")
-            self.assertNotEqual(0, removed.returncode)
+            self.assertNotEqual(0, run_cli("on", "--repo", str(repo)).returncode)
 
-    def test_mode_commands_persist_report_and_sync_active_runtime(self):
+    def test_removed_mutation_commands_do_not_change_profile(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
@@ -120,52 +123,61 @@ class IdentityAndCliTests(unittest.TestCase):
             configured["requestedModels"] = {"worker": "custom:medium"}
             config.write_text(json.dumps(configured), encoding="utf-8")
 
-            standard = run_cli("mode", "standard", "--repo", str(repo))
-            self.assertEqual(0, standard.returncode, standard.stdout + standard.stderr)
-            saved = json.loads(config.read_text(encoding="utf-8"))
-            self.assertEqual("standard", saved["mode"])
-            self.assertEqual({"worker": "custom:medium"}, saved["requestedModels"])
+            before = config.read_text(encoding="utf-8")
+            for command in (("mode", "standard"), ("models", "set", "worker=custom:high"), ("close",)):
+                self.assertNotEqual(0, run_cli(*command, "--repo", str(repo)).returncode)
+            self.assertEqual(before, config.read_text(encoding="utf-8"))
 
-            on = run_cli("on", "--repo", str(repo))
-            self.assertEqual(0, on.returncode, on.stdout + on.stderr)
-            strict = run_cli("mode", "strict", "--repo", str(repo))
-            self.assertEqual(0, strict.returncode, strict.stdout + strict.stderr)
-            self.assertEqual("strict", json.loads(runtime_marker(repo).read_text(encoding="utf-8"))["mode"])
-
-            status = run_cli("mode", "status", "--repo", str(repo))
-            self.assertEqual(0, status.returncode, status.stdout + status.stderr)
-            result = json.loads(status.stdout)
-            self.assertEqual("strict", result["configured"])
-            self.assertEqual("strict", result["effective"])
-            self.assertEqual("strict", result["runtimeMode"])
-            self.assertTrue(result["active"])
-
-            automatic = run_cli("mode", "auto", "--repo", str(repo))
-            self.assertEqual(0, automatic.returncode, automatic.stdout + automatic.stderr)
-            self.assertEqual("auto", json.loads(config.read_text(encoding="utf-8"))["mode"])
-            self.assertEqual("simple", json.loads(runtime_marker(repo).read_text(encoding="utf-8"))["mode"])
-
-    def test_scorecard_is_conditional(self):
+    def test_benchmark_is_part_of_metrics_report(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
-            one = repo / "one.json"
-            one.write_text('{"model":"sol"}', encoding="utf-8")
-            process = run_cli("scorecard", "--repo", str(repo), "--observation", str(one))
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            process = run_cli("metrics", "report", "--benchmark", "--repo", str(repo))
             self.assertEqual(0, process.returncode)
-            self.assertFalse(json.loads(process.stdout)["created"])
+            self.assertIn("benchmark", json.loads(process.stdout))
 
-    def test_models_set_preserves_defaults_and_records_explicit_pin(self):
+    def test_models_are_skill_owned_not_cli_mutations(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             config = repo / "profile.json"
             config.write_text(json.dumps(profile()), encoding="utf-8")
+            before = config.read_text(encoding="utf-8")
             process = run_cli("models", "--repo", str(repo), "--profile", "profile.json", "set", "worker=custom:high")
-            self.assertEqual(0, process.returncode, process.stdout + process.stderr)
-            saved = json.loads(config.read_text(encoding="utf-8"))
-            self.assertEqual(DEFAULT_MODELS, saved["models"])
-            self.assertEqual("custom:high", saved["requestedModels"]["worker"])
+            self.assertNotEqual(0, process.returncode)
+            self.assertEqual(before, config.read_text(encoding="utf-8"))
 
-    def test_check_all_validates_full_strict_lifecycle(self):
+    def test_workspace_estimate_and_inspect_are_read_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            before = set(repo.rglob("*"))
+            estimate = run_cli("workspace", "estimate", "--repo", str(repo), "--backend", "code-worktree")
+            self.assertEqual(0, estimate.returncode, estimate.stdout + estimate.stderr)
+            self.assertEqual("code-worktree", json.loads(estimate.stdout)["backend"])
+            inspect = run_cli("workspace", "inspect", "--repo", str(repo))
+            self.assertEqual(0, inspect.returncode, inspect.stdout + inspect.stderr)
+            self.assertEqual(before, set(repo.rglob("*")))
+
+    def test_workspace_estimate_over_ten_gib_requires_approval(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            with patch.object(workspace_module, "_tracked_size", return_value=11 * workspace_module.GIB), patch.object(workspace_module, "_submodule_paths", return_value=[]):
+                result = workspace_module.estimate_workspace(repo, backend="code-worktree")
+            self.assertTrue(result["approvalRequired"])
+            self.assertGreater(result["estimatedGiB"], 10)
+
+    def test_canonical_baseline_and_candidate_reviews(self):
+        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "base", "integrationBranch": "codex/p1", "contractsFrozen": True, "contracts": [], "baselineReviewRef": "reviews/base.json", "taskDag": [], "leases": [], "close": {"mergeCommits": [], "phaseValidation": []}}
+        baseline = {"schemaVersion": 1, "reviewId": "RB", "subject": {"kind": "baseline", "phaseId": "P1", "sha": "base"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        self.assertTrue(validate_review(baseline, phase=phase).ok)
+        value = task(state="Candidate", previousState="Active", baseSha="base", commits={"candidate": "head", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["tests"]})
+        candidate = {"schemaVersion": 1, "reviewId": "RC", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "head"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        self.assertTrue(validate_review(candidate, value).ok)
+        legacy = {"schemaVersion": 1, "taskId": "TASK-1", "base": "base", "head": "head", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
+        self.assertIn("review.subject", {item.code for item in validate_review(legacy, value).findings})
+
+    def test_check_all_accepts_canonical_strict_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
@@ -178,54 +190,23 @@ class IdentityAndCliTests(unittest.TestCase):
             (repo / "candidate.txt").write_text("candidate\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(repo), "add", "candidate.txt"], check=True)
             subprocess.run(["git", "-C", str(repo), "commit", "-m", "candidate"], check=True, capture_output=True)
-            candidate = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
-            current = task(
-                state="Accepted", previousState="Candidate", worktree=str(repo), baseSha=base,
-                ownership={"owned": ["candidate.txt"], "shared": [], "forbidden": []},
-                models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]},
-                commits={"candidate": candidate, "fix": []},
-                execution={"handoff": "done", "validationEvidence": ["python -m unittest"]},
-                review={"taskId": "TASK-1", "base": base, "status": "Accepted", "cycle": 0, "head": candidate, "evidence": "review.json"},
-            )
-            phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": base, "integrationBranch": "main", "contractsFrozen": True, "baselineReview": {"status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "evidence": "baseline-review.json"}}
-            review = {"schemaVersion": 1, "taskId": "TASK-1", "base": base, "head": candidate, "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
-            for name, value in (("profile.json", profile()), ("task.json", current), ("phase.json", phase), ("review.json", review)):
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            reviews = repo / "reviews"; reviews.mkdir()
+            baseline = {"schemaVersion": 1, "reviewId": "RB", "subject": {"kind": "baseline", "phaseId": "P1", "sha": base}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+            candidate = {"schemaVersion": 1, "reviewId": "RC", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": base, "headSha": head}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+            (reviews / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
+            (reviews / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+            phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": base, "integrationBranch": "codex/p1", "contractsFrozen": True, "contracts": [], "baselineReviewRef": "reviews/baseline.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": [], "close": {"mergeCommits": [], "phaseValidation": []}}
+            current = task(mode="strict", state="Accepted", previousState="Candidate", baseSha=base, ownership={"owned": ["candidate.txt"], "shared": [], "forbidden": []}, workspace={"policy": "isolated", "backend": "code-worktree", "path": str(repo), "estimatedGiB": 1, "approval": "not-required", "reason": "strict validation"}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, commits={"candidate": head, "fix": []}, execution={"handoff": "done", "validationEvidence": ["tests"]}, reviewRef="reviews/candidate.json")
+            for name, value in (("profile.json", profile()), ("task.json", current), ("phase.json", phase)):
                 (repo / name).write_text(json.dumps(value), encoding="utf-8")
-            (repo / "baseline-review.json").write_text(json.dumps({"schemaVersion": 1, "phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
-            process = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", "review.json", "--all")
+            process = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", "reviews/candidate.json", "--all")
             self.assertEqual(0, process.returncode, process.stdout + process.stderr)
-            self.assertTrue(json.loads(process.stdout)["ok"])
-            absolute = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", str(repo / "review.json"), "--all")
-            self.assertEqual(0, absolute.returncode, absolute.stdout + absolute.stderr)
-            missing_task = json.loads(json.dumps(current))
-            missing_task["review"]["evidence"] = "reviews/missing.json"
-            missing_review = {**review, "_evidencePath": "review.json"}
-            missing_result = check_repository(repo, profile(), missing_task, phase, missing_review, True)
-            self.assertIn("review.evidence_missing", {item.code for item in missing_result.findings})
-            missing_phase = json.loads(json.dumps(phase))
-            missing_phase["baselineReview"]["evidence"] = "reviews/missing-baseline.json"
-            phase_result = check_repository(repo, profile(), current, missing_phase, {**review, "_evidencePath": "review.json"}, True)
-            self.assertIn("phase.baseline_evidence_path", {item.code for item in phase_result.findings})
-            wrong_phase = json.loads(json.dumps(phase))
-            wrong_phase["phaseId"] = "P2"
-            binding_result = check_repository(repo, profile(), current, wrong_phase, {**review, "_evidencePath": "review.json"}, True)
-            self.assertIn("phase.baseline_binding", {item.code for item in binding_result.findings})
-            (repo / "baseline-review.json").write_text(json.dumps({"schemaVersion": 999, "phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
-            schema_result = check_repository(repo, profile(), current, phase, {**review, "_evidencePath": "review.json"}, True)
-            self.assertIn("phase.baseline_binding", {item.code for item in schema_result.findings})
-            (repo / "baseline-review.json").write_text(json.dumps({"schemaVersion": 1, "phaseId": "P1", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": base}), encoding="utf-8")
-            outside_task = json.loads(json.dumps(current))
-            outside_task["ownership"]["owned"] = ["src/**"]
-            outside_result = check_repository(repo, profile(), outside_task, phase, {**review, "_evidencePath": "review.json"}, True)
-            self.assertIn("ownership.outside", {item.code for item in outside_result.findings})
-            forbidden_task = json.loads(json.dumps(current))
-            forbidden_task["ownership"]["forbidden"] = ["candidate.txt"]
-            forbidden_result = check_repository(repo, profile(), forbidden_task, phase, {**review, "_evidencePath": "review.json"}, True)
-            self.assertIn("ownership.forbidden", {item.code for item in forbidden_result.findings})
-            shared_task = json.loads(json.dumps(current))
-            shared_task["ownership"] = {"owned": ["src/**"], "shared": ["candidate.txt"], "forbidden": []}
-            shared_result = check_repository(repo, profile(), shared_task, phase, {**review, "_evidencePath": "review.json"}, True)
-            self.assertIn("ownership.shared", {item.code for item in shared_result.findings})
+            phase["taskDag"].append({"taskId": "TASK-2", "dependencies": []})
+            (repo / "phase.json").write_text(json.dumps(phase), encoding="utf-8")
+            missing = run_cli("check", "--repo", str(repo), "--profile", "profile.json", "--task", "task.json", "--phase", "phase.json", "--review", "reviews/candidate.json", "--all")
+            self.assertNotEqual(0, missing.returncode)
+            self.assertIn("phase.task_artifact_missing", {item["code"] for item in json.loads(missing.stdout)["findings"]})
 
     def test_candidate_on_sibling_task_branch_need_not_be_current_head(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -243,33 +224,9 @@ class IdentityAndCliTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(repo), "commit", "-m", "candidate"], check=True, capture_output=True)
             candidate = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
             subprocess.run(["git", "-C", str(repo), "checkout", "master"], check=True, capture_output=True)
-            value = task(state="Candidate", previousState="Active", baseSha=base, commits={"candidate": candidate, "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+            value = task(state="Candidate", previousState="Active", baseSha=base, commits={"candidate": candidate, "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
             result = check_repository(repo, profile("standard"), value)
             self.assertTrue(result.ok, result.as_dict())
-
-    def test_phase_prepare_does_not_claim_unreviewed_baseline(self):
-        with tempfile.TemporaryDirectory() as temp:
-            repo = Path(temp)
-            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
-            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
-            (repo / "README.md").write_text("base\n", encoding="utf-8")
-            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
-            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
-            baseline = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
-            unreviewed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P1", "--integration-branch", "main", "--output", "phase.json")
-            self.assertEqual("Planned", json.loads(unreviewed.stdout)["phase"]["baselineReview"]["status"])
-            evidence = repo / "reviews" / "base.json"
-            evidence.parent.mkdir()
-            evidence.write_text(json.dumps({"schemaVersion": 1, "phaseId": "P2", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
-            reviewed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P2", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "reviewed.json")
-            self.assertEqual("Accepted", json.loads(reviewed.stdout)["phase"]["baselineReview"]["status"])
-            evidence.write_text(json.dumps({"schemaVersion": 999, "phaseId": "P2", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"], "baselineSha": baseline}), encoding="utf-8")
-            wrong_schema = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P2", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "wrong-schema.json")
-            self.assertEqual("Planned", json.loads(wrong_schema.stdout)["phase"]["baselineReview"]["status"])
-            evidence.write_text("{", encoding="utf-8")
-            malformed = run_cli("phase", "--repo", str(repo), "prepare", "--phase-id", "P3", "--integration-branch", "main", "--baseline-review-evidence", "reviews/base.json", "--output", "malformed.json")
-            self.assertEqual("Planned", json.loads(malformed.stdout)["phase"]["baselineReview"]["status"])
 
     def test_idle_strict_profile_check_all_is_valid(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -298,30 +255,6 @@ class IdentityAndCliTests(unittest.TestCase):
             self.assertNotEqual(0, process.returncode)
             self.assertIn("runtime.task_missing", {item["code"] for item in output["findings"]})
 
-    def test_worktree_allocate_inspect_and_dry_release(self):
-        with tempfile.TemporaryDirectory() as temp:
-            container = Path(temp)
-            repo, root = container / "repo", container / "lemmings-worktrees"
-            repo.mkdir()
-            subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
-            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
-            (repo / "README.md").write_text("base\n", encoding="utf-8")
-            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
-            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
-            config = profile(); config["worktreeRoot"] = str(root)
-            (repo / "profile.json").write_text(json.dumps(config), encoding="utf-8")
-            allocated = run_cli("worktree", "--repo", str(repo), "--profile", "profile.json", "allocate", "--task", "TASK-1", "--branch", "codex/task-1")
-            self.assertEqual(0, allocated.returncode, allocated.stdout + allocated.stderr)
-            worktree = root / "task-1"
-            self.assertTrue(worktree.is_dir())
-            inspected = run_cli("worktree", "--repo", str(repo), "--profile", "profile.json", "inspect", "--path", str(worktree))
-            self.assertTrue(json.loads(inspected.stdout)["worktree"]["registered"])
-            release = run_cli("worktree", "--repo", str(repo), "--profile", "profile.json", "release", "--task", "TASK-1")
-            self.assertFalse(json.loads(release.stdout)["executed"])
-            self.assertTrue(worktree.exists())
-
-
 class ContractTests(unittest.TestCase):
     def test_mode_detection(self):
         self.assertEqual("simple", detect_mode(profile()))
@@ -344,8 +277,31 @@ class ContractTests(unittest.TestCase):
         self.assertIn("execution.handoff", codes)
 
     def test_user_pin_has_priority(self):
-        value = task(models={"requested": "gpt-custom:high", "assigned": DEFAULT_MODELS["complex-worker"], "actual": None})
+        value = task(models={"requested": "gpt-custom:high", "assigned": DEFAULT_MODELS["worker"], "actual": None})
         self.assertIn("model.pin", {f.code for f in validate_task(value, profile()).findings})
+
+    def test_retired_complex_worker_role_is_rejected(self):
+        value = task(role="complex-worker")
+        self.assertIn("task.role", {item.code for item in validate_task(value, profile()).findings})
+
+    def test_sol_medium_is_approved_high_risk_assignment_for_worker_role(self):
+        value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["highRiskModel"], "actual": None})
+        self.assertTrue(validate_task(value, profile()).ok)
+
+    def test_terra_max_is_approved_elevated_assignment_for_worker_role(self):
+        value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["elevatedModel"], "actual": None})
+        self.assertTrue(validate_task(value, profile()).ok)
+
+    def test_unapproved_unpinned_worker_assignment_is_rejected(self):
+        value = task(models={"requested": None, "assigned": "unapproved:model", "actual": None})
+        self.assertIn("model.default_assignment", {item.code for item in validate_task(value, profile()).findings})
+
+    def test_worker_routing_defaults_are_fixed(self):
+        for route in DEFAULT_WORKER_POLICY:
+            with self.subTest(route=route):
+                configured = profile()
+                configured["workerPolicy"][route] = "gpt-5.6-luna:low"
+                self.assertIn("model.worker_route_fixed", {item.code for item in validate_profile(configured).findings})
 
     def test_task_role_pin_overrides_repo_default_and_mismatch_fails(self):
         configured = profile()
@@ -373,39 +329,49 @@ class ContractTests(unittest.TestCase):
         self.assertIn("model.pin_policy", {f.code for f in validate_task(downgraded, profile()).findings})
 
     def test_fallback_requires_reason(self):
-        value = task(models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": "fallback"})
+        value = task(models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": "fallback"})
         configured = profile(); configured["fallback"] = {"allowed": ["fallback"]}
         self.assertIn("model.fallback_reason", {f.code for f in validate_task(value, configured).findings})
 
     def test_stale_review_is_rejected_and_accepted_not_integrated(self):
         value = task(
             state="Accepted", previousState="Candidate",
-            models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]},
+            models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]},
             commits={"candidate": "aaa", "fix": ["bbb"]},
             execution={"handoff": "done", "validationEvidence": [{"command": "test", "passed": True}]},
-            review={"status": "Accepted", "cycle": 1, "head": "aaa", "evidence": "reviews/TASK-1.json"},
+            reviewRef="reviews/TASK-1.json",
         )
-        result = validate_task(value, profile())
+        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": None, "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        result = validate_review(review, value)
         self.assertIn("review.stale", {f.code for f in result.findings})
         self.assertNotIn("integration.evidence", {f.code for f in result.findings})
 
     def test_second_failed_review_requires_replan(self):
-        value = task(state="Candidate", previousState="Candidate", commits={"candidate": "aaa", "fix": []}, execution={"handoff": "done", "validationEvidence": ["test"]}, review={"status": "ChangesRequested", "cycle": 2, "head": "aaa", "evidence": "review.json"})
-        self.assertIn("review.replan", {f.code for f in validate_task(value, profile()).findings})
+        value = task(state="Candidate", previousState="Candidate", baseSha="base", commits={"candidate": "aaa", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "ChangesRequested", "cycle": 2, "findings": [], "validation": []}
+        self.assertIn("review.replan", {f.code for f in validate_review(review, value).findings})
 
     def test_strict_wave_requires_unique_worktrees_and_nonoverlap(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True}
-        left = task(mode="strict", worktree="C:/wt/one")
-        right = task(taskId="TASK-2", mode="strict", worktree="C:/wt/one")
+        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [], "leases": []}
+        isolated = {"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 1, "approval": "not-required", "reason": "parallel"}
+        left = task(mode="strict", workspace=isolated)
+        right = task(taskId="TASK-2", mode="strict", workspace=isolated)
         result = validate_wave(ROOT, [left, right], phase)
         codes = {f.code for f in result.findings}
         self.assertIn("worktree.duplicate", codes)
         self.assertIn("ownership.overlap", codes)
 
     def test_external_resource_requires_unique_lease(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "leases": []}
-        value = task(mode="strict", worktree="C:/wt/one", risks=["externalResources"])
+        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [], "leases": []}
+        value = task(mode="strict", workspace={"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 1, "approval": "not-required", "reason": "external"}, risks=["externalResources"])
         self.assertIn("lease.required", {f.code for f in validate_wave(ROOT, [value], phase).findings})
+
+    def test_blocked_strict_refusal_does_not_require_worktree(self):
+        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": []}
+        value = task(mode="strict", state="Blocked", previousState="Ready", risks=["sharedContracts"], workspace={"policy": "isolated", "backend": "current", "path": None, "estimatedGiB": 12, "approval": "declined", "reason": "unsafe serial fallback"})
+        codes = {item.code for item in validate_wave(ROOT, [value], phase).findings}
+        self.assertNotIn("worktree.required", codes)
+        self.assertNotIn("workspace.approval", codes)
 
     def test_ready_strict_writer_requires_owned_paths(self):
         value = task(mode="strict", ownership={"owned": [], "shared": [], "forbidden": []})
@@ -413,13 +379,13 @@ class ContractTests(unittest.TestCase):
         candidate = task(mode="strict", state="Candidate", previousState="Active", baseSha="base", ownership={"owned": [], "shared": [], "forbidden": []})
         self.assertIn("ownership.required", {f.code for f in validate_task(candidate, profile()).findings})
 
-    def test_embedded_review_base_and_nonempty_range_are_required(self):
-        value = task(state="Accepted", previousState="Candidate", baseSha="base", commits={"candidate": "base", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]}, review={"taskId": "TASK-1", "base": "other", "head": "base", "status": "Accepted", "cycle": 0, "evidence": "review.json"})
-        codes = {item.code for item in validate_task(value, profile()).findings}
+    def test_review_base_and_nonempty_range_are_required(self):
+        value = task(state="Accepted", previousState="Candidate", baseSha="base", commits={"candidate": "base", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]}, reviewRef="review.json")
+        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "other", "headSha": "base"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        codes = {item.code for item in validate_review(review, value).findings}
         self.assertIn("review.base", codes)
-        empty = json.loads(json.dumps(value))
-        empty["review"]["base"] = "base"
-        self.assertIn("review.range", {item.code for item in validate_task(empty, profile()).findings})
+        review["subject"]["baseSha"] = "base"
+        self.assertIn("review.range", {item.code for item in validate_review(review, value).findings})
 
 
 class HookTests(unittest.TestCase):
@@ -581,11 +547,11 @@ class HookTests(unittest.TestCase):
         self.assertIn("effective pin", output["reason"])
 
     def test_writer_and_reviewer_dispatch_are_role_aware(self):
-        worker = task(role="worker", models={"requested": None, "assigned": "worker-model:medium", "actual": None})
-        configured = profile(); configured["models"]["worker"] = "worker-model:medium"
-        writer = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "profile": configured, "toolInput": {"task_name": "lemmings_worker", "message": "Implement the Ready task.", "model": "worker-model", "reasoning_effort": "medium"}})
+        worker = task(role="worker")
+        configured = profile()
+        writer = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "profile": configured, "toolInput": {"task_name": "lemmings_worker", "message": "Implement the Ready task.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
         self.assertEqual("allow", writer["decision"])
-        candidate = task(state="Candidate", previousState="Active", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+        candidate = task(state="Candidate", previousState="Active", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
         reviewer = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "high", "head": "abc"}})
         self.assertEqual("allow", reviewer["decision"])
         wrong_model = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "medium", "head": "abc"}})
@@ -593,18 +559,94 @@ class HookTests(unittest.TestCase):
         wrong_state = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review current candidate.", "model": "gpt-5.6-sol", "reasoning_effort": "high"}})
         self.assertEqual("block", wrong_state["decision"])
 
+    def test_high_risk_worker_uses_sol_medium_without_a_separate_role(self):
+        value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["highRiskModel"], "actual": None})
+        output = handle({
+            "event": "PreToolUse",
+            "toolName": "Agent",
+            "task": value,
+            "profile": profile(),
+            "toolInput": {
+                "task_name": "lemmings_worker",
+                "message": "Implement the high-risk Ready task.",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "medium",
+            },
+        })
+        self.assertEqual("allow", output["decision"])
+
+    def test_elevated_worker_uses_terra_max_without_a_separate_role(self):
+        value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["elevatedModel"], "actual": None})
+        output = handle({
+            "event": "PreToolUse",
+            "toolName": "Agent",
+            "task": value,
+            "profile": profile(),
+            "toolInput": {
+                "task_name": "lemmings_worker",
+                "message": "Implement the elevated Ready task.",
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "max",
+            },
+        })
+        self.assertEqual("allow", output["decision"])
+
+    def test_embedded_model_effort_cannot_hide_conflicting_spawn_effort(self):
+        value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["elevatedModel"], "actual": None})
+        output = handle({
+            "event": "PreToolUse",
+            "toolName": "Agent",
+            "task": value,
+            "profile": profile(),
+            "toolInput": {
+                "task_name": "lemmings_worker",
+                "message": "Implement.",
+                "model": "gpt-5.6-terra:max",
+                "reasoning_effort": "medium",
+            },
+        })
+        self.assertEqual("block", output["decision"])
+
+    def test_invalid_profile_worker_route_is_blocked_before_dispatch(self):
+        configured = profile()
+        configured["workerPolicy"]["elevatedModel"] = "rogue:model"
+        value = task(models={"requested": None, "assigned": "rogue:model", "actual": None})
+        output = handle({
+            "event": "PreToolUse",
+            "toolName": "Agent",
+            "task": value,
+            "profile": configured,
+            "toolInput": {"task_name": "lemmings_worker", "model": "rogue", "reasoning_effort": "model"},
+        })
+        self.assertEqual("block", output["decision"])
+        self.assertIn("workerPolicy.elevatedModel", output["reason"])
+
+    def test_worker_spawn_without_explicit_model_is_blocked_for_all_routes(self):
+        for assigned in (DEFAULT_MODELS["worker"], *DEFAULT_WORKER_POLICY.values()):
+            with self.subTest(assigned=assigned):
+                value = task(models={"requested": None, "assigned": assigned, "actual": None})
+                output = handle({
+                    "event": "PreToolUse",
+                    "toolName": "Agent",
+                    "task": value,
+                    "profile": profile(),
+                    "toolInput": {"task_name": "lemmings_worker", "message": "Implement."},
+                })
+                self.assertEqual("block", output["decision"])
+                self.assertIn("must be explicit", output["reason"])
+
     def test_actual_shaped_summarizer_is_bounded_read_only_role(self):
         value = task(state="Active", previousState="Ready")
         output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": value, "toolInput": {"task_name": "lemmings_summarizer", "message": "Summarize supplied evidence.", "model": "gpt-5.6-terra", "reasoning_effort": "low"}})
         self.assertEqual("allow", output["decision"])
 
     def test_strict_spawn_requires_explicit_role(self):
-        output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": task(), "toolInput": {"model": DEFAULT_MODELS["complex-worker"]}})
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": task(), "toolInput": {"model": DEFAULT_MODELS["worker"]}})
         self.assertEqual("block", output["decision"])
 
     def test_strict_writer_spawn_and_patch_require_owned_paths(self):
         value = task(mode="strict", ownership={"owned": [], "shared": [], "forbidden": []})
-        spawn = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_complex-worker", "message": "Implement.", "model": "gpt-5.6-sol", "reasoning_effort": "medium"}})
+        spawn = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
         write = handle({"event": "PreToolUse", "toolName": "apply_patch", "mode": "strict", "task": value, "changedPaths": ["lemmings/core.py"]})
         self.assertEqual("block", spawn["decision"])
         self.assertEqual("block", write["decision"])
@@ -663,7 +705,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual({}, host_output(output, "Stop", {}))
 
     def test_subagent_stop_requires_embedded_handoff(self):
-        value = task(state="Candidate", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["complex-worker"], "actual": DEFAULT_MODELS["complex-worker"]})
+        value = task(state="Candidate", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]})
         output = handle({"event": "SubagentStop", "task": value})
         self.assertEqual("block", output["decision"])
 

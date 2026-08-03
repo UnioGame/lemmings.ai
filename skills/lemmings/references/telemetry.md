@@ -1,6 +1,6 @@
 # Telemetry
 
-Telemetry is local, optional, and off by default. It never changes orchestration mode, model routing, acceptance, or hook policy.
+Telemetry and hooks are local, optional, and off by default. They never change the skill's lifecycle, model routing, acceptance, or safety policy.
 
 ## Levels
 
@@ -12,9 +12,9 @@ Exact tokens and model API latency are unsupported in schema version 1. Reports 
 
 ## Lifecycle discipline
 
-If telemetry is active, enter `discover`, `plan`, `refine`, `implement`, and `verify` at their real boundaries. Repeating the current stage is a no-op. Finish with the factual outcome; successful `lemmings close` records integration automatically.
+If telemetry is active, enter `discover`, `plan`, `refine`, `implement`, and `verify` at their real boundaries. Repeating the current stage is a no-op. Finish every run with the factual `lemmings metrics finish --outcome ...` command.
 
-For Standard work without an active `lemmings on --task` binding, pass the stable task ID until its packet exists, then pass the real packet path. A missing path-like value is rejected rather than recorded as an ID. Simple work may remain taskless. A successful Strict `wave plan` creates each worktree binding.
+Pass the stable task ID until its packet exists, then pass the real packet path. A missing path-like value is rejected rather than recorded as an ID. Simple work may remain taskless. For Strict work, invoke the first `metrics stage` from each task workspace so its binding records the actual worktree.
 
 Strict waves bind each task to its declared worktree. A hook without an unambiguous binding remains unbound and lowers report completeness. Never assign it to a task heuristically.
 
@@ -22,7 +22,7 @@ Strict waves bind each task to its declared worktree. A hook without an unambigu
 
 Raw events live under `.git/lemmings/telemetry` as immutable, deduplicated files. Do not store prompts, transcripts, hidden reasoning, tool inputs/outputs, code, diffs, secrets, authorization headers, or absolute paths in events or exports.
 
-Full telemetry imports existing validation/CI results; it does not run checks. Use the [quality observation template](../../../Documentation~/tasks/templates/quality-observation.json). Each signal requires `name`, `category`, numeric `value`, `unit`, `direction`, `status`, and `sourceRef`; optional `baseline` and `threshold` are also numeric. Categories are `tests`, `coverage`, `analyzer`, `complexity`, `performance`, `size`, or `cost`. Direction is `higher-better`, `lower-better`, or `target`; status is `pass`, `fail`, or `unknown`.
+Full telemetry imports existing validation/CI results; it does not run checks. A quality observation uses schema version 1 and binds `taskId`, `baseSha`, `headSha`, and `recordedAt` to a `signals` array. Each signal requires `name`, `category`, numeric `value`, `unit`, `direction`, `status`, and `sourceRef`; optional `baseline` and `threshold` are numeric. Categories are `tests`, `coverage`, `analyzer`, `complexity`, `performance`, `size`, or `cost`. Direction is `higher-better`, `lower-better`, or `target`; status is `pass`, `fail`, or `unknown`.
 
 Import through the task packet path when possible so `taskId`, `baseSha`, and candidate/fix or integration-merge `headSha` are cross-checked. An ID uses a unique local binding when one exists; without one it cannot validate packet SHAs.
 
@@ -32,4 +32,4 @@ A post-integration annotation requires kind, P0-P3 severity, confirmed or suspec
 
 Keep wall-clock lead time separate from summed agent time. Treat churn as task-size context, not productivity. Do not create a combined efficiency score or automatically change a mode/model.
 
-Comparative recommendations require at least five Integrated tasks in one explicit `telemetryCohort`, complete bound lifecycle stages, at least one passing quality signal per task, no failed quality signal, and no confirmed P0/P1 regression. Smaller, incomplete, or mixed samples remain descriptive. Use `lemmings scorecard` only for explicit benchmark or comparable cohort observations.
+Comparative recommendations require at least five Integrated tasks in one explicit `telemetryCohort`, complete bound lifecycle stages, at least one passing quality signal per task, no failed quality signal, and no confirmed P0/P1 regression. Smaller, incomplete, or mixed samples remain descriptive. Use `lemmings metrics report --benchmark` for explicit benchmark evidence.

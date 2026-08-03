@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from lemmings import hooks
-from lemmings.core import runtime_marker, validate_task
+from lemmings.contracts import runtime_marker, validate_task
 from lemmings.telemetry import (
     annotate_regression,
     bind_run,
@@ -50,16 +50,21 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
 
 def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
     value = {
+        "schemaVersion": 1,
         "taskId": "TASK-17",
+        "goal": "measure delivery",
+        "acceptance": ["report is complete"],
+        "dependencies": [],
         "mode": "standard",
         "state": state,
-        "role": "complex-worker",
-        "models": {"requested": None, "assigned": "gpt-5.6-sol:medium", "actual": "gpt-5.6-sol:medium"},
+        "role": "worker",
+        "models": {"requested": None, "assigned": "gpt-5.6-luna:max", "actual": "gpt-5.6-luna:max"},
         "baseSha": "base",
         "commits": {"candidate": "head", "fix": []},
         "execution": {"validationEvidence": [{"passed": True}]},
+        "workspace": {"policy": "auto", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "serial"},
         "validation": {"debt": []},
-        "review": {"status": "Accepted", "cycle": 1},
+        "reviewRef": "reviews/TASK-17.json",
         "close": {"integrationValidationPassed": state == "Integrated"},
     }
     if cohort:
@@ -407,8 +412,8 @@ class TelemetryTests(unittest.TestCase):
         current = task()
         current["state"] = "C:/private/source"
         current["mode"] = "custom"
-        current["review"]["status"] = "made-up"
-        summary = summarize_task(current)
+        review = {"status": "made-up", "cycle": 1}
+        summary = summarize_task(current, review)
         self.assertIsNone(summary["state"])
         self.assertIsNone(summary["mode"])
         self.assertIsNone(summary["reviewStatus"])

@@ -1,4 +1,4 @@
 interface:
   display_name: "Lemmings"
-  short_description: "Orchestrate discover-to-verify delivery"
-  default_prompt: "Use $lemmings to discover, plan, refine, implement, and verify this repository task."
+  short_description: "Smart proportional delivery orchestration"
+  default_prompt: "Use $lemmings to select a safe mode and workspace, then discover, plan, refine, implement, and verify this repository task."

@@ -1,6 +1,0 @@
-name = "lemmings-orchestrator"
-description = "Sol High orchestrator for discover-to-verify delivery."
-model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
-sandbox_mode = "workspace-write"
-developer_instructions = "Follow Discover -> Plan -> Refine -> Implement -> Verify. Do not dispatch implementation before Refine makes the task Ready. Choose proportional contracts, enforce ownership and model pins, coordinate immutable review of the actual range, integrate Accepted tasks, run lemmings check, and record close evidence."

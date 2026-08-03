@@ -5,11 +5,8 @@
   "integrationBranch": "codex/phase-1",
   "contractsFrozen": true,
   "contracts": [],
-  "baselineReview": {
-    "status": "Planned",
-    "reviewerModel": null,
-    "evidence": null
-  },
+  "baselineReviewRef": "docs/tasks/reviews/PHASE-1-baseline.json",
+  "taskDag": [],
   "leases": [],
   "close": { "mergeCommits": [], "phaseValidation": [] }
 }

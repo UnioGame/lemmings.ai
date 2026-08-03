@@ -13,10 +13,10 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.core import as_list, candidate_head, path_matches, read_object, runtime_marker, validate_models
+    from lemmings.contracts import as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile
     from lemmings.telemetry import read_binding, record_hook_event, record_telemetry_error
 else:
-    from .core import as_list, candidate_head, path_matches, read_object, runtime_marker, validate_models
+    from .contracts import as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile
     from .telemetry import read_binding, record_hook_event, record_telemetry_error
 
 READ_ONLY_COMMANDS = {
@@ -57,14 +57,14 @@ def requested_role(payload: Mapping[str, Any]) -> str | None:
     if isinstance(tool_input, dict):
         candidates.extend(tool_input.get(key) for key in ("role", "agent_type", "subagent_type", "task_name", "profile"))
         message = str(tool_input.get("message") or "").lower()
-        match = re.search(r"(?:role\s*[:=]\s*|as\s+|lemmings[-_])(reviewer|explorer|validator|summarizer|orchestrator|complex-worker|worker)\b", message)
+        match = re.search(r"(?:role\s*[:=]\s*|as\s+|lemmings[-_])(reviewer|explorer|validator|summarizer|orchestrator|worker)\b", message)
         if match:
             candidates.append(match.group(1))
     for explicit in candidates:
         if not explicit:
             continue
         value = str(explicit).lower().replace(" ", "-")
-        for role in ("reviewer", "explorer", "validator", "summarizer", "orchestrator", "complex-worker", "worker"):
+        for role in ("reviewer", "explorer", "validator", "summarizer", "orchestrator", "worker"):
             token = role.replace("-", "[-_]")
             if re.search(rf"(?:^|[-_]){token}(?:$|[-_])", value):
                 return role
@@ -83,7 +83,12 @@ def requested_model(payload: Mapping[str, Any]) -> str | None:
     if not model:
         return None
     value = str(model)
-    return value if ":" in value or not effort else f"{value}:{effort}"
+    if ":" in value:
+        embedded_effort = value.rpartition(":")[2]
+        if effort and embedded_effort != str(effort):
+            return f"{value}#conflicting-effort:{effort}"
+        return value
+    return value if not effort else f"{value}:{effort}"
 
 
 def changed_paths(payload: Mapping[str, Any]) -> list[str]:
@@ -370,16 +375,20 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("allow", f"bounded {role} dispatch accepted")
             if task.get("state") != "Ready":
                 return decision("block", "writer requires a Ready task")
-            model_result = validate_models(task, payload.get("profile") or {})
+            profile = payload.get("profile") or {}
+            profile_result = validate_profile(profile)
+            if not profile_result.ok:
+                return decision("block", profile_result.findings[0].message)
+            model_result = validate_models(task, profile)
             if not model_result.ok:
                 return decision("block", model_result.findings[0].message)
-            if requested and requested != assigned:
-                return decision("block", "writer spawn model differs from models.assigned")
+            if requested != assigned:
+                return decision("block", "writer spawn model must be explicit and equal models.assigned")
             if mode == "strict" and not as_list((task.get("ownership") or {}).get("owned")):
                 return decision("block", "Strict writer requires non-empty ownership.owned")
             isolated = mode == "strict" or payload.get("parallelWriters") or payload.get("dirtyPrimary")
             if writer and isolated:
-                declared = task.get("worktree")
+                declared = task_worktree(task)
                 if not declared:
                     return decision("block", "Strict, parallel, or dirty-primary writer requires an isolated worktree")
                 cwd = Path(str(payload.get("cwd") or os.getcwd())).resolve()

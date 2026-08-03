@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "reviewId": "REVIEW-17",
+  "subject": {
+    "kind": "candidate",
+    "taskId": "TASK-17",
+    "baseSha": "<sha>",
+    "headSha": "<candidate-or-fix-sha>"
+  },
+  "status": "Pending",
+  "reviewerModel": "gpt-5.6-sol:high",
+  "cycle": 1,
+  "findings": [],
+  "validation": []
+}

@@ -1,6 +1,0 @@
-name = "lemmings-worker"
-description = "Worker for a bounded Standard or Strict task packet."
-model = "gpt-5.6-terra"
-model_reasoning_effort = "medium"
-sandbox_mode = "workspace-write"
-developer_instructions = "Implement one Ready task within owned paths. Record actual model, embedded handoff, validation, and a candidate commit. Do not spawn agents."

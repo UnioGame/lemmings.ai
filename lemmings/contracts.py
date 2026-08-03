@@ -1,4 +1,4 @@
-"""Canonical schema-v1 contracts for Lemmings."""
+"""Canonical schema-v1 orchestration contracts for Lemmings."""
 
 from __future__ import annotations
 
@@ -35,9 +35,15 @@ STRICT_RISKS = {
 DEFAULT_MODELS = {
     "orchestrator": "gpt-5.6-sol:high",
     "reviewer": "gpt-5.6-sol:high",
-    "complex-worker": "gpt-5.6-sol:medium",
+    "worker": "gpt-5.6-luna:max",
+    "validator": "gpt-5.6-terra:medium",
+}
+DEFAULT_WORKER_POLICY = {
+    "elevatedModel": "gpt-5.6-terra:max",
+    "highRiskModel": "gpt-5.6-sol:medium",
 }
 ORCHESTRATOR_EFFORTS = {"high", "xhigh", "max", "ultra"}
+TASK_ROLES = {"orchestrator", "worker", "reviewer", "validator", "explorer", "summarizer", "shared-contract-owner"}
 
 
 @dataclass
@@ -202,9 +208,21 @@ def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     if not isinstance(models, dict):
         result.error("profile.models", "models must be an object")
     else:
+        if "complex-worker" in models:
+            result.error("profile.legacy_role", "complex-worker is not valid in schema version 1; use worker")
         for role, required in DEFAULT_MODELS.items():
             if models.get(role, required) != required:
                 result.error("model.fixed", f"{role} must use {required}")
+    worker_policy = profile.get("workerPolicy", DEFAULT_WORKER_POLICY)
+    if not isinstance(worker_policy, Mapping):
+        result.error("profile.worker_policy", "workerPolicy must be an object")
+    else:
+        for route, required in DEFAULT_WORKER_POLICY.items():
+            if worker_policy.get(route, required) != required:
+                result.error(
+                    "model.worker_route_fixed",
+                    f"workerPolicy.{route} must use {required}",
+                )
     fallback = profile.get("fallback", {})
     if fallback and not isinstance(fallback, dict):
         result.error("profile.fallback", "fallback must be an object")
@@ -228,6 +246,19 @@ def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
                 violation = model_pin_violation(str(role), str(model))
                 if violation:
                     result.error("model.pin_policy", f"taskModels.{task_id}: {violation}")
+    tooling = profile.get("tooling") or {}
+    if tooling:
+        if not isinstance(tooling, Mapping) or not tooling.get("root"):
+            result.error("profile.tooling", "tooling must contain repo-relative root")
+        elif Path(str(tooling["root"])).is_absolute():
+            result.error("profile.tooling", "profile tooling.root must be repo-relative; use the Git-common environment file for local absolute paths")
+    game = profile.get("game") or {}
+    if game:
+        workspace = game.get("workspace") if isinstance(game, Mapping) else None
+        if not isinstance(workspace, Mapping):
+            result.error("profile.game", "game.workspace must be an object")
+        elif workspace.get("largeThresholdGiB", 10) != 10:
+            result.error("profile.workspace_threshold", "large workspace approval threshold is fixed at 10 GiB")
     return result
 
 
@@ -251,6 +282,8 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
     if not assigned:
         result.error("model.assigned", "models.assigned is required before dispatch")
     role = str(task.get("role", "worker"))
+    if role not in TASK_ROLES:
+        result.error("task.role", f"unsupported task role: {role}")
     task_id = str(task.get("taskId", ""))
     profile = profile or {}
     task_pins = (profile.get("taskModels") or {}).get(task_id, {})
@@ -268,8 +301,15 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
     if pin_violation:
         result.error("model.pin_policy", pin_violation)
     default_assignment = (profile.get("models") or {}).get(role) or DEFAULT_MODELS.get(role)
-    if not effective_pin and not requested and default_assignment and assigned != default_assignment:
-        result.error("model.default_assignment", f"models.assigned must equal role default {default_assignment}")
+    allowed_assignments = {default_assignment} if default_assignment else set()
+    if role == "worker":
+        worker_policy = profile.get("workerPolicy") or DEFAULT_WORKER_POLICY
+        if isinstance(worker_policy, Mapping):
+            for route, required in DEFAULT_WORKER_POLICY.items():
+                allowed_assignments.add(worker_policy.get(route) or required)
+    if not effective_pin and not requested and allowed_assignments and assigned not in allowed_assignments:
+        expected = " or ".join(sorted(str(value) for value in allowed_assignments))
+        result.error("model.default_assignment", f"models.assigned must equal an approved role assignment: {expected}")
     if actual and actual != assigned:
         fallback_reason = models.get("fallbackReason")
         allowed = as_list(profile.get("fallback", {}).get("allowed"))
@@ -294,16 +334,29 @@ def candidate_head(task: Mapping[str, Any]) -> str | None:
     return str(fixes[-1]) if fixes else (str(commits.get("candidate")) if commits.get("candidate") else None)
 
 
+def task_worktree(task: Mapping[str, Any]) -> str | None:
+    """Return the isolated workspace path declared by the canonical task contract."""
+    workspace = task.get("workspace") or {}
+    value = workspace.get("path") if isinstance(workspace, Mapping) else None
+    return str(value) if value else None
+
+
 def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = None) -> ValidationResult:
     result = ValidationResult()
     if task.get("schemaVersion") != SCHEMA_VERSION:
         result.error("task.schema", "schemaVersion must be 1")
-    for name in ("taskId", "state", "ownership", "models", "validation"):
-        if not task.get(name):
+    for name in ("taskId", "goal", "acceptance", "state", "ownership", "models", "workspace", "validation"):
+        if name not in task or task.get(name) is None:
             result.error("task.missing", f"missing task field: {name}")
     state = str(task.get("state", ""))
     if state not in TASK_STATES:
         result.error("state.unknown", f"unknown task state: {state}")
+    if state not in {"Planned", "Cancelled", "Superseded"}:
+        if not isinstance(task.get("goal"), str) or not str(task.get("goal")).strip():
+            result.error("task.goal", f"{state} requires a non-empty goal")
+        acceptance = task.get("acceptance")
+        if not isinstance(acceptance, list) or not acceptance:
+            result.error("task.acceptance", f"{state} requires at least one acceptance criterion")
     previous = task.get("previousState")
     if previous and state not in TRANSITIONS.get(str(previous), set()) and state != previous:
         result.error("state.transition", f"illegal transition: {previous} -> {state}")
@@ -317,12 +370,32 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     ownership = task.get("ownership") or {}
     if mode == "strict" and role not in {"reviewer", "explorer", "validator", "summarizer"} and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"} and not as_list(ownership.get("owned")):
         result.error("ownership.required", f"{state} Strict writer requires non-empty ownership.owned")
-    review = task.get("review") or {}
-    cycle = review.get("cycle", 0) if isinstance(review, dict) else -1
-    if not isinstance(cycle, int) or isinstance(cycle, bool) or cycle < 0 or cycle > 2:
-        result.error("review.cycle", "review.cycle must be between 0 and 2")
-    if cycle >= 2 and review.get("status") == "ChangesRequested" and state != "Replan Required":
-        result.error("review.replan", "second failed review requires Replan Required")
+    workspace = task.get("workspace") or {}
+    if not isinstance(workspace, Mapping):
+        result.error("workspace.shape", "workspace must be an object")
+        workspace = {}
+    backend = workspace.get("backend")
+    if workspace.get("policy") not in {"auto", "current", "isolated"}:
+        result.error("workspace.policy", "workspace.policy must be auto, current, or isolated")
+    if backend not in {"current", "code-worktree", "package-worktree", "unity-clone"}:
+        result.error("workspace.backend", "workspace.backend must be current, code-worktree, package-worktree, or unity-clone")
+    estimated = workspace.get("estimatedGiB")
+    if estimated is not None and (not isinstance(estimated, (int, float)) or isinstance(estimated, bool) or estimated < 0):
+        result.error("workspace.estimate", "workspace.estimatedGiB must be a non-negative number or null")
+    if isinstance(estimated, (int, float)) and estimated > 10 and backend != "current" and workspace.get("approval") != "approved":
+        result.error("workspace.approval", "workspace estimates above 10 GiB require explicit approval")
+    if workspace.get("approval") not in {"not-required", "approved", "declined"}:
+        result.error("workspace.approval", "workspace.approval must be not-required, approved, or declined")
+    if not workspace.get("reason"):
+        result.error("workspace.reason", "workspace.reason is required")
+    if backend in {"code-worktree", "package-worktree", "unity-clone"} and not workspace.get("path"):
+        result.error("workspace.path", f"{backend} requires workspace.path")
+    if backend in {"code-worktree", "package-worktree", "unity-clone"} and estimated is None:
+        result.error("workspace.estimate", f"{backend} requires workspace.estimatedGiB")
+    if backend in {"code-worktree", "package-worktree", "unity-clone"} and workspace.get("approval") == "declined":
+        result.error("workspace.declined", "declined isolation must fall back to safe current work or Blocked")
+    if "parallelWriters" in as_list(task.get("risks")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
+        result.error("workspace.parallel", "parallel writers cannot share the current checkout")
     if state in {"Candidate", "Accepted", "Integrated"}:
         if not task.get("baseSha"):
             result.error("commit.base_required", f"{state} requires baseSha")
@@ -337,17 +410,8 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
             result.error("model.actual_required", f"{state} requires models.actual")
         if not (task.get("execution") or {}).get("handoff"):
             result.error("execution.handoff", f"{state} requires embedded execution.handoff")
-    if state in {"Accepted", "Integrated"}:
-        if review.get("status") != "Accepted":
-            result.error("review.accepted", f"{state} requires an Accepted review")
-        if review.get("head") != candidate_head(task):
-            result.error("review.stale", "review head must equal the latest candidate/fix head")
-        if not review.get("evidence"):
-            result.error("review.evidence", "accepted task must reference immutable review evidence")
-        if review.get("base") != task.get("baseSha"):
-            result.error("review.base", "embedded review base must equal task baseSha")
-        if review.get("base") == review.get("head"):
-            result.error("review.range", "review range must be non-empty")
+    if state in {"Accepted", "Integrated"} and not task.get("reviewRef"):
+        result.error("review.reference", f"{state} requires reviewRef")
     if state == "Integrated":
         close = task.get("close") or {}
         if not close.get("mergeCommit") or close.get("integrationValidationPassed") is not True:
@@ -364,42 +428,94 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
             result.error("phase.missing", f"missing phase field: {name}")
     if phase.get("contractsFrozen") is not True:
         result.error("phase.contracts", "Strict phase requires frozen contracts")
-    baseline_review = phase.get("baselineReview") or {}
-    if baseline_review.get("status") != "Accepted":
-        result.error("phase.baseline_review", "Strict phase requires an Accepted baselineReview")
-    if baseline_review.get("reviewerModel") != DEFAULT_MODELS["reviewer"]:
-        result.error("phase.baseline_reviewer", f"baseline review must use {DEFAULT_MODELS['reviewer']}")
-    if not baseline_review.get("evidence"):
-        result.error("phase.baseline_evidence", "accepted baseline review requires immutable evidence")
+    if not phase.get("baselineReviewRef"):
+        result.error("phase.baseline_review", "Strict phase requires baselineReviewRef")
+    dag = phase.get("taskDag")
+    if not isinstance(dag, list):
+        result.error("phase.task_dag", "Strict phase requires taskDag array")
+    else:
+        dependencies: dict[str, list[str]] = {}
+        for index, node in enumerate(dag):
+            if not isinstance(node, Mapping) or not node.get("taskId") or not isinstance(node.get("dependencies", []), list):
+                result.error("phase.task_dag", f"taskDag[{index}] requires taskId and dependencies array")
+                continue
+            task_id = str(node["taskId"])
+            if task_id in dependencies:
+                result.error("phase.task_duplicate", f"duplicate taskDag taskId: {task_id}")
+            dependencies[task_id] = [str(value) for value in node.get("dependencies", [])]
+        for task_id, values in dependencies.items():
+            for dependency in values:
+                if dependency not in dependencies:
+                    result.error("phase.dependency_missing", f"{task_id} depends on unknown task {dependency}")
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        def visit(task_id: str) -> None:
+            if task_id in visiting:
+                result.error("phase.dependency_cycle", f"taskDag contains a cycle at {task_id}")
+                return
+            if task_id in visited:
+                return
+            visiting.add(task_id)
+            for dependency in dependencies.get(task_id, []):
+                visit(dependency)
+            visiting.remove(task_id)
+            visited.add(task_id)
+        for task_id in dependencies:
+            visit(task_id)
     return result
 
 
-def validate_review(review: Mapping[str, Any], task: Mapping[str, Any], phase: Mapping[str, Any] | None = None) -> ValidationResult:
+def validate_review(
+    review: Mapping[str, Any],
+    task: Mapping[str, Any] | None = None,
+    phase: Mapping[str, Any] | None = None,
+) -> ValidationResult:
     result = ValidationResult()
     if review.get("schemaVersion") != SCHEMA_VERSION:
         result.error("review.schema", "schemaVersion must be 1")
-    if review.get("taskId") != task.get("taskId"):
-        result.error("review.task", "review taskId differs from task")
+    if not review.get("reviewId"):
+        result.error("review.id", "reviewId is required")
     if review.get("status") not in REVIEW_STATES:
         result.error("review.status", f"review status must be one of {sorted(REVIEW_STATES)}")
-    if review.get("head") != candidate_head(task):
-        result.error("review.stale", "review head must equal latest candidate/fix head")
     if review.get("reviewerModel") != DEFAULT_MODELS["reviewer"]:
         result.error("review.model", f"reviewer must use {DEFAULT_MODELS['reviewer']}")
-    embedded = task.get("review") or {}
-    for field_name in ("taskId", "base", "head", "status"):
-        if embedded.get(field_name) != review.get(field_name):
-            result.error("review.binding", f"task review {field_name} differs from immutable evidence")
-    if not embedded.get("evidence"):
-        result.error("review.evidence_path", "task review must reference immutable review evidence")
-    if phase and review.get("base") != phase.get("baselineSha"):
-        result.error("review.base", "review base must equal phase baselineSha")
-    if review.get("base") != task.get("baseSha"):
-        result.error("review.base", "immutable review base must equal task baseSha")
-    if review.get("base") == review.get("head"):
-        result.error("review.range", "immutable review range must be non-empty")
-    if task.get("state") in {"Accepted", "Integrated"} and review.get("status") != "Accepted":
-        result.error("review.verdict", "Accepted and Integrated tasks require Accepted immutable review")
+    if not isinstance(review.get("findings"), list):
+        result.error("review.findings", "review findings must be an array")
+    if not isinstance(review.get("validation"), list):
+        result.error("review.validation", "review validation must be an array")
+    cycle = review.get("cycle")
+    if not isinstance(cycle, int) or isinstance(cycle, bool) or cycle < 1 or cycle > 2:
+        result.error("review.cycle", "review cycle must be 1 or 2")
+    subject = review.get("subject") or {}
+    kind = subject.get("kind") if isinstance(subject, Mapping) else None
+    if kind == "candidate":
+        if not task:
+            result.error("review.task_required", "candidate review requires its task packet")
+            return result
+        if subject.get("taskId") != task.get("taskId"):
+            result.error("review.task", "review subject taskId differs from task")
+        if subject.get("headSha") != candidate_head(task):
+            result.error("review.stale", "review subject headSha must equal latest candidate/fix head")
+        if subject.get("baseSha") != task.get("baseSha"):
+            result.error("review.base", "review subject baseSha must equal task baseSha")
+        if subject.get("baseSha") == subject.get("headSha"):
+            result.error("review.range", "review range must be non-empty")
+        if task.get("state") in {"Accepted", "Integrated"} and review.get("status") != "Accepted":
+            result.error("review.verdict", "Accepted and Integrated tasks require an Accepted review")
+        if review.get("status") == "ChangesRequested" and cycle == 2 and task.get("state") != "Replan Required":
+            result.error("review.replan", "second failed review requires Replan Required")
+    elif kind == "baseline":
+        if not phase:
+            result.error("review.phase_required", "baseline review requires its phase artifact")
+            return result
+        if subject.get("phaseId") != phase.get("phaseId"):
+            result.error("review.phase", "review subject phaseId differs from phase")
+        if subject.get("sha") != phase.get("baselineSha"):
+            result.error("review.baseline", "review subject sha must equal phase baselineSha")
+        if review.get("status") != "Accepted":
+            result.error("review.baseline_status", "Strict baseline review must be Accepted")
+    else:
+        result.error("review.subject", "review subject.kind must be candidate or baseline")
     return result
 
 
@@ -452,7 +568,7 @@ def validate_repository_evidence(
 ) -> ValidationResult:
     result = ValidationResult()
     if phase:
-        value = (phase.get("baselineReview") or {}).get("evidence")
+        value = phase.get("baselineReviewRef")
         relative, target = canonical_evidence_path(repo, value)
         if not relative or not target or not target.is_file():
             result.error("phase.baseline_evidence_path", "baseline review evidence must be an existing file inside the repository")
@@ -462,21 +578,12 @@ def validate_repository_evidence(
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 result.error("phase.baseline_evidence_parse", f"invalid baseline review evidence: {error}")
             else:
-                expected = {
-                    "schemaVersion": SCHEMA_VERSION,
-                    "phaseId": phase.get("phaseId"),
-                    "baselineSha": phase.get("baselineSha"),
-                    "status": "Accepted",
-                    "reviewerModel": DEFAULT_MODELS["reviewer"],
-                }
-                for field_name, expected_value in expected.items():
-                    if evidence.get(field_name) != expected_value:
-                        result.error("phase.baseline_binding", f"baseline review {field_name} differs from phase")
+                result.extend(validate_review(evidence, phase=phase))
         baseline = phase.get("baselineSha")
         if baseline and git(repo, "rev-parse", "--verify", f"{baseline}^{{commit}}").returncode:
             result.error("commit.baseline_missing", f"phase baseline does not resolve: {baseline}")
     if review:
-        embedded = (task.get("review") or {}).get("evidence")
+        embedded = task.get("reviewRef")
         embedded_relative, embedded_target = canonical_evidence_path(repo, embedded)
         actual_relative, actual_target = canonical_evidence_path(repo, review.get("_evidencePath"))
         if not embedded_relative or not embedded_target or not embedded_target.is_file():
@@ -513,10 +620,24 @@ def validate_repository_ownership(repo: Path, task: Mapping[str, Any]) -> Valida
     return result
 
 
-def validate_wave(repo: Path, tasks: Iterable[Mapping[str, Any]], phase: Mapping[str, Any], profile: Mapping[str, Any] | None = None) -> ValidationResult:
+def validate_wave(
+    repo: Path,
+    tasks: Iterable[Mapping[str, Any]],
+    phase: Mapping[str, Any],
+    profile: Mapping[str, Any] | None = None,
+    complete: bool = True,
+) -> ValidationResult:
     result = validate_phase(phase)
     result.extend(validate_repository_evidence(repo, {}, phase, None))
     tasks = list(tasks)
+    dag = {
+        str(node.get("taskId")): [str(value) for value in node.get("dependencies", [])]
+        for node in as_list(phase.get("taskDag")) if isinstance(node, Mapping) and node.get("taskId")
+    }
+    task_ids = {str(task.get("taskId") or "") for task in tasks}
+    if complete:
+        for missing in sorted(set(dag) - task_ids):
+            result.error("phase.task_artifact_missing", f"phase task has no loaded Task artifact: {missing}")
     worktrees: set[str] = set()
     lease_owners: dict[str, str] = {}
     for lease in as_list(phase.get("leases")):
@@ -531,14 +652,23 @@ def validate_wave(repo: Path, tasks: Iterable[Mapping[str, Any]], phase: Mapping
         lease_owners[resource] = owner
     for task in tasks:
         result.extend(validate_task(task, profile))
-        worktree = str(task.get("worktree") or "")
-        if not worktree:
+        task_id = str(task.get("taskId") or "")
+        if detect_mode(profile, task, phase) != "strict":
+            result.error("phase.task_mode", f"phase task {task_id} must use Strict mode")
+        if task_id not in dag:
+            result.error("phase.task_missing", f"Strict task {task_id} is absent from phase.taskDag")
+        elif [str(value) for value in as_list(task.get("dependencies"))] != dag[task_id]:
+            result.error("phase.dependency_drift", f"task {task_id} dependencies differ from phase.taskDag")
+        worktree = str(task_worktree(task) or "")
+        dispatchable = task.get("state") in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}
+        if dispatchable and not worktree:
             result.error("worktree.required", f"Strict task {task.get('taskId')} requires worktree")
         normalized = normalize_path(worktree)
-        if normalized in worktrees:
-            result.error("worktree.duplicate", f"duplicate worktree: {worktree}")
-        worktrees.add(normalized)
-        if "externalResources" in as_list(task.get("risks")) and str(task.get("taskId")) not in lease_owners.values():
+        if worktree:
+            if normalized in worktrees:
+                result.error("worktree.duplicate", f"duplicate worktree: {worktree}")
+            worktrees.add(normalized)
+        if dispatchable and "externalResources" in as_list(task.get("risks")) and str(task.get("taskId")) not in lease_owners.values():
             result.error("lease.required", f"external-resource task {task.get('taskId')} requires an active lease")
     for index, task in enumerate(tasks):
         left = as_list((task.get("ownership") or {}).get("owned"))
@@ -582,7 +712,7 @@ def check_repository(
             result.extend(validate_phase(phase))
             result.extend(validate_repository_evidence(repo, {}, phase, None))
         if review:
-            result.error("review.task_required", "review evidence cannot be validated without its task packet")
+            result.extend(validate_review(review, phase=phase))
         return result
     result.data["idle"] = False
     result.extend(validate_task(task, profile))
@@ -594,8 +724,8 @@ def check_repository(
         if not phase:
             result.error("phase.required", "Strict lifecycle requires a phase artifact")
         else:
-            result.extend(validate_wave(repo, [task], phase, profile))
-        worktree_value = task.get("worktree")
+            result.extend(validate_wave(repo, [task], phase, profile, complete=False))
+        worktree_value = task_worktree(task)
         if worktree_value:
             info = inspect_worktree(repo, resolve_path(repo, str(worktree_value)) or repo)
             result.data["worktree"] = info

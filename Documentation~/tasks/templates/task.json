@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "taskId": "TASK-17",
+  "goal": "<bounded outcome>",
+  "acceptance": ["<observable acceptance criterion>"],
+  "dependencies": [],
+  "mode": "standard",
+  "state": "Ready",
+  "previousState": "Planned",
+  "role": "worker",
+  "risks": [],
+  "telemetryCohort": null,
+  "ownership": { "owned": ["<owned path>"], "shared": [], "forbidden": [] },
+  "models": { "requested": null, "assigned": "gpt-5.6-luna:max", "actual": null },
+  "workspace": {
+    "policy": "auto",
+    "backend": "current",
+    "path": null,
+    "estimatedGiB": 0,
+    "approval": "not-required",
+    "reason": "Single safe writer"
+  },
+  "execution": { "handoff": null, "validationEvidence": [] },
+  "baseSha": null,
+  "commits": { "candidate": null, "fix": [] },
+  "validation": { "riskToTest": [], "commands": [], "allowedOutputs": [], "debt": [] },
+  "reviewRef": null,
+  "close": { "mergeCommit": null, "integrationValidationPassed": false }
+}

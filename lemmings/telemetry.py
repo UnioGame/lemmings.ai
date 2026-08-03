@@ -14,7 +14,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping
 
-from .core import MODES, REVIEW_STATES, SCHEMA_VERSION, TASK_STATES, candidate_head, git, git_common_dir, read_object
+from .contracts import MODES, REVIEW_STATES, SCHEMA_VERSION, TASK_STATES, candidate_head, git, git_common_dir, read_object
 
 TELEMETRY_MODES = {"off", "basic", "full"}
 LIFECYCLE_STAGES = ("discover", "plan", "refine", "implement", "verify")
@@ -287,13 +287,26 @@ def record_event(
     return payload
 
 
-def summarize_task(task: Mapping[str, Any] | None) -> dict[str, Any]:
+def _review_for_task(repo: Path, task: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    reference = (task or {}).get("reviewRef")
+    if not reference:
+        return None
+    target = Path(str(reference))
+    target = target if target.is_absolute() else repo / target
+    try:
+        target.resolve().relative_to(repo.resolve())
+        return read_object(target) if target.is_file() else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def summarize_task(task: Mapping[str, Any] | None, review: Mapping[str, Any] | None = None) -> dict[str, Any]:
     if not task:
         return {}
     models = task.get("models") or {}
     validation = task.get("validation") or {}
     execution = task.get("execution") or {}
-    review = task.get("review") or {}
+    review = review or {}
     commits = task.get("commits") or {}
     close = task.get("close") or {}
     evidence = execution.get("validationEvidence") or []
@@ -346,14 +359,15 @@ def git_change_summary(repo: Path, task: Mapping[str, Any] | None) -> dict[str, 
 
 
 def record_task_observation(repo: Path, cwd: Path, task: Mapping[str, Any], source: str = "cli") -> dict[str, Any] | None:
-    data: dict[str, Any] = {"task": summarize_task(task)}
+    review = _review_for_task(repo, task)
+    data: dict[str, Any] = {"task": summarize_task(task, review)}
     changes = git_change_summary(repo, task)
     if changes:
         data["git"] = changes
     return record_event(
         repo, "task.observed", source=source, cwd=cwd, task_id=task.get("taskId"),
         data=data,
-        dedupe_parts=("task.observed", task.get("taskId"), task.get("state"), candidate_head(task), (task.get("review") or {}).get("cycle")),
+        dedupe_parts=("task.observed", task.get("taskId"), task.get("state"), candidate_head(task), (review or {}).get("cycle")),
     )
 
 
@@ -396,7 +410,7 @@ def enter_stage(
     binding["currentStage"] = stage
     binding["stageEnteredAt"] = now
     atomic_write_json(binding_path(repo, cwd), binding)
-    data = {"task": summarize_task(task)} if task else {}
+    data = {"task": summarize_task(task, _review_for_task(repo, task))} if task else {}
     record_event(
         repo, "stage.entered", source="cli", cwd=cwd, binding=binding, timestamp=now,
         stage=stage, data=data, dedupe_parts=(binding["runId"], stage, now, "enter"),
@@ -429,7 +443,7 @@ def finish_run(
             stage=str(binding["currentStage"]), data={"durationSeconds": duration},
             dedupe_parts=(binding["runId"], binding["currentStage"], binding["stageEnteredAt"], "exit"),
         )
-    data = {"outcome": outcome, "task": summarize_task(task)}
+    data = {"outcome": outcome, "task": summarize_task(task, _review_for_task(repo, task))}
     changes = git_change_summary(repo, task)
     if changes:
         data["git"] = changes
@@ -920,6 +934,16 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     ]
     if completeness["missing"]:
         lines.extend(("", "Missing evidence: " + ", ".join(completeness["missing"])))
+    if report.get("benchmark"):
+        benchmark = report["benchmark"]
+        lines.extend((
+            "",
+            "## Benchmark",
+            "",
+            f"- Status: {benchmark['status']}",
+            f"- Comparable observations: {benchmark['observations']}",
+            f"- Eligible for routing review: {benchmark['eligible']}",
+        ))
     return "\n".join(lines) + "\n"
 
 
@@ -1012,7 +1036,7 @@ def record_hook_event(repo: Path, payload: Mapping[str, Any], policy_result: Map
     task_value = payload.get("_telemetryTask") or payload.get("task")
     task = task_value if isinstance(task_value, Mapping) else None
     if task:
-        data["task"] = summarize_task(task)
+        data["task"] = summarize_task(task, payload.get("review") if isinstance(payload.get("review"), Mapping) else _review_for_task(repo, task))
     return record_event(
         repo, event_type, source="hook", cwd=cwd,
         session_id=str(payload.get("session_id") or payload.get("sessionId") or "") or None,

@@ -2,6 +2,6 @@
 
 | Priority | Task | Dependencies |
 | --- | --- | --- |
-| P1 | Validate package installation in clean Codex workspace | Lemmings 1.0 cutover |
-| P2 | Add cross-platform CLI release packaging | Clean workspace validation |
-| P3 | Pilot optional telemetry and benchmark routing scorecards | Five comparable Integrated task observations |
+| P1 | Forward-test skill-only bootstrap in clean Windows, macOS, and Linux repositories | Smart Skill cutover |
+| P2 | Pilot optional hooks with the four bounded agent profiles | Bootstrap forward-test |
+| P3 | Review telemetry benchmark evidence for one comparable cohort | Five complete Integrated observations |
