@@ -14,8 +14,10 @@ from typing import Any, Mapping, Sequence
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from lemmings.core import as_list, candidate_head, path_matches, read_object, runtime_marker, validate_models
+    from lemmings.telemetry import read_binding, record_hook_event, record_telemetry_error
 else:
     from .core import as_list, candidate_head, path_matches, read_object, runtime_marker, validate_models
+    from .telemetry import read_binding, record_hook_event, record_telemetry_error
 
 READ_ONLY_COMMANDS = {
     "rg", "grep", "ls", "dir", "pwd", "type", "cat", "head", "tail",
@@ -495,7 +497,23 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
     except ValueError:
         return {**payload, "_lemmingsActive": False}
     if not marker.is_file():
-        return {**payload, "_lemmingsActive": False}
+        combined = {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
+        try:
+            binding = read_binding(repo, cwd)
+        except Exception as telemetry_error:
+            record_telemetry_error(repo, telemetry_error)
+            binding = None
+        if binding and not binding.get("finished"):
+            combined["_telemetryBinding"] = binding
+            task_path = binding.get("taskPath")
+            if task_path:
+                try:
+                    path = Path(str(task_path))
+                    if path.is_file():
+                        combined["_telemetryTask"] = read_object(path)
+                except Exception as telemetry_error:
+                    record_telemetry_error(repo, telemetry_error)
+        return combined
     state = read_object(marker)
     combined = {**state, **payload, "_lemmingsActive": True, "_repoRoot": str(repo)}
     for name in ("profile", "task", "phase", "review"):
@@ -503,6 +521,21 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
         if value:
             path = Path(value)
             combined[name] = read_object(path if path.is_absolute() else repo / path)
+    try:
+        binding = read_binding(repo, cwd)
+    except Exception as telemetry_error:
+        record_telemetry_error(repo, telemetry_error)
+        binding = None
+    if binding and not binding.get("finished"):
+        combined["_telemetryBinding"] = binding
+        task_path = binding.get("taskPath")
+        if task_path:
+            try:
+                path = Path(str(task_path))
+                if path.is_file():
+                    combined["_telemetryTask"] = read_object(path)
+            except Exception as telemetry_error:
+                record_telemetry_error(repo, telemetry_error)
     tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
     if isinstance(tool_input, dict) and tool_input.get("model"):
         combined["requestedModel"] = tool_input["model"]
@@ -531,7 +564,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not isinstance(raw, dict):
             raise ValueError("hook payload must be an object")
         payload = hydrate(raw)
-        output = host_output(handle(payload), event_name(raw), payload)
+        result = handle(payload)
+        try:
+            repo_value = payload.get("_repoRoot")
+            if repo_value:
+                record_hook_event(Path(str(repo_value)), payload, result)
+        except Exception as telemetry_error:
+            if payload.get("_repoRoot"):
+                record_telemetry_error(Path(str(payload["_repoRoot"])), telemetry_error)
+        output = host_output(result, event_name(raw), payload)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         output = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": f"invalid Lemmings hook input: {error}"}}
     print(json.dumps(output, ensure_ascii=False))

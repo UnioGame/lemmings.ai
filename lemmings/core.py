@@ -307,6 +307,9 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     previous = task.get("previousState")
     if previous and state not in TRANSITIONS.get(str(previous), set()) and state != previous:
         result.error("state.transition", f"illegal transition: {previous} -> {state}")
+    cohort = task.get("telemetryCohort")
+    if cohort is not None and (not isinstance(cohort, str) or not cohort.strip()):
+        result.error("telemetry.cohort", "telemetryCohort must be null or a non-empty string")
     result.extend(validate_models(task, profile))
     result.extend(validate_debt(task))
     mode = detect_mode(profile, task)

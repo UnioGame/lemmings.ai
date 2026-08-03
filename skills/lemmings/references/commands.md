@@ -33,8 +33,17 @@ lemmings phase prepare
 lemmings wave plan
 lemmings close
 lemmings scorecard
+lemmings metrics off|basic|full|status
+lemmings metrics stage discover|plan|refine|implement|verify
+lemmings metrics finish --outcome completed|blocked|cancelled|replan
+lemmings metrics import --task TASK-17 --file quality.json
+lemmings metrics annotate --task TASK-17 --kind escaped-defect --severity P1 --relation suspected --reference BUG-123 --detected-at <ISO-8601>
+lemmings metrics report [--task TASK-17] [--phase PHASE-2] [--since 30d] [--format json|markdown] [--output <path>]
+lemmings metrics cleanup --older-than 90d [--execute]
 ```
 
 `mode auto|simple|standard|strict` persists the repository selection in `.codex/lemmings.json` without replacing other profile settings. `mode status` reports the configured value, the effective risk-adjusted mode, hook activity, and the active runtime mode.
 
 `models set` records an explicit repo-role pin in `requestedModels`; `models task` records the higher-priority task-role pin in `taskModels`. Neither command rewrites immutable role defaults in `models`.
+
+Telemetry is independent of `lemmings on|off` and orchestration mode. It is disabled until `metrics basic` or `metrics full` is selected. `basic` records lifecycle and hook timing; `full` also accepts normalized quality and regression evidence. Report export requires an explicit `--output`. Cleanup is inspection-only unless `--execute` is present.

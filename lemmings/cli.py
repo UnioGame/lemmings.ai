@@ -15,6 +15,21 @@ from .core import (
     git, inspect_worktree, read_object, resolve_path, runtime_marker, validate_wave,
     write_object,
 )
+from .telemetry import (
+    ANNOTATION_KINDS, FINISH_OUTCOMES, LIFECYCLE_STAGES, TELEMETRY_MODES,
+    annotate_regression, bind_run, build_report, cleanup_events, enter_stage,
+    find_task_binding, finish_run, import_quality, render_markdown, set_telemetry_mode,
+    telemetry_enabled, telemetry_status, record_task_observation, record_telemetry_error,
+)
+
+
+def telemetry_side_effect(repo: Path, callback: Any, *args: Any, **kwargs: Any) -> Any:
+    """Keep optional telemetry from changing an orchestration command outcome."""
+    try:
+        return callback(*args, **kwargs)
+    except Exception as error:
+        record_telemetry_error(repo, error)
+        return None
 
 
 def emit(value: Any) -> None:
@@ -60,6 +75,9 @@ def command_check(args: argparse.Namespace) -> int:
     repo, profile, task, phase, review, marker = paths_from_args(args)
     result = check_repository(repo, profile, task, phase, review, args.all)
     result.extend(runtime_reference_findings(repo, marker))
+    if task and telemetry_side_effect(repo, telemetry_enabled, repo):
+        working = resolve_path(repo, task.get("worktree")) or repo
+        telemetry_side_effect(repo, record_task_observation, repo, working, task)
     emit(result.as_dict())
     return 0 if result.ok else 1
 
@@ -97,6 +115,18 @@ def command_activation(args: argparse.Namespace) -> int:
             if path:
                 value[name + "Path"] = path
         write_object(marker, value)
+        if telemetry_side_effect(repo, telemetry_enabled, repo):
+            working = repo
+            task_path = resolve_path(repo, args.task)
+            declared_worktree = (task or {}).get("worktree")
+            if declared_worktree:
+                working = resolve_path(repo, str(declared_worktree)) or repo
+            telemetry_side_effect(repo, bind_run,
+                repo, working, task_id=(task or {}).get("taskId"), phase_id=(phase or {}).get("phaseId"),
+                role=(task or {}).get("role"), model=((task or {}).get("models") or {}).get("assigned"),
+                mode=value["mode"], cohort=(task or {}).get("telemetryCohort"),
+                branch=(task or {}).get("branch"), task_path=str(task_path) if task_path else None,
+            )
         emit({"ok": True, "active": True, "marker": str(marker), "mode": value["mode"]})
         return 0
     if args.command == "off":
@@ -206,6 +236,17 @@ def command_wave(args: argparse.Namespace) -> int:
         {"taskId": task.get("taskId"), "branch": task.get("branch"), "worktree": task.get("worktree"), "model": (task.get("models") or {}).get("assigned")}
         for task in tasks
     ]
+    if result.ok and telemetry_side_effect(repo, telemetry_enabled, repo):
+        for path_value, task in zip(args.task, tasks):
+            worktree = resolve_path(repo, task.get("worktree"))
+            if not worktree:
+                continue
+            telemetry_side_effect(repo, bind_run,
+                repo, worktree, task_id=task.get("taskId"), phase_id=phase.get("phaseId"),
+                role=task.get("role"), model=(task.get("models") or {}).get("assigned"),
+                mode=task.get("mode") or "strict", cohort=task.get("telemetryCohort"),
+                branch=task.get("branch"), task_path=str(resolve_path(repo, path_value)),
+            )
     emit(result.as_dict())
     return 0 if result.ok else 1
 
@@ -217,22 +258,39 @@ def command_close(args: argparse.Namespace) -> int:
     if task.get("state") != "Accepted":
         emit({"ok": False, "error": "only an Accepted task can be integrated"})
         return 1
+    if telemetry_side_effect(repo, telemetry_enabled, repo):
+        working = resolve_path(repo, task.get("worktree")) or repo
+        telemetry_side_effect(repo, record_task_observation, repo, working, task)
     task["previousState"] = "Accepted"
     task["state"] = "Integrated"
     task["close"] = {"mergeCommit": args.merge_commit, "integrationValidationPassed": args.validation_passed}
     result = check_repository(repo, load_optional(repo, args.profile, ".codex/lemmings.json"), task, load_optional(repo, args.phase), load_optional(repo, args.review))
     if result.ok:
         write_object(task_path, task)
+        working = resolve_path(repo, task.get("worktree")) or repo
+        telemetry_side_effect(repo, finish_run, repo, working, "completed", task=task, event_type="task.integrated")
     emit(result.as_dict())
     return 0 if result.ok else 1
 
 
 def command_scorecard(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
-    observations = [read_object(resolve_path(repo, path)) for path in args.observation]
+    observations: list[dict[str, Any]] = []
+    for path in args.observation:
+        value = read_object(resolve_path(repo, path))
+        nested = value.get("observations")
+        if isinstance(nested, list):
+            observations.extend(item for item in nested if isinstance(item, dict))
+        else:
+            observations.append(value)
     if not args.benchmark and len(observations) < 2:
         emit({"ok": True, "created": False, "reason": "scorecard requires a benchmark or at least two comparable observations"})
         return 0
+    if not args.benchmark:
+        cohorts = {item.get("cohort") for item in observations}
+        if None in cohorts or len(cohorts) != 1:
+            emit({"ok": False, "created": False, "reason": "scorecard observations require one shared telemetry cohort"})
+            return 1
     output = resolve_path(repo, args.output) or repo / "docs/tasks/routing-scorecard.json"
     value = {"schemaVersion": 1, "benchmark": args.benchmark, "observations": observations}
     write_object(output, value)
@@ -297,6 +355,104 @@ def command_mode(args: argparse.Namespace) -> int:
     return 0
 
 
+def _task_from_metrics_arg(repo: Path, value: str | None) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    if not value:
+        try:
+            marker = runtime_marker(repo)
+            if marker.is_file():
+                state = read_object(marker)
+                reference = state.get("taskPath")
+                path = resolve_path(repo, reference)
+                if path and path.is_file():
+                    task = read_object(path)
+                    return task.get("taskId"), task, str(reference)
+        except ValueError:
+            pass
+        return None, None, None
+    path = resolve_path(repo, value)
+    if path and path.is_file():
+        task = read_object(path)
+        return str(task.get("taskId") or value), task, value
+    if value.lower().endswith(".json") or "/" in value or "\\" in value:
+        raise ValueError(f"task packet path does not exist: {value}; use a stable task ID until it exists")
+    binding = find_task_binding(repo, value)
+    if binding and binding.get("taskPath"):
+        task_path = Path(str(binding["taskPath"]))
+        if task_path.is_file():
+            task = read_object(task_path)
+            return str(task.get("taskId") or value), task, str(task_path)
+    return value, None, None
+
+
+def _phase_from_metrics_arg(repo: Path, value: str | None) -> dict[str, Any] | None:
+    if not value:
+        return None
+    path = resolve_path(repo, value)
+    if path and path.is_file():
+        return read_object(path)
+    return {"phaseId": value}
+
+
+def command_metrics(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    action = args.metrics_command
+    if action in TELEMETRY_MODES:
+        settings = set_telemetry_mode(repo, action)
+        emit({"ok": True, "mode": settings["mode"], "retentionDays": settings["retentionDays"], "maxLocalMiB": settings["maxLocalMiB"]})
+        return 0
+    if action == "status":
+        emit(telemetry_status(repo))
+        return 0
+    task_id, task, task_reference = _task_from_metrics_arg(repo, getattr(args, "task", None))
+    phase = _phase_from_metrics_arg(repo, getattr(args, "phase", None))
+    working = resolve_path(repo, (task or {}).get("worktree")) or repo
+    if action == "stage":
+        if task_id and task is None:
+            task = {"taskId": task_id, "role": "orchestrator"}
+        result = enter_stage(repo, working, args.stage, task=task, phase=phase, task_path=task_reference)
+        emit(result)
+        return 0
+    if action == "finish":
+        if task_id and task is None:
+            task = {"taskId": task_id, "role": "orchestrator"}
+        emit(finish_run(repo, working, args.outcome, task=task))
+        return 0
+    if action == "import":
+        observation = read_object(resolve_path(repo, args.file))
+        expected = task_id or str(observation.get("taskId") or "")
+        if not expected:
+            raise ValueError("metrics import requires --task or observation.taskId")
+        emit(import_quality(repo, working, observation, expected, task))
+        return 0
+    if action == "annotate":
+        if not task_id:
+            raise ValueError("metrics annotate requires --task")
+        emit(annotate_regression(
+            repo, working, task_id=task_id, kind=args.kind, severity=args.severity,
+            relation=args.relation, reference=args.reference, detected_at=args.detected_at,
+            resolved_at=args.resolved_at, fix_commit=args.fix_commit,
+        ))
+        return 0
+    if action == "report":
+        report = build_report(repo, task_id=task_id, phase_id=(phase or {}).get("phaseId"), since=args.since)
+        rendered = render_markdown(report) if args.format == "markdown" else json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+        if args.output:
+            output = resolve_path(repo, args.output)
+            assert output is not None
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(rendered, encoding="utf-8")
+            emit({"ok": True, "created": True, "path": str(output), "format": args.format})
+        elif args.format == "markdown":
+            print(rendered, end="")
+        else:
+            emit(report)
+        return 0
+    if action == "cleanup":
+        emit(cleanup_events(repo, args.older_than, args.execute))
+        return 0
+    raise ValueError(f"unsupported metrics command: {action}")
+
+
 def add_common(parser: argparse.ArgumentParser, artifacts: bool = False) -> None:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--profile")
@@ -344,6 +500,24 @@ def build_parser() -> argparse.ArgumentParser:
     task_model = models_sub.add_parser("task"); task_model.add_argument("task_id"); task_model.add_argument("assignment"); task_model.set_defaults(run=command_models)
     for name in ("status", "reset"):
         models_sub.add_parser(name).set_defaults(run=command_models)
+    metrics = sub.add_parser("metrics", help="manage optional local pipeline telemetry")
+    metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
+    for name in ("off", "basic", "full", "status"):
+        item = metrics_sub.add_parser(name)
+        add_common(item)
+        item.set_defaults(run=command_metrics)
+    stage = metrics_sub.add_parser("stage", help="enter a lifecycle stage and close the previous one")
+    add_common(stage); stage.add_argument("stage", choices=LIFECYCLE_STAGES); stage.add_argument("--task"); stage.add_argument("--phase"); stage.set_defaults(run=command_metrics)
+    finish = metrics_sub.add_parser("finish", help="finish the current telemetry run")
+    add_common(finish); finish.add_argument("--outcome", required=True, choices=sorted(FINISH_OUTCOMES)); finish.add_argument("--task"); finish.set_defaults(run=command_metrics)
+    importing = metrics_sub.add_parser("import", help="import normalized CI or validation quality signals")
+    add_common(importing); importing.add_argument("--task"); importing.add_argument("--file", required=True); importing.set_defaults(run=command_metrics)
+    annotate = metrics_sub.add_parser("annotate", help="record a post-integration regression or resolution")
+    add_common(annotate); annotate.add_argument("--task", required=True); annotate.add_argument("--kind", required=True, choices=sorted(ANNOTATION_KINDS)); annotate.add_argument("--severity", required=True, choices=["P0", "P1", "P2", "P3"]); annotate.add_argument("--relation", default="confirmed", choices=["confirmed", "suspected"]); annotate.add_argument("--reference", required=True); annotate.add_argument("--detected-at"); annotate.add_argument("--resolved-at"); annotate.add_argument("--fix-commit"); annotate.set_defaults(run=command_metrics)
+    report = metrics_sub.add_parser("report", help="build a privacy-bounded aggregate report")
+    add_common(report); report.add_argument("--task"); report.add_argument("--phase"); report.add_argument("--since"); report.add_argument("--format", choices=["json", "markdown"], default="json"); report.add_argument("--output"); report.set_defaults(run=command_metrics)
+    cleanup = metrics_sub.add_parser("cleanup", help="inspect or remove expired local event files")
+    add_common(cleanup); cleanup.add_argument("--older-than", default="90d"); cleanup.add_argument("--execute", action="store_true"); cleanup.set_defaults(run=command_metrics)
     return parser
 
 

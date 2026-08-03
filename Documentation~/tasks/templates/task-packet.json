@@ -5,6 +5,7 @@
   "state": "Ready",
   "previousState": "Planned",
   "role": "complex-worker",
+  "telemetryCohort": null,
   "plan": { "goal": "", "acceptance": [], "dependencies": [] },
   "ownership": { "owned": [], "shared": [], "forbidden": [] },
   "models": { "requested": null, "assigned": "gpt-5.6-sol:medium", "actual": null },

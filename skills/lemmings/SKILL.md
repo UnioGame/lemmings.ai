@@ -1,6 +1,6 @@
 ---
 name: lemmings
-description: Coordinate repository delivery through Discover, Plan, Refine, Implement, and Verify with proportional Simple, Standard, or Strict orchestration. Use when a user invokes $lemmings, asks to discover or plan repository work, refine a task before implementation, enable or inspect Lemmings, assign models, delegate implementation, review a commit range, isolate parallel writers, protect shared contracts, or collect integration evidence.
+description: Coordinate and optionally measure repository delivery through Discover, Plan, Refine, Implement, and Verify with proportional Simple, Standard, or Strict orchestration. Use when a user invokes $lemmings, asks to discover or plan repository work, refine a task before implementation, enable or inspect Lemmings, assign models, delegate implementation, review a commit range, isolate parallel writers, protect shared contracts, collect integration evidence, or evaluate pipeline performance and regressions.
 ---
 
 # Lemmings
@@ -23,6 +23,8 @@ The orchestrator must follow `Discover -> Plan -> Refine -> Implement -> Verify`
 - Implement only Ready work through derived dispatch, owned changes, focused validation, embedded handoff, and candidate/fix commits.
 - Verify the actual candidate range, repair bounded findings, integrate Accepted work, rerun integration validation, and close or record owned debt.
 
+Telemetry is optional and off by default. When `lemmings metrics status` reports `basic` or `full`, enter each lifecycle boundary with `lemmings metrics stage <name>` and finish Simple or non-integrated work with `lemmings metrics finish --outcome <outcome>`. `lemmings close` finishes Integrated work. Telemetry failure never weakens or blocks policy enforcement. Do not record prompts, transcripts, reasoning, tool payloads, source, diffs, secrets, or absolute paths.
+
 Do not dispatch an implementation worker before Refine has made the task Ready. Internally, `Prepare` contains Discover, Plan, and Refine; `Dispatch` plus `Execute/Candidate` implements; `Review/Repair` plus `Integrate/Close` verifies. Simple compresses the cycle without artifacts. Standard records it in one task packet. Strict adds the phase baseline, frozen contracts, isolated worktrees, leases, and close evidence. A verification finding may return bounded work to Implement; after the second failed review, use Replan Required and restart from the earliest invalidated step. Treat Accepted and Integrated as distinct states.
 
-Before finishing, run `lemmings check`; use `lemmings check --all` for a full Strict lifecycle audit. Read [workflow.md](references/workflow.md) for gates and hooks, [contracts.md](references/contracts.md) when authoring artifacts, and [commands.md](references/commands.md) for exact CLI usage.
+Before finishing, run `lemmings check`; use `lemmings check --all` for a full Strict lifecycle audit. Read [workflow.md](references/workflow.md) for gates and hooks, [contracts.md](references/contracts.md) when authoring artifacts, [commands.md](references/commands.md) for exact CLI usage, and [telemetry.md](references/telemetry.md) when measuring or comparing the pipeline.

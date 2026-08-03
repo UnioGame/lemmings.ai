@@ -6,6 +6,7 @@ All JSON artifacts use `schemaVersion: 1`.
 - Strict phase stores baseline, frozen contracts, leases, and close evidence.
 - Task stores plan, ownership, execution/handoff, commits, model assignment, validation/debt, review pointer, and close evidence.
 - Review is separate immutable evidence for the exact candidate/fix head.
+- `telemetryCohort` is optional. Set it only for tasks intended to be compared under the same delivery/risk class.
 
 Do not create tracked dispatch, separate handoff, separate integration evidence, adapters, or compatibility fields. Generate a scorecard only for a benchmark or at least two comparable observations.
 
@@ -14,3 +15,5 @@ Model fields live under `models`: `requested` is an optional user pin, `assigned
 Candidate tasks require `baseSha`, an actual model, embedded handoff, and real candidate/fix Git commits. Each fix descends from the previous commit and the candidate descends from `baseSha`; a task branch need not be the orchestrator's current HEAD. Accepted tasks bind their embedded review task/base/head/status/evidence path to an existing immutable review file; base must differ from and be an ancestor of head. Evidence paths must remain inside the repository. Strict repository checks also validate the actual commit-range paths against ownership.
 
 Consumer defaults live in `profile.models`. Explicit repo pins live in `profile.requestedModels`; task-role pins live in `profile.taskModels`. Resolve assignment as task pin, then repo pin, then role default. Copy an effective pin into both task `models.requested` and `models.assigned`. Reviewer remains `gpt-5.6-sol:high`; an explicit orchestrator pin may raise Sol effort above High but may not downgrade it.
+
+Telemetry events are derived local state under the Git common directory, not canonical task artifacts. Raw events are never tracked automatically. Quality imports bind task ID and `baseSha..headSha`; regression evidence requires a recorded Integrated event. Only explicit sanitized report exports may be committed.

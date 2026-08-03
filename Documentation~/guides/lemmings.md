@@ -36,6 +36,26 @@ PreToolUse validates dispatch/model/worktree binding and exact path ownership. R
 
 Repo consumers install the Lemmings plugin through their marketplace. The plugin auto-discovers `hooks/hooks.json`; do not copy the hook configuration into consumer `.codex` state because duplicate registration executes every hook twice.
 
+## Optional telemetry
+
+Telemetry is independent of policy runtime and orchestration mode. Its selection is repository-wide in the Git common directory and remains off until the user explicitly selects `lemmings metrics basic` or `lemmings metrics full`. Return it to `off` after a bounded measurement when other repository work must not be observed.
+
+Basic telemetry records the five lifecycle boundaries, task outcome, wall-clock stage duration, subagent and tool timing, assigned/actual model, task state, review/fix cycles, validation failures, and validation debt. Full telemetry additionally accepts normalized test, coverage, analyzer, complexity, performance, size, and actual-cost observations plus explicit escaped-defect, rollback, revert, and resolution annotations. Lemmings imports these results; it never runs repository quality commands itself.
+
+The orchestrator calls `lemmings metrics stage discover|plan|refine|implement|verify` when entering each real step. A repeated current stage is idempotent. `lemmings close` finishes Integrated work; `lemmings metrics finish --outcome completed|blocked|cancelled|replan` closes Simple or non-integrated work.
+
+Raw data is derived local state under `.git/lemmings/telemetry`. Each event is an atomic immutable JSON file with a dedupe key, so parallel worktrees do not share a writable ledger. `lemmings on --task` and a successful `lemmings wave plan` create local worktree bindings. Events without an unambiguous binding stay unbound and reduce report completeness.
+
+Hooks observe SessionStart, turn start/Stop, supported tool pairs, and subagent start/stop. Telemetry recording is fail-open and never modifies a policy decision. SessionEnd is not used for duration because it can arrive late. Transcripts are never parsed.
+
+Events and exported reports exclude prompts, transcripts, reasoning, tool arguments/output, source-code content, diffs, secrets, authorization headers, and absolute paths. Report export occurs only with explicit `--output`. Cleanup only inspects until `--execute` is supplied. Defaults are a 90-day retention warning and a 100 MiB size warning; no automatic deletion occurs.
+
+Quality imports use schema version 1 and bind `taskId`, `baseSha`, and current candidate/fix or integration-merge `headSha`. Use the task packet path for complete cross-checking; an ID alone can resolve it only through a unique local binding. Regressions require a recorded Integrated event. Only confirmed regressions count toward the blocking KPI; suspected relations remain visible. Reports calculate time from integration to detection and from detection to resolution. Imported labels and references must be producer-sanitized; built-in rejection of common secret patterns is an additional guard, not a general secret scanner.
+
+Keep wall-clock lead time separate from summed agent time. Churn is task-size context, not productivity. Do not calculate a subjective combined score or change modes/models automatically. Comparative analysis becomes `eligible_for_review` only with at least five Integrated tasks in one `telemetryCohort`, complete bound lifecycle stages, at least one passing quality signal per task, no failed quality signal, and no confirmed P0/P1 regression. Otherwise it remains descriptive.
+
+Exact token usage and model API latency are unsupported in the first schema and are reported as such, never as zero or estimates. Actual provider cost may be imported as a quality signal.
+
 ## CLI
 
-Use `lemmings mode auto|simple|standard|strict` to persist the repository mode and `lemmings mode status` to compare its configured and effective values. Use `lemmings status` and `lemmings check` for routine work. Worktrees are managed through `lemmings worktree allocate|inspect|release`. Strict preparation uses `lemmings phase prepare` and `lemmings wave plan`; final integration uses `lemmings close`. `lemmings scorecard` creates output only for a benchmark or at least two observations.
+Use `lemmings mode auto|simple|standard|strict` to persist the repository mode and `lemmings mode status` to compare its configured and effective values. Use `lemmings status` and `lemmings check` for routine work. Worktrees are managed through `lemmings worktree allocate|inspect|release`. Strict preparation uses `lemmings phase prepare` and `lemmings wave plan`; final integration uses `lemmings close`. `lemmings scorecard` creates output only for a benchmark or at least two observations sharing one explicit telemetry cohort.

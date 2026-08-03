@@ -1,6 +1,6 @@
 {
   "name": "lemmings",
-  "version": "1.0.0+codex.20260731163114",
+  "version": "1.0.0+codex.20260802165757",
   "description": "Proportional repository orchestration for Codex agents",
   "author": {
     "name": "Lemmings Maintainers"

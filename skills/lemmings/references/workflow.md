@@ -34,6 +34,8 @@ Internal execution stages remain compatible with the CLI and contracts:
 
 Simple compresses Discover, Plan, and Refine into bounded reasoning and creates no artifacts. Standard records the cycle in one task packet. Strict adds phase baseline and contract evidence without changing the five orchestrator steps.
 
+When optional telemetry is basic or full, call `lemmings metrics stage <step>` as each orchestrator lifecycle step begins. Entering a step closes the preceding interval. `lemmings close` ends Integrated Standard/Strict work; otherwise call `lemmings metrics finish`. Do not infer missing task bindings: unbound hook events remain explicit incomplete evidence.
+
 Task states are `Planned -> Ready -> Active -> Candidate -> Accepted -> Integrated`, with `Blocked`, `Replan Required`, `Cancelled`, and `Superseded` exceptions. Dispatch is an audit event. Review remains nested in Candidate until Accepted. A second failed review requires Replan Required.
 
 ## Safety
