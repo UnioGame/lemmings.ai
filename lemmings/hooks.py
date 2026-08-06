@@ -386,11 +386,12 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("block", "writer spawn model must be explicit and equal models.assigned")
             if mode == "strict" and not as_list((task.get("ownership") or {}).get("owned")):
                 return decision("block", "Strict writer requires non-empty ownership.owned")
-            isolated = mode == "strict" or payload.get("parallelWriters") or payload.get("dirtyPrimary")
+            backend = ((task.get("workspace") or {}).get("backend"))
+            isolated = backend in {"code-worktree", "package-worktree", "unity-clone"} or payload.get("parallelWriters") or payload.get("dirtyPrimary")
             if writer and isolated:
                 declared = task_worktree(task)
                 if not declared:
-                    return decision("block", "Strict, parallel, or dirty-primary writer requires an isolated worktree")
+                    return decision("block", "Declared isolation, parallel writing, or a dirty primary checkout requires an isolated worktree")
                 cwd = Path(str(payload.get("cwd") or os.getcwd())).resolve()
                 worktree = Path(str(declared))
                 if not worktree.is_absolute():

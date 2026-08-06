@@ -46,7 +46,7 @@ Review uses one immutable schema for both subjects:
 
 A baseline subject replaces the task range with `{"kind":"baseline","phaseId":"PHASE-2","sha":"<sha>"}`. Legacy embedded reviews and separate baseline/candidate schemas are invalid.
 
-Task workspace overrides record `auto`, `current`, or `isolated`, its resolved strategy, safety rationale, estimated size, and any permission decision. A game-project strategy is `code-worktree`, `package-worktree`, or `unity-clone`. A declined request over 10 GiB may fall back only to serial current-checkout work; when that is unsafe, record Blocked rather than provisioning anyway.
+Task workspace overrides record `auto`, `current`, or `isolated`, its resolved strategy, safety rationale, estimated size, and any permission decision. A game-project strategy is `code-worktree`, `package-worktree`, or `unity-clone`. Current checkout and Git worktrees use `approval: not-required`. Only a `unity-clone` estimated above 10 GiB requires explicit approval. After a declined clone, a safe fallback Task records its actual current/worktree backend with `approval: not-required` and names the refusal in `reason`; when no safe fallback exists, retain `backend: unity-clone`, record `approval: declined`, and set the Task to `Blocked`.
 
 Model fields live under `models`: `requested` is an optional user pin, `assigned` is fixed before spawn, `actual` records execution, and `fallbackReason` is required only when actual differs from assigned.
 

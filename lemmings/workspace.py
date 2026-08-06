@@ -111,7 +111,7 @@ def estimate_workspace(
     if backend not in WORKSPACE_BACKENDS:
         raise ValueError(f"unknown workspace backend: {backend}")
     game = find_game_project(repo, profile)
-    selected = ("unity-clone" if game else "code-worktree") if backend == "auto" else backend
+    selected = "code-worktree" if backend == "auto" else backend
     tracked = _tracked_size(repo) if selected in {"code-worktree", "unity-clone"} else 0
     submodules = sum(_size(path) for path in _submodule_paths(repo)) if selected in {"code-worktree", "unity-clone"} else 0
     cache = _size(game / "Library") if game and selected == "unity-clone" else 0
@@ -125,8 +125,13 @@ def estimate_workspace(
         estimate = tracked + submodules + cache
     threshold = 10.0
     estimated_gib = estimate / GIB
-    approval = estimated_gib > threshold
-    reason = f"Estimated workspace exceeds {threshold:g} GiB" if approval else "Estimate is within the configured limit"
+    approval = selected == "unity-clone" and estimated_gib > threshold
+    if approval:
+        reason = f"Estimated Unity clone exceeds {threshold:g} GiB"
+    elif selected == "unity-clone":
+        reason = "Unity clone estimate is within the configured limit"
+    else:
+        reason = "Selected backend does not require full-clone approval"
     return {
         "backend": selected,
         "trackedGiB": round(tracked / GIB, 3),

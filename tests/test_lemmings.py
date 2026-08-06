@@ -158,14 +158,29 @@ class IdentityAndCliTests(unittest.TestCase):
             self.assertEqual(0, inspect.returncode, inspect.stdout + inspect.stderr)
             self.assertEqual(before, set(repo.rglob("*")))
 
-    def test_workspace_estimate_over_ten_gib_requires_approval(self):
+    def test_only_large_unity_clone_requires_approval(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+            (repo / "Assets").mkdir()
+            (repo / "ProjectSettings").mkdir()
             with patch.object(workspace_module, "_tracked_size", return_value=11 * workspace_module.GIB), patch.object(workspace_module, "_submodule_paths", return_value=[]):
-                result = workspace_module.estimate_workspace(repo, backend="code-worktree")
-            self.assertTrue(result["approvalRequired"])
-            self.assertGreater(result["estimatedGiB"], 10)
+                automatic = workspace_module.estimate_workspace(repo, backend="auto")
+                worktree = workspace_module.estimate_workspace(repo, backend="code-worktree")
+                clone = workspace_module.estimate_workspace(repo, backend="unity-clone")
+            self.assertEqual("code-worktree", automatic["backend"])
+            self.assertFalse(automatic["approvalRequired"])
+            self.assertFalse(worktree["approvalRequired"])
+            self.assertTrue(clone["approvalRequired"])
+            self.assertGreater(clone["estimatedGiB"], 10)
+
+    def test_large_code_worktree_does_not_require_task_approval(self):
+        value = task(workspace={"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 12, "approval": "not-required", "reason": "Git worktree"})
+        self.assertNotIn("workspace.approval", {item.code for item in validate_task(value, profile()).findings})
+
+    def test_large_unity_clone_requires_task_approval(self):
+        value = task(workspace={"policy": "isolated", "backend": "unity-clone", "path": "C:/clone/one", "estimatedGiB": 12, "approval": "not-required", "reason": "Full clone"})
+        self.assertIn("workspace.approval", {item.code for item in validate_task(value, profile()).findings})
 
     def test_canonical_baseline_and_candidate_reviews(self):
         phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "base", "integrationBranch": "codex/p1", "contractsFrozen": True, "contracts": [], "baselineReviewRef": "reviews/base.json", "taskDag": [], "leases": [], "close": {"mergeCommits": [], "phaseValidation": []}}
@@ -366,12 +381,22 @@ class ContractTests(unittest.TestCase):
         value = task(mode="strict", workspace={"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 1, "approval": "not-required", "reason": "external"}, risks=["externalResources"])
         self.assertIn("lease.required", {f.code for f in validate_wave(ROOT, [value], phase).findings})
 
-    def test_blocked_strict_refusal_does_not_require_worktree(self):
+    def test_blocked_declined_clone_is_valid_without_provisioned_path(self):
         phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": []}
-        value = task(mode="strict", state="Blocked", previousState="Ready", risks=["sharedContracts"], workspace={"policy": "isolated", "backend": "current", "path": None, "estimatedGiB": 12, "approval": "declined", "reason": "unsafe serial fallback"})
+        value = task(mode="strict", state="Blocked", previousState="Ready", risks=["sharedContracts"], workspace={"policy": "isolated", "backend": "unity-clone", "path": None, "estimatedGiB": 12, "approval": "declined", "reason": "clone-dependent validation has no safe fallback"})
         codes = {item.code for item in validate_wave(ROOT, [value], phase).findings}
         self.assertNotIn("worktree.required", codes)
         self.assertNotIn("workspace.approval", codes)
+        self.assertNotIn("workspace.declined", codes)
+        self.assertNotIn("workspace.path", codes)
+
+    def test_ready_strict_serial_writer_may_use_current_checkout(self):
+        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": []}
+        value = task(mode="strict", risks=["sharedContracts"], workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "safe serial writer"})
+        codes = {item.code for item in validate_wave(ROOT, [value], phase).findings}
+        self.assertNotIn("worktree.required", codes)
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement serially in current checkout.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
+        self.assertEqual("allow", output["decision"])
 
     def test_ready_strict_writer_requires_owned_paths(self):
         value = task(mode="strict", ownership={"owned": [], "shared": [], "forbidden": []})

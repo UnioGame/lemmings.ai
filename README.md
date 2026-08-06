@@ -35,7 +35,7 @@ flowchart LR
 | --- | --- | --- |
 | **Simple** | One local, low-risk change | No Lemmings artifact by default |
 | **Standard** | One writer with meaningful implementation or validation | Task, candidate commit, immutable high-model Review |
-| **Strict** | Parallel writers, shared contracts, serialized assets, submodules, code generation, or leased resources | Phase baseline, frozen contracts, isolated writers, leases, Reviews, integration evidence |
+| **Strict** | Parallel writers, shared contracts, serialized assets, submodules, code generation, or leased resources | Phase baseline, frozen contracts, isolated writers when required, leases, Reviews, integration evidence |
 
 `auto` is the default. Explicit user mode and model choices remain in force until changed.
 
@@ -52,7 +52,7 @@ Lemmings chooses the narrowest safe backend:
 
 For large game repositories, the default is **hybrid**: writers use code or package worktrees, while one warmed validation clone owns full-project checks. Only one editor or batch process uses shared validation resources at a time, and shared serialized files have one owner.
 
-Before creating an isolated workspace, Lemmings estimates its size. Estimates above **10 GiB** require approval. If approval is declined, it attempts safe serial work in the current checkout; if that would violate isolation or ownership, the task becomes `Blocked`.
+The pipeline, subagents, current checkout, and Git worktrees need no special workspace approval. Lemmings asks only before creating a full validation clone estimated above **10 GiB**. If approval is declined, it continues through a code/package worktree or safe serial work in the current checkout; only clone-dependent work becomes `Blocked` when no safe fallback exists.
 
 ## Install
 
@@ -119,6 +119,8 @@ python -m lemmings status
 python -m lemmings workspace estimate
 python -m lemmings workspace inspect
 ```
+
+`workspace estimate` defaults to the Git worktree estimate. Pass `--backend unity-clone` only after full-clone validation has been selected; that estimate carries the large-clone approval decision.
 
 Telemetry is local, off by default, and independent of the orchestration mode:
 

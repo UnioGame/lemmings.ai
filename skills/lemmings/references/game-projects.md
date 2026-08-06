@@ -10,6 +10,12 @@ Use this reference after the smart skill has selected `isolated` work for a game
 
 Resolve in that order from the affected scope, then verify the selected workspace can run the required editor and validation flow. One writer owns one isolated workspace. Never share a Unity `Library/` directory between concurrently writing clones.
 
+## Approval boundary
+
+Running Lemmings or dispatching subagents in the current checkout needs no special workspace approval. A sequential implementation worker may write there when ownership and dirty-state safety allow it. Creating a `code-worktree` or `package-worktree` also needs no special approval because it does not duplicate the full imported project state.
+
+Ask the user only before creating a full `unity-clone` whose estimated project, package, and generated/import state exceeds 10 GiB. A declined clone does not disable the pipeline or unrelated workers: prefer a code/package worktree or safe serial work in the current checkout, and block only editor or validation work that cannot safely proceed without the clone.
+
 ## Hybrid default
 
 For parallel work, keep writers editor-free in `code-worktree` or `package-worktree` backends and use one persistent, warmed `unity-clone` for full validation. Integrate accepted commits into the validation clone in task-DAG order. Allow at most one Editor or BatchMode process at a time unless the project proves independent caches, ports, licenses, and outputs. Never copy `Library/`, `Temp/`, build outputs, logs, or generated imports into task worktrees.
@@ -30,6 +36,6 @@ Treat scenes, prefabs, imported assets, project settings, package manifests, loc
 
 Lease exclusive Editor, BatchMode, build output, port, device, signing identity, paid API, and shared code-generation resources to one task at a time. Record owner, scope, acquisition, release condition, and cleanup evidence in the Strict Phase. A worker without the required lease remains Blocked; it must not probe or consume the resource speculatively.
 
-Before provisioning, estimate disk use including the project, required packages, and expected generated/import state. Above 10 GiB, ask the user for permission. If they decline, run serially in the current checkout only after confirming it is clean enough and safe for the requested change; otherwise set the task to Blocked. Do not silently weaken isolation or delete existing workspace data to make room.
+Before provisioning a full Unity clone, estimate disk use including the project, required packages, and expected generated/import state. Above 10 GiB, ask the user for permission. If they decline, use a code/package worktree or run serially in the current checkout after confirming it is safe; otherwise block only the clone-dependent step. Do not silently weaken isolation or delete existing workspace data to make room.
 
 On close, inspect worktrees, branches, validation state, leases, and generated outputs. Cleanup is a separate, explicit action: never remove a dirty or unmerged workspace automatically.

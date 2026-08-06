@@ -14,9 +14,9 @@ Exact tokens and model API latency are unsupported in schema version 1. Reports 
 
 If telemetry is active, enter `discover`, `plan`, `refine`, `implement`, and `verify` at their real boundaries. Repeating the current stage is a no-op. Finish every run with the factual `lemmings metrics finish --outcome ...` command.
 
-Pass the stable task ID until its packet exists, then pass the real packet path. A missing path-like value is rejected rather than recorded as an ID. Simple work may remain taskless. For Strict work, invoke the first `metrics stage` from each task workspace so its binding records the actual worktree.
+Pass the stable task ID until its packet exists, then pass the real packet path. A missing path-like value is rejected rather than recorded as an ID. Simple work may remain taskless. For Strict work, invoke the first `metrics stage` from the task's actual current checkout or isolated workspace so its binding records the real execution location.
 
-Strict waves bind each task to its declared worktree. A hook without an unambiguous binding remains unbound and lowers report completeness. Never assign it to a task heuristically.
+Strict waves bind isolated tasks to their declared worktrees and serial-current tasks to the current checkout. A hook without an unambiguous binding remains unbound and lowers report completeness. Never assign it to a task heuristically.
 
 ## Evidence and privacy
 
