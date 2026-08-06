@@ -125,13 +125,13 @@ def estimate_workspace(
         estimate = tracked + submodules + cache
     threshold = 10.0
     estimated_gib = estimate / GIB
-    approval = selected == "unity-clone" and estimated_gib > threshold
+    approval = selected != "current" and estimated_gib > threshold
     if approval:
-        reason = f"Estimated Unity clone exceeds {threshold:g} GiB"
-    elif selected == "unity-clone":
-        reason = "Unity clone estimate is within the configured limit"
+        reason = f"Estimated workspace exceeds {threshold:g} GiB"
+    elif selected != "current":
+        reason = "Workspace estimate is within the configured limit"
     else:
-        reason = "Selected backend does not require full-clone approval"
+        reason = "Current checkout does not require workspace approval"
     return {
         "backend": selected,
         "trackedGiB": round(tracked / GIB, 3),

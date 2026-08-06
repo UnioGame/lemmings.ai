@@ -52,7 +52,7 @@ Lemmings chooses the narrowest safe backend:
 
 For large game repositories, the default is **hybrid**: writers use code or package worktrees, while one warmed validation clone owns full-project checks. Only one editor or batch process uses shared validation resources at a time, and shared serialized files have one owner.
 
-The pipeline, subagents, current checkout, and Git worktrees need no special workspace approval. Lemmings asks only before creating a full validation clone estimated above **10 GiB**. If approval is declined, it continues through a code/package worktree or safe serial work in the current checkout; only clone-dependent work becomes `Blocked` when no safe fallback exists.
+The pipeline, subagents, and safe serial work in the current checkout need no special workspace approval. Concurrent implementation writers never share that checkout; each needs an isolated workspace. Before creating any code worktree, package worktree, or full validation clone, Lemmings estimates the new workspace; estimates above **10 GiB** require approval in Unity and non-Unity repositories alike. If approval is declined, the pipeline continues in the current checkout where safe, and only workspace-dependent work becomes `Blocked` when no safe fallback exists.
 
 ## Install
 
@@ -120,7 +120,7 @@ python -m lemmings workspace estimate
 python -m lemmings workspace inspect
 ```
 
-`workspace estimate` defaults to the Git worktree estimate. Pass `--backend unity-clone` only after full-clone validation has been selected; that estimate carries the large-clone approval decision.
+`workspace estimate` defaults to the Git worktree estimate. Pass another `--backend` after selecting a package worktree or full Unity clone. Every isolated backend reports whether its estimated copy exceeds the approval threshold.
 
 Telemetry is local, off by default, and independent of the orchestration mode:
 

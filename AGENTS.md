@@ -22,7 +22,7 @@ Avoid duplicating detailed policy across these files. Keep the skill compact and
 - Default the orchestrator to `gpt-5.6-sol` with `high` reasoning. Use a higher effort only when the user explicitly requests it.
 - Use the lowest-cost model that safely fits a role when the user has not pinned one.
 - Apply Simple, Standard, or Strict contracts proportionally. The default workspace policy is hybrid: safe serial work may use current, while parallel writers and dirty-primary isolation require separate worktrees; one writer owns one isolated worktree.
-- For game projects, select a code worktree, package worktree, or Unity clone from the affected scope. The pipeline, subagents, current checkout, and Git worktrees need no special user approval. Ask only before creating a full Unity clone estimated above 10 GiB; after refusal, use a worktree or safe serial current work and block only a step with no safe fallback.
+- Select a code worktree, package worktree, or full clone from the affected scope. The pipeline, read-only workers, reviewers, validators, and safe serial work in the current checkout need no special user approval. Obtain explicit approval before provisioning any isolated workspace estimated above 10 GiB, for Unity and non-Unity repositories alike; pending or declined approval blocks only that provisioning or a step with no safe fallback.
 - Keep only Task, Phase, and immutable Review files as canonical artifacts. Embed handoff, validation, and integration evidence in their owning artifact.
 - Map acceptance criteria and material risks to tests.
 - Keep roadmap and progress notes concise; never paste raw logs.

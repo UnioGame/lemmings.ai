@@ -382,19 +382,19 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     estimated = workspace.get("estimatedGiB")
     if estimated is not None and (not isinstance(estimated, (int, float)) or isinstance(estimated, bool) or estimated < 0):
         result.error("workspace.estimate", "workspace.estimatedGiB must be a non-negative number or null")
-    declined_clone = backend == "unity-clone" and workspace.get("approval") == "declined" and state == "Blocked"
-    if isinstance(estimated, (int, float)) and estimated > 10 and backend == "unity-clone" and workspace.get("approval") != "approved" and not declined_clone:
-        result.error("workspace.approval", "Unity clone estimates above 10 GiB require explicit approval")
-    if workspace.get("approval") not in {"not-required", "approved", "declined"}:
-        result.error("workspace.approval", "workspace.approval must be not-required, approved, or declined")
+    isolated_backend = backend in {"code-worktree", "package-worktree", "unity-clone"}
+    approval = workspace.get("approval")
+    unprovisioned_workspace = isolated_backend and approval in {"pending", "declined"}
+    if isinstance(estimated, (int, float)) and estimated > 10 and isolated_backend and approval not in {"approved", "pending", "declined"}:
+        result.error("workspace.approval", "workspace estimates above 10 GiB require explicit approval")
+    if approval not in {"not-required", "pending", "approved", "declined"}:
+        result.error("workspace.approval", "workspace.approval must be not-required, pending, approved, or declined")
     if not workspace.get("reason"):
         result.error("workspace.reason", "workspace.reason is required")
-    if backend in {"code-worktree", "package-worktree", "unity-clone"} and not workspace.get("path") and not declined_clone:
+    if isolated_backend and not workspace.get("path") and not unprovisioned_workspace:
         result.error("workspace.path", f"{backend} requires workspace.path")
-    if backend in {"code-worktree", "package-worktree", "unity-clone"} and estimated is None:
+    if isolated_backend and estimated is None:
         result.error("workspace.estimate", f"{backend} requires workspace.estimatedGiB")
-    if backend == "unity-clone" and workspace.get("approval") == "declined" and state != "Blocked":
-        result.error("workspace.declined", "declined Unity clone must fall back to a Git worktree, safe current work, or Blocked")
     if "parallelWriters" in as_list(task.get("risks")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
         result.error("workspace.parallel", "parallel writers cannot share the current checkout")
     if state in {"Candidate", "Accepted", "Integrated"}:
