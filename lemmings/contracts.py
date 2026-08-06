@@ -384,7 +384,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("workspace.estimate", "workspace.estimatedGiB must be a non-negative number or null")
     isolated_backend = backend in {"code-worktree", "package-worktree", "unity-clone"}
     approval = workspace.get("approval")
-    unprovisioned_workspace = isolated_backend and approval in {"pending", "declined"}
+    unprovisioned_workspace = isolated_backend and (approval == "pending" or (approval == "declined" and state == "Blocked"))
     if isinstance(estimated, (int, float)) and estimated > 10 and isolated_backend and approval not in {"approved", "pending", "declined"}:
         result.error("workspace.approval", "workspace estimates above 10 GiB require explicit approval")
     if approval not in {"not-required", "pending", "approved", "declined"}:
@@ -395,6 +395,8 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("workspace.path", f"{backend} requires workspace.path")
     if isolated_backend and estimated is None:
         result.error("workspace.estimate", f"{backend} requires workspace.estimatedGiB")
+    if isolated_backend and approval == "declined" and state != "Blocked":
+        result.error("workspace.declined", "declined workspace must fall back to safe current work or set the Task to Blocked")
     if "parallelWriters" in as_list(task.get("risks")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
         result.error("workspace.parallel", "parallel writers cannot share the current checkout")
     if state in {"Candidate", "Accepted", "Integrated"}:
@@ -640,6 +642,7 @@ def validate_wave(
         for missing in sorted(set(dag) - task_ids):
             result.error("phase.task_artifact_missing", f"phase task has no loaded Task artifact: {missing}")
     worktrees: set[str] = set()
+    active_current_writers: list[str] = []
     lease_owners: dict[str, str] = {}
     for lease in as_list(phase.get("leases")):
         if not isinstance(lease, dict) or not lease.get("resource") or not lease.get("owner"):
@@ -662,6 +665,10 @@ def validate_wave(
             result.error("phase.dependency_drift", f"task {task_id} dependencies differ from phase.taskDag")
         worktree = str(task_worktree(task) or "")
         dispatchable = task.get("state") in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}
+        role = str(task.get("role") or "worker")
+        backend = str((task.get("workspace") or {}).get("backend") or "current")
+        if task.get("state") == "Active" and role not in {"reviewer", "explorer", "validator", "summarizer"} and backend == "current":
+            active_current_writers.append(task_id)
         normalized = normalize_path(worktree)
         if worktree:
             if normalized in worktrees:
@@ -669,6 +676,8 @@ def validate_wave(
             worktrees.add(normalized)
         if dispatchable and "externalResources" in as_list(task.get("risks")) and str(task.get("taskId")) not in lease_owners.values():
             result.error("lease.required", f"external-resource task {task.get('taskId')} requires an active lease")
+    if len(active_current_writers) > 1:
+        result.error("workspace.parallel", f"active writers cannot share the current checkout: {', '.join(active_current_writers)}")
     for index, task in enumerate(tasks):
         left = as_list((task.get("ownership") or {}).get("owned"))
         for other in tasks[index + 1:]:

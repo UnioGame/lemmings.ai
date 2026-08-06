@@ -26,6 +26,8 @@ For a single task, prefer `current` when the checkout is safe and the user does 
 
 Use `package-worktree` only when every owned write belongs to the package repository and the task can validate through its public contract. Record the package commit separately from the consumer repository pointer update. Do not assume a superproject worktree initializes or isolates submodules correctly; create the package worktree from the package repository itself, then update the consumer pointer during integration.
 
+When optional tooling estimates this backend, pass the actual target package with `workspace estimate --backend package-worktree --package <repo-relative-package>`; never substitute the Lemmings tooling package or the whole consumer repository.
+
 Bootstrap and tooling paths must come from `.git/lemmings/environment.json`, the repo-relative `tooling.root`, or package detection. Never hard-code a consumer checkout path. Do not bootstrap from generated package caches because they are disposable and may be read-only.
 
 ## Serialized ownership and metadata

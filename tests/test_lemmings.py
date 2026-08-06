@@ -178,17 +178,36 @@ class IdentityAndCliTests(unittest.TestCase):
         value = task(workspace={"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 12, "approval": "not-required", "reason": "Git worktree"})
         self.assertIn("workspace.approval", {item.code for item in validate_task(value, profile()).findings})
 
-    def test_pending_or_declined_large_workspace_can_remain_unprovisioned(self):
-        for approval in ("pending", "declined"):
-            with self.subTest(approval=approval):
-                value = task(workspace={"policy": "isolated", "backend": "package-worktree", "path": None, "estimatedGiB": 12, "approval": approval, "reason": "awaiting isolated workspace"})
-                codes = {item.code for item in validate_task(value, profile()).findings}
-                self.assertNotIn("workspace.approval", codes)
-                self.assertNotIn("workspace.path", codes)
+    def test_pending_large_workspace_can_remain_ready_and_unprovisioned(self):
+        value = task(workspace={"policy": "isolated", "backend": "package-worktree", "path": None, "estimatedGiB": 12, "approval": "pending", "reason": "awaiting isolated workspace"})
+        codes = {item.code for item in validate_task(value, profile()).findings}
+        self.assertNotIn("workspace.approval", codes)
+        self.assertNotIn("workspace.path", codes)
+
+    def test_declined_large_workspace_cannot_remain_ready(self):
+        value = task(workspace={"policy": "isolated", "backend": "package-worktree", "path": None, "estimatedGiB": 12, "approval": "declined", "reason": "workspace declined"})
+        codes = {item.code for item in validate_task(value, profile()).findings}
+        self.assertIn("workspace.declined", codes)
+        self.assertIn("workspace.path", codes)
 
     def test_small_code_worktree_does_not_require_task_approval(self):
         value = task(workspace={"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 9, "approval": "not-required", "reason": "Git worktree"})
         self.assertNotIn("workspace.approval", {item.code for item in validate_task(value, profile()).findings})
+
+    def test_package_worktree_estimates_the_explicit_target_package(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            package = repo / "Packages" / "target"
+            package.mkdir(parents=True)
+            with patch.object(workspace_module, "_size", return_value=11 * workspace_module.GIB):
+                result = workspace_module.estimate_workspace(repo, backend="package-worktree", package_path="Packages/target")
+            self.assertEqual("package-worktree", result["backend"])
+            self.assertTrue(result["approvalRequired"])
+
+    def test_package_worktree_requires_an_explicit_target_package(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(ValueError, "--package"):
+                workspace_module.estimate_workspace(Path(temp), backend="package-worktree")
 
     def test_large_unity_clone_requires_task_approval(self):
         value = task(workspace={"policy": "isolated", "backend": "unity-clone", "path": "C:/clone/one", "estimatedGiB": 12, "approval": "not-required", "reason": "Full clone"})
@@ -412,13 +431,38 @@ class ContractTests(unittest.TestCase):
         output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement serially in current checkout.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
         self.assertEqual("allow", output["decision"])
 
+    def test_active_strict_writers_cannot_share_current_checkout(self):
+        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}, {"taskId": "TASK-2", "dependencies": []}], "leases": []}
+        left = task(mode="strict", state="Active", previousState="Ready", ownership={"owned": ["src/left/**"], "shared": [], "forbidden": []}, workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "current"})
+        right = task(taskId="TASK-2", mode="strict", state="Active", previousState="Ready", ownership={"owned": ["src/right/**"], "shared": [], "forbidden": []}, workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "current"})
+        self.assertIn("workspace.parallel", {item.code for item in validate_wave(ROOT, [left, right], phase).findings})
+
+    def test_large_isolated_writer_spawn_requires_workspace_approval(self):
+        value = task(mode="strict", workspace={"policy": "isolated", "backend": "code-worktree", "path": str(ROOT), "estimatedGiB": 12, "approval": "not-required", "reason": "large worktree"})
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "cwd": str(ROOT), "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
+        self.assertEqual("block", output["decision"])
+        self.assertIn("approval", output["reason"])
+
+    def test_parallel_writer_risk_cannot_dispatch_in_current_checkout(self):
+        value = task(mode="strict", risks=["parallelWriters"], workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "invalid parallel current"})
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "cwd": str(ROOT), "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement in parallel.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
+        self.assertEqual("block", output["decision"])
+        self.assertIn("isolated worktree", output["reason"])
+
     def test_workspace_approval_gate_does_not_block_read_only_roles(self):
-        for approval in ("pending", "declined"):
-            value = task(workspace={"policy": "isolated", "backend": "code-worktree", "path": None, "estimatedGiB": 12, "approval": approval, "reason": "workspace not provisioned"})
+        cases = (("pending", "Ready", "Planned"), ("declined", "Blocked", "Ready"))
+        for approval, state, previous_state in cases:
+            value = task(state=state, previousState=previous_state, workspace={"policy": "isolated", "backend": "code-worktree", "path": None, "estimatedGiB": 12, "approval": approval, "reason": "workspace not provisioned"})
             for role in ("explorer", "validator"):
                 with self.subTest(approval=approval, role=role):
                     output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "toolInput": {"task_name": f"lemmings_{role}", "message": "Read-only work.", "role": role}})
                     self.assertEqual("allow", output["decision"])
+
+    def test_declined_blocked_workspace_still_blocks_writer(self):
+        value = task(mode="strict", state="Blocked", previousState="Ready", workspace={"policy": "isolated", "backend": "code-worktree", "path": None, "estimatedGiB": 12, "approval": "declined", "reason": "workspace not provisioned"})
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
+        self.assertEqual("block", output["decision"])
+        self.assertIn("Ready", output["reason"])
 
     def test_ready_strict_writer_requires_owned_paths(self):
         value = task(mode="strict", ownership={"owned": [], "shared": [], "forbidden": []})

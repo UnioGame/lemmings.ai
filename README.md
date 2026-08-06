@@ -120,7 +120,7 @@ python -m lemmings workspace estimate
 python -m lemmings workspace inspect
 ```
 
-`workspace estimate` defaults to the Git worktree estimate. Pass another `--backend` after selecting a package worktree or full Unity clone. Every isolated backend reports whether its estimated copy exceeds the approval threshold.
+`workspace estimate` defaults to the Git worktree estimate. Pass `--backend package-worktree --package <repo-relative-package>` for the target package, or `--backend unity-clone` after full-clone validation has been selected. Every isolated backend reports whether its estimated copy exceeds the approval threshold.
 
 Telemetry is local, off by default, and independent of the orchestration mode:
 

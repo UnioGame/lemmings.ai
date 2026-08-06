@@ -107,6 +107,7 @@ def estimate_workspace(
     repo: Path,
     profile: Mapping[str, Any] | None = None,
     backend: str = "auto",
+    package_path: str | None = None,
 ) -> dict[str, Any]:
     if backend not in WORKSPACE_BACKENDS:
         raise ValueError(f"unknown workspace backend: {backend}")
@@ -118,7 +119,10 @@ def estimate_workspace(
     if selected == "current":
         estimate = 0
     elif selected == "package-worktree":
-        estimate = _size(_package_root(repo, profile) or repo)
+        package = resolve_path(repo, package_path) if package_path else None
+        if not package or not package.is_dir():
+            raise ValueError("package-worktree requires an existing --package path")
+        estimate = _size(package)
     elif selected == "code-worktree":
         estimate = tracked + submodules
     else:

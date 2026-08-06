@@ -370,7 +370,8 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "reviewer must inspect the current candidate/fix head")
                 return decision("allow", "reviewer dispatch invariants satisfied")
             if role in {"explorer", "validator", "summarizer"}:
-                if task.get("state") not in {"Ready", "Active", "Candidate"}:
+                workspace_blocked = task.get("state") == "Blocked" and (task.get("workspace") or {}).get("approval") == "declined"
+                if task.get("state") not in {"Ready", "Active", "Candidate"} and not workspace_blocked:
                     return decision("block", f"{role} requires Ready, Active, or Candidate task")
                 return decision("allow", f"bounded {role} dispatch accepted")
             if task.get("state") != "Ready":
@@ -387,8 +388,12 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             if mode == "strict" and not as_list((task.get("ownership") or {}).get("owned")):
                 return decision("block", "Strict writer requires non-empty ownership.owned")
             backend = ((task.get("workspace") or {}).get("backend"))
-            isolated = backend in {"code-worktree", "package-worktree", "unity-clone"} or payload.get("parallelWriters") or payload.get("dirtyPrimary")
+            isolated = backend in {"code-worktree", "package-worktree", "unity-clone"} or "parallelWriters" in as_list(task.get("risks")) or payload.get("parallelWriters") or payload.get("dirtyPrimary")
             if writer and isolated:
+                workspace = task.get("workspace") or {}
+                estimated = workspace.get("estimatedGiB")
+                if isinstance(estimated, (int, float)) and not isinstance(estimated, bool) and estimated > 10 and workspace.get("approval") != "approved":
+                    return decision("block", "workspace estimates above 10 GiB require explicit user approval before writer dispatch")
                 declared = task_worktree(task)
                 if not declared:
                     return decision("block", "Declared isolation, parallel writing, or a dirty primary checkout requires an isolated worktree")

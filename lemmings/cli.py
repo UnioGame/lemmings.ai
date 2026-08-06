@@ -127,7 +127,7 @@ def command_workspace(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
     profile = load_optional(repo, args.profile, ".codex/lemmings.json")
     if args.workspace_command == "estimate":
-        emit({"ok": True, **estimate_workspace(repo, profile, args.backend)})
+        emit({"ok": True, **estimate_workspace(repo, profile, args.backend, args.package)})
     else:
         emit(inspect_workspaces(repo, profile))
     return 0
@@ -240,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check", help="validate applicable contracts"); add_common(check); check.add_argument("--task", action="append"); check.add_argument("--phase"); check.add_argument("--review"); check.add_argument("--all", action="store_true"); check.set_defaults(run=command_check)
     status = sub.add_parser("status", help="inspect runtime and contract status"); add_common(status, True); status.set_defaults(run=command_status)
     workspace = sub.add_parser("workspace", help="estimate or inspect workspaces"); workspace_sub = workspace.add_subparsers(dest="workspace_command", required=True)
-    estimate = workspace_sub.add_parser("estimate"); add_common(estimate); estimate.add_argument("--backend", default="auto", choices=["auto", "current", "code-worktree", "package-worktree", "unity-clone"]); estimate.set_defaults(run=command_workspace)
+    estimate = workspace_sub.add_parser("estimate"); add_common(estimate); estimate.add_argument("--backend", default="auto", choices=["auto", "current", "code-worktree", "package-worktree", "unity-clone"]); estimate.add_argument("--package", help="repo-relative target package path for package-worktree sizing"); estimate.set_defaults(run=command_workspace)
     inspect = workspace_sub.add_parser("inspect"); add_common(inspect); inspect.set_defaults(run=command_workspace)
     metrics = sub.add_parser("metrics", help="manage optional local telemetry"); metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
     for name in ("off", "basic", "full", "status"):
