@@ -74,7 +74,11 @@ function Get-TreeFingerprint {
     param([Parameter(Mandatory = $true)][string]$Root)
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $null }
     $lines = Get-ChildItem -LiteralPath $Root -File -Recurse | Sort-Object FullName | ForEach-Object {
-        '{0}:{1}' -f (Get-RelativeSlashPath -From $Root -To $_.FullName), (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        $content = [IO.File]::ReadAllText($_.FullName).Replace("`r`n", "`n")
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        try { $hash = -join ($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($content)) | ForEach-Object { $_.ToString('x2') }) }
+        finally { $hasher.Dispose() }
+        '{0}:{1}' -f (Get-RelativeSlashPath -From $Root -To $_.FullName), $hash
     }
     return ($lines -join "`n")
 }
@@ -198,11 +202,12 @@ $profileDefaults = [pscustomobject]@{
         orchestrator = 'gpt-5.6-sol:high'
         reviewer = 'gpt-5.6-sol:high'
         worker = 'gpt-5.6-luna:max'
-        validator = 'gpt-5.6-terra:medium'
+        validator = 'gpt-5.6-luna:high'
+        explorer = 'gpt-5.6-luna:high'
+        summarizer = 'gpt-5.6-luna:medium'
     }
     workerPolicy = [pscustomobject]@{
         elevatedModel = 'gpt-5.6-terra:max'
-        highRiskModel = 'gpt-5.6-sol:medium'
     }
     fallback = [pscustomobject]@{ allowed = @() }
     game = [pscustomobject]@{

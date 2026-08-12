@@ -20,7 +20,7 @@ Lemmings guides work through **Discover → Plan → Refine → Implement → Ve
 
 The **Smart Skill** is the product and the only orchestrator. It selects a mode, assigns models, creates the necessary artifacts, delegates bounded work, operates Git, reviews the real candidate range, and verifies integration.
 
-Python tooling is optional. It validates contracts, reports status, estimates workspace size, and records opt-in telemetry. Optional hooks enforce decisions already made by the skill; neither tooling nor hooks implement a second workflow.
+Python tooling is optional. It validates contracts, finalizes tracked Task quality, reports status, estimates workspace size, and records opt-in timing telemetry. Optional hooks enforce decisions already made by the skill; neither tooling nor hooks implement a second workflow.
 
 ```mermaid
 flowchart LR
@@ -98,7 +98,7 @@ $lemmings workspace status
 $lemmings workspace task TASK-17 isolated
 ```
 
-Enable or disable Lemmings for the current task with `$lemmings on` and `$lemmings off`. The orchestrator and reviewer use `gpt-5.6-sol:high`; an explicitly requested higher orchestrator effort is allowed. A bounded Ready task defaults to `gpt-5.6-luna:max`, an elevated well-specified cross-file task uses `gpt-5.6-terra:max`, and high-risk or ambiguous work uses `gpt-5.6-sol:medium`. All three assignments use the same worker role; there is no separate complex-worker role. Explicit user pins still take priority.
+Enable or disable Lemmings for the current task with `$lemmings on` and `$lemmings off`. Discover/Plan/Refine, orchestration, and independent review use `gpt-5.6-sol:high`. A bounded Ready worker defaults to `gpt-5.6-luna:max`; large-context, multi-subsystem, or failed-Luna implementation escalates to `gpt-5.6-terra:max`. Sol Medium/High/Max are explicit worker pins only and always override automatic routing. Plan defects return to Refine without worker escalation. Explorer and validator use Luna High; evidence summarization uses Luna Medium.
 
 Example:
 
@@ -147,7 +147,7 @@ The optional [hook layer](hooks/hooks.json) can enforce:
 
 Hooks are **not enabled by bootstrap**. They fail open on telemetry recording errors; safety policy remains separate from telemetry. See [game-project workspace policy](skills/lemmings/references/game-projects.md) for resource ownership and large-repository constraints.
 
-Four optional [agent profiles](agents) cover orchestrator, worker, reviewer, and validator. Explorers and summarizers remain ordinary bounded subagents instead of permanent profiles.
+Six optional [agent profiles](agents) cover orchestrator, worker, reviewer, validator, explorer, and summarizer.
 
 ## Artifacts
 

@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from lemmings import hooks
 from lemmings.contracts import runtime_marker, validate_task
+from lemmings.quality import build_quality_report, finalize_task_quality, summarize_quality
 from lemmings.telemetry import (
     annotate_regression,
     bind_run,
@@ -88,6 +89,81 @@ def quality() -> dict:
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_quality_summary_aggregates_attempts_reviews_and_escalation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp); init_repo(repo)
+            reviews = repo / "docs/tasks/reviews"; reviews.mkdir(parents=True)
+            first_ref = "docs/tasks/reviews/TASK-17-1.json"
+            second_ref = "docs/tasks/reviews/TASK-17-2.json"
+            (repo / first_ref).write_text(json.dumps({"status": "ChangesRequested", "findings": [{"priority": "P1", "origin": "implementation"}, {"priority": "P2", "origin": "plan-contract"}]}), encoding="utf-8")
+            (repo / second_ref).write_text(json.dumps({"status": "Accepted", "findings": [{"priority": "P3", "origin": "implementation"}]}), encoding="utf-8")
+            current = task("Integrated")
+            current["execution"]["attempts"] = [
+                {"attempt": 1, "kind": "candidate", "actualModel": "gpt-5.6-luna:max", "headSha": "head", "validationFailures": 1, "reviewRef": first_ref, "reviewStatus": "ChangesRequested"},
+                {"attempt": 2, "kind": "fix", "actualModel": "gpt-5.6-terra:max", "headSha": "fix", "validationFailures": 0, "reviewRef": second_ref, "reviewStatus": "Accepted"},
+            ]
+            current["reviewHistory"] = [first_ref, second_ref]
+            current["reviewRef"] = second_ref
+            summary = summarize_quality(repo, current, "completed")
+            self.assertTrue(summary["complete"])
+            self.assertFalse(summary["firstPassAccepted"])
+            self.assertEqual(1, summary["repairCycles"])
+            self.assertEqual(1, summary["workerModelChanges"])
+            self.assertEqual(1, summary["validationFailures"])
+            self.assertEqual(1, summary["findings"]["implementation"]["P1"])
+            self.assertEqual(1, summary["findings"]["plan-contract"]["P2"])
+            self.assertTrue(summary["lunaToTerraEscalated"])
+
+    def test_metrics_finish_writes_quality_with_telemetry_off(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp); init_repo(repo)
+            packets = repo / "docs/tasks"; reviews = packets / "reviews"
+            reviews.mkdir(parents=True)
+            review_ref = "docs/tasks/reviews/TASK-17.json"
+            (repo / review_ref).write_text(json.dumps({"status": "Accepted", "findings": []}), encoding="utf-8")
+            current = task("Integrated")
+            current["execution"]["attempts"] = [{"attempt": 1, "kind": "candidate", "actualModel": "gpt-5.6-luna:max", "headSha": "head", "validationFailures": 0, "reviewRef": review_ref, "reviewStatus": "Accepted"}]
+            current["reviewHistory"] = [review_ref]
+            current["reviewRef"] = review_ref
+            packet = packets / "TASK-17.json"; packet.write_text(json.dumps(current), encoding="utf-8")
+            process = run_cli("metrics", "finish", "--repo", str(repo), "--task", str(packet), "--outcome", "completed")
+            self.assertEqual(0, process.returncode, process.stdout + process.stderr)
+            output = json.loads(process.stdout)
+            self.assertFalse(output["recorded"])
+            self.assertTrue(output["taskQuality"]["complete"])
+            self.assertTrue(json.loads(packet.read_text(encoding="utf-8"))["qualitySummary"]["firstPassAccepted"])
+
+    def test_legacy_task_is_reported_but_not_comparable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp); init_repo(repo)
+            packets = repo / "docs/tasks"; packets.mkdir(parents=True)
+            legacy = task("Integrated")
+            (packets / "legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
+            report = build_quality_report(repo, {"taskGlobs": ["docs/tasks/*.json"]})
+            self.assertEqual(1, report["legacyOrIncompleteTasks"])
+            self.assertEqual([], report["comparison"]["recommendations"])
+
+    def test_routing_recommendation_waits_for_five_integrated_tasks_per_model(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp); init_repo(repo)
+            packets = repo / "docs/tasks"; reviews = packets / "reviews"
+            reviews.mkdir(parents=True)
+            for model_index, model in enumerate(("gpt-5.6-luna:max", "gpt-5.6-terra:max")):
+                for index in range(5):
+                    task_id = f"TASK-{model_index}-{index}"
+                    review_ref = f"docs/tasks/reviews/{task_id}.json"
+                    (repo / review_ref).write_text(json.dumps({"status": "Accepted", "findings": []}), encoding="utf-8")
+                    current = task("Integrated")
+                    current.update({"taskId": task_id, "telemetryCohort": "same", "reviewRef": review_ref, "reviewHistory": [review_ref]})
+                    current["models"] = {"requested": None, "assigned": model, "actual": model}
+                    current["execution"]["attempts"] = [{"attempt": 1, "kind": "candidate", "actualModel": model, "headSha": "head", "validationFailures": 0, "reviewRef": review_ref, "reviewStatus": "Accepted"}]
+                    (packets / f"{task_id}.json").write_text(json.dumps(current), encoding="utf-8")
+            report = build_quality_report(repo, {"taskGlobs": ["docs/tasks/*.json"]})
+            self.assertEqual("compare-routing", report["comparison"]["recommendations"][0]["recommendation"])
+            (packets / "TASK-1-4.json").unlink()
+            report = build_quality_report(repo, {"taskGlobs": ["docs/tasks/*.json"]})
+            self.assertEqual([], report["comparison"]["recommendations"])
+
     def test_telemetry_cohort_contract_is_optional_but_typed(self):
         value = task(); value["schemaVersion"] = 1; value["ownership"] = {"owned": [], "shared": [], "forbidden": []}
         self.assertNotIn("telemetry.cohort", {item.code for item in validate_task(value).findings})

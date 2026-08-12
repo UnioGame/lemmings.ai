@@ -256,7 +256,7 @@ skill_target="$repo_root/.agents/skills/lemmings"
 if [[ ! -d "$skill_target" ]]; then
   echo "copy $skill_source -> $skill_target"
   if (( ! dry_run )); then mkdir -p "$skill_target"; cp -R "$skill_source/." "$skill_target/"; fi
-elif ! diff -qr "$skill_source" "$skill_target" >/dev/null 2>&1; then
+elif ! diff -qr --strip-trailing-cr "$skill_source" "$skill_target" >/dev/null 2>&1; then
   if (( ! force )); then echo "Skill target differs from the package copy: $skill_target. Re-run with --force to replace it." >&2; exit 1; fi
   echo "replace $skill_target"
   if (( ! dry_run )); then rm -rf -- "$skill_target"; mkdir -p "$skill_target"; cp -R "$skill_source/." "$skill_target/"; fi
@@ -278,11 +278,12 @@ cat >"$defaults_file" <<JSON
     "orchestrator": "gpt-5.6-sol:high",
     "reviewer": "gpt-5.6-sol:high",
     "worker": "gpt-5.6-luna:max",
-    "validator": "gpt-5.6-terra:medium"
+    "validator": "gpt-5.6-luna:high",
+    "explorer": "gpt-5.6-luna:high",
+    "summarizer": "gpt-5.6-luna:medium"
   },
   "workerPolicy": {
-    "elevatedModel": "gpt-5.6-terra:max",
-    "highRiskModel": "gpt-5.6-sol:medium"
+    "elevatedModel": "gpt-5.6-terra:max"
   },
   "fallback": { "allowed": [] },
   "game": {

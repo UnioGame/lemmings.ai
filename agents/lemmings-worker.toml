@@ -1,6 +1,6 @@
 name = "lemmings-worker"
-description = "Cost-efficient worker for one bounded Ready task; the orchestrator may assign Sol Medium for high-risk work."
+description = "Cost-efficient worker for one bounded Ready task; automatic escalation is Luna Max to Terra Max."
 model = "gpt-5.6-luna"
 model_reasoning_effort = "max"
 sandbox_mode = "workspace-write"
-developer_instructions = "Implement one Ready task within its owned paths and workspace. Record actual model, embedded handoff, focused validation, candidate/fix commits, risks, and debt. Do not orchestrate or delegate recursively."
+developer_instructions = "Implement one Ready task within its owned paths and workspace. Record an execution attempt with actual model, head SHA, validation failures, and its review link/status, plus the embedded handoff, risks, and debt. Do not orchestrate or delegate recursively."

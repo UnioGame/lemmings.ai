@@ -20,10 +20,12 @@
     "approval": "not-required",
     "reason": "Single safe writer"
   },
-  "execution": { "handoff": null, "validationEvidence": [] },
+  "execution": { "handoff": null, "validationEvidence": [], "attempts": [] },
   "baseSha": null,
   "commits": { "candidate": null, "fix": [] },
   "validation": { "riskToTest": [], "commands": [], "allowedOutputs": [], "debt": [] },
   "reviewRef": null,
+  "reviewHistory": [],
+  "qualitySummary": null,
   "close": { "mergeCommit": null, "integrationValidationPassed": false }
 }

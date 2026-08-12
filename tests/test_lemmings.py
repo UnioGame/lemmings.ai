@@ -330,9 +330,16 @@ class ContractTests(unittest.TestCase):
         value = task(role="complex-worker")
         self.assertIn("task.role", {item.code for item in validate_task(value, profile()).findings})
 
-    def test_sol_medium_is_approved_high_risk_assignment_for_worker_role(self):
-        value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["highRiskModel"], "actual": None})
+    def test_historical_sol_medium_worker_assignment_remains_valid(self):
+        value = task(models={"requested": None, "assigned": "gpt-5.6-sol:medium", "actual": None})
         self.assertTrue(validate_task(value, profile()).ok)
+
+    def test_explicit_sol_worker_pins_are_preserved(self):
+        for effort in ("medium", "high", "max"):
+            model = f"gpt-5.6-sol:{effort}"
+            with self.subTest(model=model):
+                value = task(models={"requested": model, "assigned": model, "actual": None})
+                self.assertTrue(validate_task(value, profile()).ok)
 
     def test_terra_max_is_approved_elevated_assignment_for_worker_role(self):
         value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["elevatedModel"], "actual": None})
@@ -396,6 +403,20 @@ class ContractTests(unittest.TestCase):
         value = task(state="Candidate", previousState="Candidate", baseSha="base", commits={"candidate": "aaa", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
         review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "ChangesRequested", "cycle": 2, "findings": [], "validation": []}
         self.assertIn("review.replan", {f.code for f in validate_review(review, value).findings})
+
+    def test_review_findings_require_valid_quality_classification(self):
+        value = task(state="Candidate", previousState="Active", baseSha="base", commits={"candidate": "aaa", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "ChangesRequested", "cycle": 1, "findings": [{"priority": "P2", "origin": "implementation"}], "validation": []}
+        self.assertTrue(validate_review(review, value).ok)
+        review["findings"][0]["origin"] = "unknown"
+        self.assertIn("review.finding_origin", {f.code for f in validate_review(review, value).findings})
+
+    def test_legacy_review_finding_is_valid_but_warned_incomplete(self):
+        value = task(state="Candidate", previousState="Active", baseSha="base", commits={"candidate": "aaa", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [{"summary": "legacy"}], "validation": []}
+        result = validate_review(review, value)
+        self.assertTrue(result.ok)
+        self.assertIn("review.finding_origin_missing", {f.code for f in result.findings})
 
     def test_strict_wave_requires_unique_worktrees_and_nonoverlap(self):
         phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [], "leases": []}
@@ -650,8 +671,8 @@ class HookTests(unittest.TestCase):
         wrong_state = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review current candidate.", "model": "gpt-5.6-sol", "reasoning_effort": "high"}})
         self.assertEqual("block", wrong_state["decision"])
 
-    def test_high_risk_worker_uses_sol_medium_without_a_separate_role(self):
-        value = task(models={"requested": None, "assigned": DEFAULT_WORKER_POLICY["highRiskModel"], "actual": None})
+    def test_explicit_sol_high_worker_pin_uses_same_worker_role(self):
+        value = task(models={"requested": "gpt-5.6-sol:high", "assigned": "gpt-5.6-sol:high", "actual": None})
         output = handle({
             "event": "PreToolUse",
             "toolName": "Agent",
@@ -659,9 +680,9 @@ class HookTests(unittest.TestCase):
             "profile": profile(),
             "toolInput": {
                 "task_name": "lemmings_worker",
-                "message": "Implement the high-risk Ready task.",
+                "message": "Execute on Sol High as explicitly requested.",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "medium",
+                "reasoning_effort": "high",
             },
         })
         self.assertEqual("allow", output["decision"])

@@ -1,4 +1,4 @@
-"""Optional, local, privacy-bounded telemetry for Lemmings."""
+"""Optional, local, privacy-bounded timing telemetry for Lemmings."""
 
 from __future__ import annotations
 
@@ -906,7 +906,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     delivery = report["delivery"]
     completeness = report["completeness"]
     lines = [
-        "# Lemmings telemetry report",
+        "# Lemmings delivery report",
         "",
         f"Generated: {report['generatedAt']}",
         f"Completeness: {'complete' if completeness['complete'] else 'incomplete'}",
@@ -934,6 +934,20 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     ]
     if completeness["missing"]:
         lines.extend(("", "Missing evidence: " + ", ".join(completeness["missing"])))
+    tracked = report.get("taskQuality") or {}
+    if tracked:
+        lines.extend((
+            "",
+            "## Tracked implementation quality",
+            "",
+            f"- Tasks: {len(tracked.get('tasks') or [])}",
+            f"- Legacy or incomplete tasks: {tracked.get('legacyOrIncompleteTasks', 0)}",
+        ))
+        for model, values in (tracked.get("attemptsByModel") or {}).items():
+            lines.append(
+                f"- {model}: {values.get('reviewedAttempts', 0)} reviewed attempts, "
+                f"{values.get('implementationFindings', 0)} implementation findings"
+            )
     if report.get("benchmark"):
         benchmark = report["benchmark"]
         lines.extend((

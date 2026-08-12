@@ -1,6 +1,6 @@
 # Telemetry
 
-Telemetry and hooks are local, optional, and off by default. They never change the skill's lifecycle, model routing, acceptance, or safety policy.
+Tracked Task/Review quality metrics are mandatory for Standard and Strict delivery and do not depend on telemetry. Telemetry and hooks add local timing data, remain optional and off by default, and never change lifecycle, routing, acceptance, or safety policy.
 
 ## Levels
 
@@ -12,7 +12,7 @@ Exact tokens and model API latency are unsupported in schema version 1. Reports 
 
 ## Lifecycle discipline
 
-If telemetry is active, enter `discover`, `plan`, `refine`, `implement`, and `verify` at their real boundaries. Repeating the current stage is a no-op. Finish every run with the factual `lemmings metrics finish --outcome ...` command.
+Always finish a tracked run with `lemmings metrics finish --task <task-json> --outcome ...`; this derives and writes `qualitySummary` and outputs cumulative artifact quality even in `off` mode. If telemetry is active, enter `discover`, `plan`, `refine`, `implement`, and `verify` at their real boundaries. Repeating the current stage is a no-op.
 
 Pass the stable task ID until its packet exists, then pass the real packet path. A missing path-like value is rejected rather than recorded as an ID. Simple work may remain taskless. For Strict work, invoke the first `metrics stage` from the task's actual current checkout or isolated workspace so its binding records the real execution location.
 
@@ -32,4 +32,4 @@ A post-integration annotation requires kind, P0-P3 severity, confirmed or suspec
 
 Keep wall-clock lead time separate from summed agent time. Treat churn as task-size context, not productivity. Do not create a combined efficiency score or automatically change a mode/model.
 
-Comparative recommendations require at least five Integrated tasks in one explicit `telemetryCohort`, complete bound lifecycle stages, at least one passing quality signal per task, no failed quality signal, and no confirmed P0/P1 regression. Smaller, incomplete, or mixed samples remain descriptive. Use `lemmings metrics report --benchmark` for explicit benchmark evidence.
+Artifact-quality comparisons require at least five Integrated, complete, fully classified tasks per model in one explicit `telemetryCohort`. Incomplete or unclassified tasks remain visible but excluded. A comparison recommendation appears only when at least two eligible model cohorts exist; it never changes routing automatically. Timing-aware benchmark recommendations additionally require complete bound lifecycle stages, passing imported quality evidence, and no confirmed P0/P1 regression. Use `lemmings metrics report --benchmark` for explicit benchmark evidence.

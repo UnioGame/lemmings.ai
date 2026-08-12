@@ -36,12 +36,16 @@ DEFAULT_MODELS = {
     "orchestrator": "gpt-5.6-sol:high",
     "reviewer": "gpt-5.6-sol:high",
     "worker": "gpt-5.6-luna:max",
-    "validator": "gpt-5.6-terra:medium",
+    "validator": "gpt-5.6-luna:high",
+    "explorer": "gpt-5.6-luna:high",
+    "summarizer": "gpt-5.6-luna:medium",
 }
 DEFAULT_WORKER_POLICY = {
     "elevatedModel": "gpt-5.6-terra:max",
-    "highRiskModel": "gpt-5.6-sol:medium",
 }
+LEGACY_WORKER_ASSIGNMENTS = {"gpt-5.6-sol:medium"}
+FINDING_ORIGINS = {"implementation", "plan-contract", "validation", "integration"}
+FINDING_PRIORITIES = {"P0", "P1", "P2", "P3"}
 ORCHESTRATOR_EFFORTS = {"high", "xhigh", "max", "ultra"}
 TASK_ROLES = {"orchestrator", "worker", "reviewer", "validator", "explorer", "summarizer", "shared-contract-owner"}
 
@@ -307,6 +311,9 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
         if isinstance(worker_policy, Mapping):
             for route, required in DEFAULT_WORKER_POLICY.items():
                 allowed_assignments.add(worker_policy.get(route) or required)
+        # Historical unpinned Sol Medium packets remain readable, but this model
+        # is no longer selected by automatic routing.
+        allowed_assignments.update(LEGACY_WORKER_ASSIGNMENTS)
     if not effective_pin and not requested and allowed_assignments and assigned not in allowed_assignments:
         expected = " or ".join(sorted(str(value) for value in allowed_assignments))
         result.error("model.default_assignment", f"models.assigned must equal an approved role assignment: {expected}")
@@ -365,6 +372,42 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("telemetry.cohort", "telemetryCohort must be null or a non-empty string")
     result.extend(validate_models(task, profile))
     result.extend(validate_debt(task))
+    execution = task.get("execution") or {}
+    attempts = execution.get("attempts") if isinstance(execution, Mapping) else None
+    if attempts is not None:
+        if not isinstance(attempts, list):
+            result.error("quality.attempts", "execution.attempts must be an array")
+        else:
+            for index, attempt in enumerate(attempts, 1):
+                if not isinstance(attempt, Mapping):
+                    result.error("quality.attempt", f"execution.attempts[{index - 1}] must be an object")
+                    continue
+                if attempt.get("attempt") != index:
+                    result.error("quality.attempt_number", f"execution.attempts[{index - 1}].attempt must be {index}")
+                if attempt.get("kind") not in {"candidate", "fix"}:
+                    result.error("quality.attempt_kind", f"execution.attempts[{index - 1}].kind must be candidate or fix")
+                for field_name in ("actualModel", "headSha"):
+                    if not attempt.get(field_name):
+                        result.error("quality.attempt_field", f"execution.attempts[{index - 1}].{field_name} is required")
+                failures = attempt.get("validationFailures")
+                if not isinstance(failures, int) or isinstance(failures, bool) or failures < 0:
+                    result.error("quality.validation_failures", f"execution.attempts[{index - 1}].validationFailures must be a non-negative integer")
+                review_status = attempt.get("reviewStatus")
+                if review_status is not None and review_status not in REVIEW_STATES:
+                    result.error("quality.review_status", f"execution.attempts[{index - 1}].reviewStatus is invalid")
+    review_history = task.get("reviewHistory")
+    if review_history is not None:
+        if not isinstance(review_history, list) or any(not isinstance(value, str) or not value.strip() for value in review_history):
+            result.error("quality.review_history", "reviewHistory must be an array of non-empty review references")
+        elif len(review_history) != len(set(review_history)):
+            result.error("quality.review_history_duplicate", "reviewHistory must not contain duplicate references")
+    if isinstance(attempts, list) and isinstance(review_history, list):
+        for index, attempt in enumerate(attempts):
+            if isinstance(attempt, Mapping) and attempt.get("reviewRef") and attempt.get("reviewRef") not in review_history:
+                result.error("quality.attempt_review", f"execution.attempts[{index}].reviewRef must appear in reviewHistory")
+    summary = task.get("qualitySummary")
+    if summary is not None and not isinstance(summary, Mapping):
+        result.error("quality.summary", "qualitySummary must be null or an object")
     mode = detect_mode(profile, task)
     role = str(task.get("role", "worker"))
     ownership = task.get("ownership") or {}
@@ -416,6 +459,19 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     if state in {"Accepted", "Integrated"} and not task.get("reviewRef"):
         result.error("review.reference", f"{state} requires reviewRef")
     if state == "Integrated":
+        tracked_quality = isinstance(execution, Mapping) and "attempts" in execution or "reviewHistory" in task or "qualitySummary" in task
+        if tracked_quality:
+            commits = task.get("commits") or {}
+            expected_heads = [commits.get("candidate"), *as_list(commits.get("fix"))]
+            actual_heads = [item.get("headSha") for item in attempts or [] if isinstance(item, Mapping)]
+            if actual_heads != expected_heads:
+                result.error("quality.attempt_heads", "Integrated execution attempts must match the candidate/fix commit sequence")
+            if any(not item.get("reviewRef") or not item.get("reviewStatus") for item in attempts or [] if isinstance(item, Mapping)):
+                result.error("quality.attempt_review", "Integrated execution attempts require reviewRef and reviewStatus")
+            if not isinstance(summary, Mapping) or summary.get("complete") is not True:
+                result.error("quality.incomplete", "Integrated tracked task requires complete qualitySummary")
+        else:
+            result.warn("quality.legacy", "Integrated task is legacy/incomplete: tracked quality fields are absent")
         close = task.get("close") or {}
         if not close.get("mergeCommit") or close.get("integrationValidationPassed") is not True:
             result.error("integration.evidence", "Integrated requires mergeCommit and integrationValidationPassed")
@@ -484,6 +540,21 @@ def validate_review(
         result.error("review.model", f"reviewer must use {DEFAULT_MODELS['reviewer']}")
     if not isinstance(review.get("findings"), list):
         result.error("review.findings", "review findings must be an array")
+    else:
+        for index, finding in enumerate(review.get("findings") or []):
+            if not isinstance(finding, Mapping):
+                result.error("review.finding", f"findings[{index}] must be an object")
+                continue
+            priority = finding.get("priority")
+            if priority is None:
+                result.warn("review.finding_priority_missing", f"findings[{index}] is legacy/incomplete: priority is missing")
+            elif priority not in FINDING_PRIORITIES:
+                result.error("review.finding_priority", f"findings[{index}].priority must be P0, P1, P2, or P3")
+            origin = finding.get("origin")
+            if origin is None:
+                result.warn("review.finding_origin_missing", f"findings[{index}] is legacy/incomplete: origin is missing")
+            elif origin not in FINDING_ORIGINS:
+                result.error("review.finding_origin", f"findings[{index}].origin is invalid")
     if not isinstance(review.get("validation"), list):
         result.error("review.validation", "review validation must be an array")
     cycle = review.get("cycle")
@@ -595,6 +666,27 @@ def validate_repository_evidence(
             result.error("review.evidence_missing", "immutable review artifact must exist inside the repository")
         elif embedded_relative != actual_relative:
             result.error("review.evidence_path", "task review evidence path differs from the validated review artifact")
+    allowed_heads = {
+        value for value in [
+            (task.get("commits") or {}).get("candidate"),
+            *as_list((task.get("commits") or {}).get("fix")),
+        ] if value
+    }
+    for index, value in enumerate(as_list(task.get("reviewHistory"))):
+        relative, target = canonical_evidence_path(repo, value)
+        if not relative or not target or not target.is_file():
+            result.error("review.history_evidence", f"reviewHistory[{index}] must be an existing file inside the repository")
+            continue
+        try:
+            evidence = read_object(target)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            result.error("review.history_parse", f"invalid reviewHistory[{index}] evidence: {error}")
+            continue
+        subject = evidence.get("subject") or {}
+        if subject.get("kind") != "candidate" or subject.get("taskId") != task.get("taskId"):
+            result.error("review.history_subject", f"reviewHistory[{index}] must bind this candidate task")
+        if subject.get("baseSha") != task.get("baseSha") or subject.get("headSha") not in allowed_heads:
+            result.error("review.history_range", f"reviewHistory[{index}] must bind a recorded candidate/fix range")
     return result
 
 

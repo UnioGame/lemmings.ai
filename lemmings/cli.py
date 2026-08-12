@@ -1,4 +1,4 @@
-"""Read-only validation/workspace CLI plus opt-in local telemetry."""
+"""Contract validation, quality reporting, workspaces, and opt-in timing telemetry."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .contracts import ValidationResult, as_list, check_repository, read_object, resolve_path, runtime_marker, task_worktree, validate_wave
+from .quality import build_quality_report, finalize_task_quality
 from .telemetry import (
     ANNOTATION_KINDS,
     FINISH_OUTCOMES,
@@ -191,10 +192,19 @@ def command_metrics(args: argparse.Namespace) -> int:
     task_id, task, task_reference = _task_arg(repo, getattr(args, "task", None))
     phase = _phase_arg(repo, getattr(args, "phase", None))
     working = resolve_path(repo, task_worktree(task or {})) or repo
+    profile = load_optional(repo, getattr(args, "profile", None), ".codex/lemmings.json") or {}
     if action == "stage":
         emit(enter_stage(repo, working, args.stage, task=task or ({"taskId": task_id, "role": "orchestrator"} if task_id else None), phase=phase, task_path=task_reference))
     elif action == "finish":
-        emit(finish_run(repo, working, args.outcome, task=task or ({"taskId": task_id, "role": "orchestrator"} if task_id else None)))
+        quality = None
+        if task_reference and task:
+            task, quality = finalize_task_quality(repo, task_reference, args.outcome)
+        local = finish_run(repo, working, args.outcome, task=task or ({"taskId": task_id, "role": "orchestrator"} if task_id else None))
+        emit({
+            **local,
+            "taskQuality": quality,
+            "qualityReport": build_quality_report(repo, profile),
+        })
     elif action == "import":
         observation = read_object(resolve_path(repo, args.file))
         expected = task_id or str(observation.get("taskId") or "")
@@ -207,6 +217,7 @@ def command_metrics(args: argparse.Namespace) -> int:
         emit(annotate_regression(repo, working, task_id=task_id, kind=args.kind, severity=args.severity, relation=args.relation, reference=args.reference, detected_at=args.detected_at, resolved_at=args.resolved_at, fix_commit=args.fix_commit))
     elif action == "report":
         report = build_report(repo, task_id=task_id, phase_id=(phase or {}).get("phaseId"), since=args.since)
+        report["taskQuality"] = build_quality_report(repo, profile, task_id=task_id)
         if args.benchmark:
             _add_benchmark(report)
         rendered = render_markdown(report) if args.format == "markdown" else json.dumps(report, indent=2, ensure_ascii=False) + "\n"
@@ -242,7 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     workspace = sub.add_parser("workspace", help="estimate or inspect workspaces"); workspace_sub = workspace.add_subparsers(dest="workspace_command", required=True)
     estimate = workspace_sub.add_parser("estimate"); add_common(estimate); estimate.add_argument("--backend", default="auto", choices=["auto", "current", "code-worktree", "package-worktree", "unity-clone"]); estimate.add_argument("--package", help="repo-relative target package path for package-worktree sizing"); estimate.set_defaults(run=command_workspace)
     inspect = workspace_sub.add_parser("inspect"); add_common(inspect); inspect.set_defaults(run=command_workspace)
-    metrics = sub.add_parser("metrics", help="manage optional local telemetry"); metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
+    metrics = sub.add_parser("metrics", help="finalize tracked quality metrics and manage optional timing telemetry"); metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
     for name in ("off", "basic", "full", "status"):
         item = metrics_sub.add_parser(name); add_common(item); item.set_defaults(run=command_metrics)
     stage = metrics_sub.add_parser("stage"); add_common(stage); stage.add_argument("stage", choices=LIFECYCLE_STAGES); stage.add_argument("--task"); stage.add_argument("--phase"); stage.set_defaults(run=command_metrics)
