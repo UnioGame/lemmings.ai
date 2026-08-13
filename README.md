@@ -98,7 +98,7 @@ $lemmings workspace status
 $lemmings workspace task TASK-17 isolated
 ```
 
-Enable or disable Lemmings for the current task with `$lemmings on` and `$lemmings off`. Discover/Plan/Refine, orchestration, and independent review use `gpt-5.6-sol:high`. A bounded Ready worker defaults to `gpt-5.6-luna:max`; large-context, multi-subsystem, or failed-Luna implementation escalates to `gpt-5.6-terra:max`. Sol Medium/High/Max are explicit worker pins only and always override automatic routing. Plan defects return to Refine without worker escalation. Explorer and validator use Luna High; evidence summarization uses Luna Medium.
+Enable or disable Lemmings for the current task with `$lemmings on` and `$lemmings off`. Discover/Plan/Refine, orchestration, and independent review use `gpt-5.6-sol:high`. A bounded Ready worker defaults to `gpt-5.6-luna:max`; large-context, multi-subsystem, or failed-Luna implementation escalates to `gpt-5.6-terra:max`. Sol Medium/High/Max are explicit worker pins only and always override automatic routing. Plan defects return to Refine without worker escalation. Explorer uses Luna High, validator uses Terra Medium, and evidence summarization uses Luna Medium.
 
 Example:
 

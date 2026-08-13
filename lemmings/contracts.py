@@ -36,7 +36,7 @@ DEFAULT_MODELS = {
     "orchestrator": "gpt-5.6-sol:high",
     "reviewer": "gpt-5.6-sol:high",
     "worker": "gpt-5.6-luna:max",
-    "validator": "gpt-5.6-luna:high",
+    "validator": "gpt-5.6-terra:medium",
     "explorer": "gpt-5.6-luna:high",
     "summarizer": "gpt-5.6-luna:medium",
 }
