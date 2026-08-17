@@ -8,7 +8,7 @@ Tracked Task/Review quality metrics are mandatory for Standard and Strict delive
 - `basic` records lifecycle, tool, agent, model, review, validation, and delivery timing.
 - `full` additionally accepts normalized CI quality signals and post-integration regression annotations.
 
-Exact tokens and model API latency are unsupported in schema version 1. Reports must show them as unsupported, never zero or estimated. Actual cost may arrive as an imported quality signal.
+Exact tokens and model API latency are unsupported in schema version 2. Reports must show them as unsupported, never zero or estimated. Actual cost may arrive as an imported quality signal.
 
 ## Lifecycle discipline
 
@@ -20,9 +20,9 @@ Strict waves bind isolated tasks to their declared worktrees and serial-current 
 
 ## Evidence and privacy
 
-Raw events live under `.git/lemmings/telemetry` as immutable, deduplicated files. Do not store prompts, transcripts, hidden reasoning, tool inputs/outputs, code, diffs, secrets, authorization headers, or absolute paths in events or exports.
+Raw events live under `.git/lemmings/telemetry-v2` as immutable, deduplicated files. Leave older histories untouched and never read them as v2. Do not store prompts, transcripts, hidden reasoning, tool inputs/outputs, code, diffs, secrets, authorization headers, or absolute paths in events or exports.
 
-Full telemetry imports existing validation/CI results; it does not run checks. A quality observation uses schema version 1 and binds `taskId`, `baseSha`, `headSha`, and `recordedAt` to a `signals` array. Each signal requires `name`, `category`, numeric `value`, `unit`, `direction`, `status`, and `sourceRef`; optional `baseline` and `threshold` are numeric. Categories are `tests`, `coverage`, `analyzer`, `complexity`, `performance`, `size`, or `cost`. Direction is `higher-better`, `lower-better`, or `target`; status is `pass`, `fail`, or `unknown`.
+Full telemetry imports existing validation/CI results; it does not run checks. A quality observation uses schema version 2 and binds `taskId`, `baseSha`, `headSha`, and `recordedAt` to a `signals` array. Each signal requires `name`, `category`, numeric `value`, `unit`, `direction`, `status`, and `sourceRef`; optional `baseline` and `threshold` are numeric. Categories are `tests`, `coverage`, `analyzer`, `complexity`, `performance`, `size`, or `cost`. Direction is `higher-better`, `lower-better`, or `target`; status is `pass`, `fail`, or `unknown`.
 
 Import through the task packet path when possible so `taskId`, `baseSha`, and candidate/fix or integration-merge `headSha` are cross-checked. An ID uses a unique local binding when one exists; without one it cannot validate packet SHAs.
 

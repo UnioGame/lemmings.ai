@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "taskId": "TASK-17",
   "goal": "<bounded outcome>",
   "acceptance": ["<observable acceptance criterion>"],
@@ -11,6 +11,9 @@
   "risks": [],
   "telemetryCohort": null,
   "ownership": { "owned": ["<owned path>"], "shared": [], "forbidden": [] },
+  "workingSet": [
+    { "ref": "repo/relative/path#Symbol", "purpose": "Why this source is needed" }
+  ],
   "models": { "requested": null, "assigned": "gpt-5.6-luna:max", "actual": null },
   "workspace": {
     "policy": "auto",
@@ -20,7 +23,14 @@
     "approval": "not-required",
     "reason": "Single safe writer"
   },
-  "execution": { "handoff": null, "validationEvidence": [], "attempts": [] },
+  "execution": {
+    "interfaces": [],
+    "tests": [],
+    "dependencyHandoffs": [],
+    "handoff": null,
+    "validationEvidence": [],
+    "attempts": []
+  },
   "baseSha": null,
   "commits": { "candidate": null, "fix": [] },
   "validation": { "riskToTest": [], "commands": [], "allowedOutputs": [], "debt": [] },

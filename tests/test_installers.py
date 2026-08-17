@@ -40,6 +40,7 @@ class InstallerTests(unittest.TestCase):
         self.tool = self.root / "lemmings-tool"
         shutil.copytree(PACKAGE_ROOT / "scripts", self.tool / "scripts")
         shutil.copytree(PACKAGE_ROOT / "skills", self.tool / "skills")
+        shutil.copytree(PACKAGE_ROOT / "agents", self.tool / "agents")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -96,7 +97,7 @@ class InstallerTests(unittest.TestCase):
             env=env,
         )
 
-    def test_external_bootstrap_merges_profile_and_writes_environment(self) -> None:
+    def test_external_bootstrap_refuses_drift_then_replaces_bundle(self) -> None:
         for kind, executable in installers():
             with self.subTest(installer=kind):
                 repo = self.make_repo(f"external-{kind}")
@@ -113,15 +114,19 @@ class InstallerTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                self.run_installer(kind, executable, self.tool, cwd=repo)
-                self.run_installer(kind, executable, self.tool, repo)
+                refused = self.run_installer(kind, executable, self.tool, cwd=repo, check=False)
+                self.assertNotEqual(0, refused.returncode)
+                self.run_installer(kind, executable, self.tool, repo, None, "force")
+                repeated = self.run_installer(kind, executable, self.tool, repo, check=False)
+                self.assertEqual(0, repeated.returncode, repeated.stdout + repeated.stderr)
 
                 profile = json.loads(profile_path.read_text(encoding="utf-8-sig"))
-                self.assertEqual("strict", profile["mode"])
-                self.assertEqual({"keep": True}, profile["unknown"])
+                self.assertEqual(2, profile["schemaVersion"])
+                self.assertEqual("auto", profile["mode"])
+                self.assertNotIn("unknown", profile)
                 self.assertEqual("unity", profile["game"]["engine"])
                 self.assertEqual("GameClient", profile["game"]["projectPath"])
-                self.assertEqual(7, profile["game"]["workspace"]["maxUnityEditors"])
+                self.assertEqual(1, profile["game"]["workspace"]["maxUnityEditors"])
                 self.assertEqual("hybrid", profile["game"]["workspace"]["parallelStrategy"])
                 self.assertEqual("gpt-5.6-luna:max", profile["models"]["worker"])
                 self.assertEqual("gpt-5.6-terra:medium", profile["models"]["validator"])
@@ -131,7 +136,12 @@ class InstallerTests(unittest.TestCase):
                 self.assertNotIn("highRiskModel", profile["workerPolicy"])
                 self.assertNotIn("complex-worker", profile["models"])
                 self.assertNotIn("tooling", profile)
+                self.assertEqual({"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1}, profile["contextPolicy"])
                 self.assertTrue((repo / ".agents/skills/lemmings/SKILL.md").is_file())
+                self.assertEqual(
+                    sorted(path.name for path in (self.tool / "agents").glob("lemmings-*.toml")),
+                    sorted(path.name for path in (repo / ".codex/agents").glob("lemmings-*.toml")),
+                )
                 common_dir = subprocess.run(
                     ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
                     check=True,
@@ -140,7 +150,7 @@ class InstallerTests(unittest.TestCase):
                 ).stdout.strip()
                 environment_path = (repo / common_dir / "lemmings/environment.json").resolve()
                 environment = json.loads(environment_path.read_text(encoding="utf-8-sig"))
-                self.assertEqual(1, environment["schemaVersion"])
+                self.assertEqual(2, environment["schemaVersion"])
                 self.assertEqual(self.tool.resolve(), Path(environment["toolRoot"]).resolve())
                 staged = subprocess.run(
                     ["git", "-C", str(repo), "diff", "--cached", "--name-only"],
@@ -184,6 +194,40 @@ class InstallerTests(unittest.TestCase):
                     (self.tool / "skills/lemmings/SKILL.md").read_bytes(), target_skill.read_bytes()
                 )
 
+    def test_force_replacement_rolls_back_owned_targets(self) -> None:
+        for kind, executable in installers():
+            with self.subTest(installer=kind):
+                repo = self.make_repo(f"rollback-{kind}")
+                self.run_installer(kind, executable, self.tool, repo)
+                foreign_profile = repo / ".codex/agents/foreign.toml"
+                foreign_profile.write_text("name = 'foreign'\n", encoding="utf-8")
+                skill_file = repo / ".agents/skills/lemmings/SKILL.md"
+                skill_file.write_text("drift\n", encoding="utf-8")
+                profile_path = repo / ".codex/lemmings.json"
+                profile_path.write_text('{"drift": true}\n', encoding="utf-8")
+                before_skill = skill_file.read_bytes()
+                before_profile = profile_path.read_bytes()
+                before_agents = {
+                    path.name: path.read_bytes()
+                    for path in (repo / ".codex/agents").glob("lemmings-*.toml")
+                }
+                environment = os.environ.copy()
+                environment["LEMMINGS_INSTALL_FAIL_AFTER"] = "agents"
+                failed = self.run_installer(
+                    kind, executable, self.tool, repo, None, "force", check=False, env=environment
+                )
+                self.assertNotEqual(0, failed.returncode, failed.stdout + failed.stderr)
+                self.assertEqual(before_skill, skill_file.read_bytes())
+                self.assertEqual(before_profile, profile_path.read_bytes())
+                self.assertEqual("name = 'foreign'\n", foreign_profile.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    before_agents,
+                    {
+                        path.name: path.read_bytes()
+                        for path in (repo / ".codex/agents").glob("lemmings-*.toml")
+                    },
+                )
+
     def test_rejects_package_cache_source(self) -> None:
         for kind, executable in installers():
             with self.subTest(installer=kind):
@@ -193,19 +237,6 @@ class InstallerTests(unittest.TestCase):
                 result = self.run_installer(kind, executable, cached, repo, check=False)
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn("Library/PackageCache", result.stderr + result.stdout)
-
-    def test_rejects_retired_worker_role_in_existing_profile(self) -> None:
-        for kind, executable in installers():
-            with self.subTest(installer=kind):
-                repo = self.make_repo(f"legacy-role-{kind}")
-                profile = repo / ".codex/lemmings.json"
-                profile.parent.mkdir()
-                profile.write_text('{"schemaVersion":1,"models":{"complex-worker":"gpt-5.6-sol:medium"}}\n', encoding="utf-8")
-                result = self.run_installer(kind, executable, self.tool, repo, check=False)
-                self.assertNotEqual(0, result.returncode)
-                output = result.stdout + result.stderr
-                self.assertIn("complex-worker", output)
-                self.assertIn("schema version 1", output)
 
     def test_bash_bootstrap_does_not_require_python_on_path(self) -> None:
         bash = find_bash()

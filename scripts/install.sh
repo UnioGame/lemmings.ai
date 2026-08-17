@@ -73,132 +73,6 @@ json_escape() {
   printf '%s' "$1" | awk 'BEGIN { ORS="" } { if (NR > 1) printf "\\n"; gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); gsub(/\t/, "\\t"); gsub(/\r/, "\\r"); printf "%s", $0 }'
 }
 
-merge_json() {
-  local target=$1 defaults=$2 set_tool_root=${3:-0}
-  local merged
-  merged=$(mktemp)
-  if ! awk -v current_file="$target" -v defaults_file="$defaults" -v set_tool_root="$set_tool_root" '
-    function read_file(path,    line, value, status) {
-      value = ""
-      while ((status = getline line < path) > 0) value = value line "\n"
-      close(path)
-      return value
-    }
-    function skip_ws() { while (pos <= length(source) && substr(source, pos, 1) ~ /[ \t\r\n]/) pos++ }
-    function parse_string(    start, escaped, ch) {
-      start = pos++
-      escaped = 0
-      while (pos <= length(source)) {
-        ch = substr(source, pos++, 1)
-        if (escaped) escaped = 0
-        else if (ch == "\\") escaped = 1
-        else if (ch == "\"") return substr(source, start, pos - start)
-      }
-      parse_error = "unterminated JSON string"
-      return ""
-    }
-    function key_name(raw,    value) {
-      value = substr(raw, 2, length(raw) - 2)
-      gsub(/\\\"/, "\"", value); gsub(/\\\\/, "\\", value); gsub(/\\\//, "/", value)
-      return value
-    }
-    function new_node(type, raw,    id) { id = ++node_count; kind[id] = type; atom[id] = raw; return id }
-    function parse_value(    ch, start, raw, id) {
-      skip_ws(); ch = substr(source, pos, 1)
-      if (ch == "{") return parse_object()
-      if (ch == "[") return parse_array()
-      if (ch == "\"") return new_node("atom", parse_string())
-      start = pos
-      while (pos <= length(source) && substr(source, pos, 1) !~ /[,}\] \t\r\n]/) pos++
-      if (start == pos) { parse_error = "expected JSON value at character " pos; return 0 }
-      raw = substr(source, start, pos - start)
-      if (raw !~ /^(true|false|null)$/ && raw !~ /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/) {
-        parse_error = "invalid JSON value at character " start
-        return 0
-      }
-      return new_node("atom", raw)
-    }
-    function parse_object(    id, raw_key, child, ch) {
-      id = new_node("object", ""); pos++; skip_ws()
-      if (substr(source, pos, 1) == "}") { pos++; return id }
-      while (!parse_error) {
-        skip_ws(); if (substr(source, pos, 1) != "\"") { parse_error = "expected object key at character " pos; return id }
-        raw_key = parse_string(); skip_ws()
-        if (substr(source, pos, 1) != ":") { parse_error = "expected colon at character " pos; return id }
-        pos++; child = parse_value(); entries[id]++; object_key[id, entries[id]] = raw_key; object_name[id, entries[id]] = key_name(raw_key); edge[id, entries[id]] = child
-        skip_ws(); ch = substr(source, pos, 1); pos++
-        if (ch == "}") return id
-        if (ch != ",") { parse_error = "expected comma or closing brace at character " (pos - 1); return id }
-      }
-      return id
-    }
-    function parse_array(    id, child, ch) {
-      id = new_node("array", ""); pos++; skip_ws()
-      if (substr(source, pos, 1) == "]") { pos++; return id }
-      while (!parse_error) {
-        child = parse_value(); entries[id]++; edge[id, entries[id]] = child
-        skip_ws(); ch = substr(source, pos, 1); pos++
-        if (ch == "]") return id
-        if (ch != ",") { parse_error = "expected comma or closing bracket at character " (pos - 1); return id }
-      }
-      return id
-    }
-    function parse_document(text, label,    root) {
-      source = text; sub(/^\xef\xbb\xbf/, "", source); pos = 1; parse_error = ""
-      root = parse_value(); skip_ws()
-      if (!parse_error && pos <= length(source)) parse_error = "unexpected content at character " pos
-      if (parse_error) { print "Cannot merge invalid JSON file " label ": " parse_error > "/dev/stderr"; exit 2 }
-      if (kind[root] != "object") { print "JSON file " label " must contain an object" > "/dev/stderr"; exit 2 }
-      return root
-    }
-    function find_key(id, name,    i) { for (i = 1; i <= entries[id]; i++) if (object_name[id, i] == name) return i; return 0 }
-    function merge_missing(target, defaults,    i, found, target_child, default_child) {
-      for (i = 1; i <= entries[defaults]; i++) {
-        found = find_key(target, object_name[defaults, i]); default_child = edge[defaults, i]
-        if (!found) {
-          entries[target]++; object_key[target, entries[target]] = object_key[defaults, i]; object_name[target, entries[target]] = object_name[defaults, i]; edge[target, entries[target]] = default_child
-        } else {
-          target_child = edge[target, found]
-          if (kind[target_child] == "object" && kind[default_child] == "object") merge_missing(target_child, default_child)
-        }
-      }
-    }
-    function spaces(count,    value) { value = sprintf("%*s", count, ""); return value }
-    function render(id, indent,    i, value) {
-      if (kind[id] == "atom") return atom[id]
-      if (kind[id] == "array") {
-        if (!entries[id]) return "[]"
-        value = "[\n"
-        for (i = 1; i <= entries[id]; i++) value = value spaces(indent + 2) render(edge[id, i], indent + 2) (i < entries[id] ? "," : "") "\n"
-        return value spaces(indent) "]"
-      }
-      if (!entries[id]) return "{}"
-      value = "{\n"
-      for (i = 1; i <= entries[id]; i++) value = value spaces(indent + 2) object_key[id, i] ": " render(edge[id, i], indent + 2) (i < entries[id] ? "," : "") "\n"
-      return value spaces(indent) "}"
-    }
-    BEGIN {
-      defaults_text = read_file(defaults_file); defaults_root = parse_document(defaults_text, defaults_file)
-      current_text = read_file(current_file); if (current_text == "") current_text = "{}"
-      current_root = parse_document(current_text, current_file)
-      merge_missing(current_root, defaults_root)
-      if (set_tool_root == "1") {
-        source_index = find_key(defaults_root, "toolRoot"); target_index = find_key(current_root, "toolRoot")
-        if (target_index) edge[current_root, target_index] = edge[defaults_root, source_index]
-      }
-      print render(current_root, 0)
-    }
-  ' >"$merged"; then
-    rm -f -- "$merged"
-    return 1
-  fi
-  if [[ -f "$target" ]] && cmp -s "$target" "$merged"; then rm -f -- "$merged"; return; fi
-  echo "write $target"
-  if (( dry_run )); then rm -f -- "$merged"; return; fi
-  mkdir -p "$(dirname "$target")"
-  mv -f -- "$merged" "$target"
-}
-
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 package_root=$(cd "$script_dir/.." && pwd)
 package_root_lower=${package_root,,}
@@ -206,6 +80,7 @@ case "/${package_root_lower//\\//}/" in
   */library/packagecache/*) echo "Refusing to install from Unity's Library/PackageCache: $package_root" >&2; exit 1 ;;
 esac
 skill_source="$package_root/skills/lemmings"
+agents_source="$package_root/agents"
 [[ -f "$skill_source/SKILL.md" ]] || { echo "Lemmings skill source is missing: $skill_source" >&2; exit 1; }
 
 if [[ -n "$repo_arg" ]]; then
@@ -227,12 +102,6 @@ else
 fi
 [[ -n "${repo_root:-}" ]] || { echo "Cannot infer a consumer Git repository. Pass --repo PATH." >&2; exit 1; }
 repo_root=$(absolute_path "$repo_root")
-existing_profile="$repo_root/.codex/lemmings.json"
-if [[ -f "$existing_profile" ]] && grep -Eq '"complex-worker"[[:space:]]*:' "$existing_profile"; then
-  echo "Unsupported legacy model role 'complex-worker' in $existing_profile. Remove it and use 'worker' before bootstrapping schema version 1." >&2
-  exit 1
-fi
-
 is_unity_project() {
   [[ -d "$1/Assets" && -f "$1/Packages/manifest.json" && -f "$1/ProjectSettings/ProjectVersion.txt" ]]
 }
@@ -252,23 +121,14 @@ else
 fi
 is_within "$project_path" "$repo_root" || { echo "Unity project must be inside the consumer repository: $project_path" >&2; exit 1; }
 
-skill_target="$repo_root/.agents/skills/lemmings"
-if [[ ! -d "$skill_target" ]]; then
-  echo "copy $skill_source -> $skill_target"
-  if (( ! dry_run )); then mkdir -p "$skill_target"; cp -R "$skill_source/." "$skill_target/"; fi
-elif ! diff -qr --strip-trailing-cr "$skill_source" "$skill_target" >/dev/null 2>&1; then
-  if (( ! force )); then echo "Skill target differs from the package copy: $skill_target. Re-run with --force to replace it." >&2; exit 1; fi
-  echo "replace $skill_target"
-  if (( ! dry_run )); then rm -rf -- "$skill_target"; mkdir -p "$skill_target"; cp -R "$skill_source/." "$skill_target/"; fi
-fi
-
 repo_name=$(basename "$repo_root")
 project_relative=$(json_escape "$(relative_path "$repo_root" "$project_path")")
 defaults_file=$(mktemp)
 trap 'rm -f -- "$defaults_file"' EXIT
 cat >"$defaults_file" <<JSON
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "distributionVersion": "2.0.0",
   "mode": "auto",
   "roadmap": "docs/tasks/ROADMAP.md",
   "taskGlobs": ["docs/tasks/**/*.json"],
@@ -285,6 +145,7 @@ cat >"$defaults_file" <<JSON
   "workerPolicy": {
     "elevatedModel": "gpt-5.6-terra:max"
   },
+  "contextPolicy": { "maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1 },
   "fallback": { "allowed": [] },
   "game": {
     "engine": "unity",
@@ -310,7 +171,73 @@ if is_within "$package_root" "$repo_root"; then
   printf ',\n  "tooling": { "root": "%s" }\n}\n' "$tooling_root" >>"$defaults_without_closing"
   mv -f -- "$defaults_without_closing" "$defaults_file"
 fi
-merge_json "$repo_root/.codex/lemmings.json" "$defaults_file" 0
+skill_target="$repo_root/.agents/skills/lemmings"
+agents_target="$repo_root/.codex/agents"
+profile_target="$repo_root/.codex/lemmings.json"
+shopt -s nullglob
+source_agents=("$agents_source"/lemmings-*.toml)
+installed_agents=("$agents_target"/lemmings-*.toml)
+skill_drift=0
+[[ -d "$skill_target" ]] && ! diff -qr --strip-trailing-cr "$skill_source" "$skill_target" >/dev/null 2>&1 && skill_drift=1
+agent_drift=0
+if ((${#installed_agents[@]})); then
+  ((${#source_agents[@]} == ${#installed_agents[@]})) || agent_drift=1
+  for source_agent in "${source_agents[@]}"; do
+    target_agent="$agents_target/$(basename "$source_agent")"
+    [[ -f "$target_agent" ]] && cmp -s "$source_agent" "$target_agent" || agent_drift=1
+  done
+fi
+config_drift=0
+[[ -f "$profile_target" ]] && ! cmp -s "$profile_target" "$defaults_file" && config_drift=1
+bundle_present=0
+[[ -d "$skill_target" || -f "$profile_target" || ${#installed_agents[@]} -gt 0 ]] && bundle_present=1
+bundle_drift=0
+(( skill_drift || agent_drift || config_drift )) && bundle_drift=1
+if (( bundle_present )) && [[ ! -d "$skill_target" || ! -f "$profile_target" || ${#installed_agents[@]} -eq 0 ]]; then bundle_drift=1; fi
+if (( bundle_drift && ! force )); then
+  echo "Lemmings bundle differs from the canonical v2 distribution. Re-run with --force to replace it." >&2
+  exit 1
+fi
+
+if (( dry_run )); then
+  echo "stage and replace the Lemmings bundle atomically"
+elif (( ! bundle_present || bundle_drift || force )); then
+  transaction=$(mktemp -d "$repo_root/.lemmings-install.XXXXXX")
+  stage="$transaction/stage"
+  backup="$transaction/backup"
+  had_skill=0; [[ -d "$skill_target" ]] && had_skill=1
+  had_config=0; [[ -f "$profile_target" ]] && had_config=1
+  injected_failure=0
+  rollback() {
+    rm -rf -- "$skill_target"
+    (( had_skill )) && mv -- "$backup/skill" "$skill_target"
+    rm -f -- "$agents_target"/lemmings-*.toml
+    [[ -d "$backup/agents" ]] && { mkdir -p "$agents_target"; cp "$backup/agents"/* "$agents_target/"; }
+    rm -f -- "$profile_target"
+    (( had_config )) && mv -- "$backup/lemmings.json" "$profile_target"
+  }
+  if ! {
+    mkdir -p "$stage/skill" "$stage/agents" "$backup"
+    cp -R "$skill_source/." "$stage/skill/"
+    cp "${source_agents[@]}" "$stage/agents/"
+    cp "$defaults_file" "$stage/lemmings.json"
+    (( had_skill )) && cp -R "$skill_target" "$backup/skill"
+    if ((${#installed_agents[@]})); then mkdir -p "$backup/agents"; cp "${installed_agents[@]}" "$backup/agents/"; fi
+    (( had_config )) && cp "$profile_target" "$backup/lemmings.json"
+    rm -rf -- "$skill_target"; mkdir -p "$(dirname "$skill_target")"; mv "$stage/skill" "$skill_target"
+    [[ "${LEMMINGS_INSTALL_FAIL_AFTER:-}" != skill ]] || { echo "Injected failure after skill replacement." >&2; injected_failure=1; }
+    mkdir -p "$agents_target"; rm -f -- "$agents_target"/lemmings-*.toml; cp "$stage/agents"/* "$agents_target/"
+    [[ "${LEMMINGS_INSTALL_FAIL_AFTER:-}" != agents ]] || { echo "Injected failure after agent replacement." >&2; injected_failure=1; }
+    mkdir -p "$(dirname "$profile_target")"; rm -f -- "$profile_target"; mv "$stage/lemmings.json" "$profile_target"
+    [[ "${LEMMINGS_INSTALL_FAIL_AFTER:-}" != config ]] || { echo "Injected failure after config replacement." >&2; injected_failure=1; }
+    (( ! injected_failure ))
+  }; then
+    rollback
+    rm -rf -- "$transaction"
+    exit 1
+  fi
+  rm -rf -- "$transaction"
+fi
 
 if (( ! package_inside_repo )); then
   common_dir=$(git_value "$repo_root" rev-parse --git-common-dir)
@@ -318,8 +245,8 @@ if (( ! package_inside_repo )); then
   common_path=$(absolute_path "$common_dir" "$repo_root")
   package_root_json=$package_root
   if command -v cygpath >/dev/null 2>&1; then package_root_json=$(cygpath -w "$package_root"); fi
-  printf '{"schemaVersion": 1, "toolRoot": "%s"}\n' "$(json_escape "$package_root_json")" >"$defaults_file"
-  merge_json "$common_path/lemmings/environment.json" "$defaults_file" 1
+  mkdir -p "$common_path/lemmings"
+  printf '{"schemaVersion": 2, "toolRoot": "%s"}\n' "$(json_escape "$package_root_json")" >"$common_path/lemmings/environment.json"
 fi
 
 if (( dry_run )); then echo "Lemmings bootstrap dry run complete."; else echo "Lemmings skill bootstrap complete."; fi

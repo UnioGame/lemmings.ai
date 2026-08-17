@@ -1,4 +1,4 @@
-"""Canonical schema-v1 orchestration contracts for Lemmings."""
+"""Canonical schema-v2 orchestration contracts for Lemmings."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -43,11 +43,15 @@ DEFAULT_MODELS = {
 DEFAULT_WORKER_POLICY = {
     "elevatedModel": "gpt-5.6-terra:max",
 }
-LEGACY_WORKER_ASSIGNMENTS = {"gpt-5.6-sol:medium"}
 FINDING_ORIGINS = {"implementation", "plan-contract", "validation", "integration"}
 FINDING_PRIORITIES = {"P0", "P1", "P2", "P3"}
 ORCHESTRATOR_EFFORTS = {"high", "xhigh", "max", "ultra"}
 TASK_ROLES = {"orchestrator", "worker", "reviewer", "validator", "explorer", "summarizer", "shared-contract-owner"}
+DEFAULT_CONTEXT_POLICY = {
+    "maxPacketBytes": 16384,
+    "maxWorkingSetItems": 12,
+    "maxExpansions": 1,
+}
 
 
 @dataclass
@@ -204,22 +208,26 @@ def detect_mode(
 def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
     if profile.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("profile.schema", "schemaVersion must be 1")
+        result.error("profile.schema", f"unsupported schemaVersion: {profile.get('schemaVersion')!r}; expected 2")
+        return result
+    if profile.get("distributionVersion") != "2.0.0":
+        result.error("profile.distribution", "distributionVersion must be 2.0.0")
     mode = str(profile.get("mode", "auto")).lower()
     if mode not in MODES:
         result.error("profile.mode", f"mode must be one of {sorted(MODES)}")
-    models = profile.get("models", {})
+    models = profile.get("models")
     if not isinstance(models, dict):
-        result.error("profile.models", "models must be an object")
+        result.error("profile.models", "models is required and must be an object")
     else:
-        if "complex-worker" in models:
-            result.error("profile.legacy_role", "complex-worker is not valid in schema version 1; use worker")
+        unknown_roles = sorted(set(models) - set(DEFAULT_MODELS))
+        if unknown_roles:
+            result.error("profile.role", "unsupported model roles: " + ", ".join(unknown_roles))
         for role, required in DEFAULT_MODELS.items():
             if models.get(role, required) != required:
                 result.error("model.fixed", f"{role} must use {required}")
-    worker_policy = profile.get("workerPolicy", DEFAULT_WORKER_POLICY)
+    worker_policy = profile.get("workerPolicy")
     if not isinstance(worker_policy, Mapping):
-        result.error("profile.worker_policy", "workerPolicy must be an object")
+        result.error("profile.worker_policy", "workerPolicy is required and must be an object")
     else:
         for route, required in DEFAULT_WORKER_POLICY.items():
             if worker_policy.get(route, required) != required:
@@ -227,6 +235,16 @@ def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
                     "model.worker_route_fixed",
                     f"workerPolicy.{route} must use {required}",
                 )
+        unknown_routes = sorted(set(worker_policy) - set(DEFAULT_WORKER_POLICY))
+        if unknown_routes:
+            result.error("profile.worker_policy", "unsupported workerPolicy routes: " + ", ".join(unknown_routes))
+    context_policy = profile.get("contextPolicy")
+    if not isinstance(context_policy, Mapping):
+        result.error("profile.context_policy", "contextPolicy is required")
+    else:
+        for name, expected in DEFAULT_CONTEXT_POLICY.items():
+            if context_policy.get(name) != expected:
+                result.error("profile.context_policy", f"contextPolicy.{name} must be {expected}")
     fallback = profile.get("fallback", {})
     if fallback and not isinstance(fallback, dict):
         result.error("profile.fallback", "fallback must be an object")
@@ -311,9 +329,6 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
         if isinstance(worker_policy, Mapping):
             for route, required in DEFAULT_WORKER_POLICY.items():
                 allowed_assignments.add(worker_policy.get(route) or required)
-        # Historical unpinned Sol Medium packets remain readable, but this model
-        # is no longer selected by automatic routing.
-        allowed_assignments.update(LEGACY_WORKER_ASSIGNMENTS)
     if not effective_pin and not requested and allowed_assignments and assigned not in allowed_assignments:
         expected = " or ".join(sorted(str(value) for value in allowed_assignments))
         result.error("model.default_assignment", f"models.assigned must equal an approved role assignment: {expected}")
@@ -329,7 +344,9 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
 
 def validate_debt(task: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
-    for index, debt in enumerate(as_list((task.get("validation") or {}).get("debt"))):
+    validation = task.get("validation")
+    debts = validation.get("debt") if isinstance(validation, Mapping) else []
+    for index, debt in enumerate(as_list(debts)):
         if not isinstance(debt, dict) or not all(debt.get(k) not in (None, "") for k in ("reason", "owner", "futureGate", "blocking")):
             result.error("validation.debt", f"validation.debt[{index}] requires reason, owner, futureGate, blocking")
     return result
@@ -337,7 +354,9 @@ def validate_debt(task: Mapping[str, Any]) -> ValidationResult:
 
 def candidate_head(task: Mapping[str, Any]) -> str | None:
     commits = task.get("commits") or {}
-    fixes = as_list(commits.get("fix")) if isinstance(commits, dict) else []
+    if not isinstance(commits, Mapping):
+        return None
+    fixes = as_list(commits.get("fix"))
     return str(fixes[-1]) if fixes else (str(commits.get("candidate")) if commits.get("candidate") else None)
 
 
@@ -351,10 +370,28 @@ def task_worktree(task: Mapping[str, Any]) -> str | None:
 def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = None) -> ValidationResult:
     result = ValidationResult()
     if task.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("task.schema", "schemaVersion must be 1")
-    for name in ("taskId", "goal", "acceptance", "state", "ownership", "models", "workspace", "validation"):
+        result.error("task.schema", f"unsupported schemaVersion: {task.get('schemaVersion')!r}; expected 2")
+        return result
+    for name in ("taskId", "goal", "acceptance", "dependencies", "risks", "state", "ownership", "models", "workspace", "workingSet", "validation", "execution", "reviewHistory", "close"):
         if name not in task or task.get(name) is None:
             result.error("task.missing", f"missing task field: {name}")
+    working_set = task.get("workingSet")
+    if not isinstance(working_set, list):
+        result.error("task.working_set", "workingSet must be an array")
+    else:
+        for index, entry in enumerate(working_set):
+            if not isinstance(entry, Mapping) or not isinstance(entry.get("ref"), str) or not entry.get("ref", "").strip() or not isinstance(entry.get("purpose"), str) or not entry.get("purpose", "").strip():
+                result.error("task.working_set", f"workingSet[{index}] requires non-empty ref and purpose strings")
+            else:
+                reference_path = str(entry["ref"]).split("#", 1)[0]
+                if Path(reference_path).is_absolute() or reference_path.startswith(("/", "\\\\")) or re.match(r"^[A-Za-z]:[\\/]", reference_path):
+                    result.error("task.working_set", f"workingSet[{index}].ref must be repository-relative")
+    for name in ("acceptance", "dependencies", "risks", "reviewHistory"):
+        if name in task and not isinstance(task.get(name), list):
+            result.error("task.shape", f"{name} must be an array")
+    ownership_value = task.get("ownership")
+    if not isinstance(ownership_value, Mapping) or any(not isinstance(ownership_value.get(name), list) for name in ("owned", "shared", "forbidden")):
+        result.error("task.ownership", "ownership requires owned, shared, and forbidden arrays")
     state = str(task.get("state", ""))
     if state not in TASK_STATES:
         result.error("state.unknown", f"unknown task state: {state}")
@@ -373,6 +410,13 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     result.extend(validate_models(task, profile))
     result.extend(validate_debt(task))
     execution = task.get("execution") or {}
+    if not isinstance(execution, Mapping):
+        result.error("task.execution", "execution must be an object")
+        execution = {}
+    else:
+        for name in ("interfaces", "tests", "dependencyHandoffs", "validationEvidence", "attempts"):
+            if not isinstance(execution.get(name), list):
+                result.error("task.execution", f"execution.{name} must be an array")
     attempts = execution.get("attempts") if isinstance(execution, Mapping) else None
     if attempts is not None:
         if not isinstance(attempts, list):
@@ -410,7 +454,9 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("quality.summary", "qualitySummary must be null or an object")
     mode = detect_mode(profile, task)
     role = str(task.get("role", "worker"))
-    ownership = task.get("ownership") or {}
+    ownership = task.get("ownership")
+    if not isinstance(ownership, Mapping):
+        ownership = {}
     if mode == "strict" and role not in {"reviewer", "explorer", "validator", "summarizer"} and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"} and not as_list(ownership.get("owned")):
         result.error("ownership.required", f"{state} Strict writer requires non-empty ownership.owned")
     workspace = task.get("workspace") or {}
@@ -442,26 +488,49 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("workspace.declined", "declined workspace must fall back to safe current work or set the Task to Blocked")
     if "parallelWriters" in as_list(task.get("risks")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
         result.error("workspace.parallel", "parallel writers cannot share the current checkout")
+    validation = task.get("validation")
+    if not isinstance(validation, Mapping):
+        result.error("task.validation", "validation must be an object")
+        validation = {}
+    else:
+        for name in ("riskToTest", "commands", "allowedOutputs", "debt"):
+            if not isinstance(validation.get(name), list):
+                result.error("task.validation", f"validation.{name} must be an array")
+        risk_to_test = validation.get("riskToTest")
+        if isinstance(risk_to_test, list):
+            mapped_risks: set[str] = set()
+            for index, mapping in enumerate(risk_to_test):
+                if not isinstance(mapping, Mapping) or not isinstance(mapping.get("risk"), str) or not mapping.get("risk", "").strip() or not isinstance(mapping.get("test"), str) or not mapping.get("test", "").strip():
+                    result.error("validation.risk_to_test", f"validation.riskToTest[{index}] requires non-empty risk and test strings")
+                    continue
+                mapped_risks.add(str(mapping["risk"]))
+            for risk in as_list(task.get("risks")):
+                if isinstance(risk, str) and risk not in mapped_risks:
+                    result.error("validation.risk_unmapped", f"risk has no declared test: {risk}")
+    close = task.get("close")
+    if not isinstance(close, Mapping) or "mergeCommit" not in close or not isinstance(close.get("integrationValidationPassed"), bool):
+        result.error("task.close", "close requires mergeCommit and boolean integrationValidationPassed")
     if state in {"Candidate", "Accepted", "Integrated"}:
         if not task.get("baseSha"):
             result.error("commit.base_required", f"{state} requires baseSha")
         head = candidate_head(task)
         if not head:
             result.error("commit.candidate", f"{state} requires a candidate or fix commit")
-        evidence = (task.get("execution") or {}).get("validationEvidence")
-        debt = (task.get("validation") or {}).get("debt")
+        evidence = execution.get("validationEvidence")
+        debt = validation.get("debt")
         if not evidence and not debt:
             result.error("validation.evidence", "candidate requires validation evidence or owned debt")
-        if not (task.get("models") or {}).get("actual"):
+        models = task.get("models") if isinstance(task.get("models"), Mapping) else {}
+        if not models.get("actual"):
             result.error("model.actual_required", f"{state} requires models.actual")
-        if not (task.get("execution") or {}).get("handoff"):
+        if not execution.get("handoff"):
             result.error("execution.handoff", f"{state} requires embedded execution.handoff")
     if state in {"Accepted", "Integrated"} and not task.get("reviewRef"):
         result.error("review.reference", f"{state} requires reviewRef")
     if state == "Integrated":
         tracked_quality = isinstance(execution, Mapping) and "attempts" in execution or "reviewHistory" in task or "qualitySummary" in task
         if tracked_quality:
-            commits = task.get("commits") or {}
+            commits = task.get("commits") if isinstance(task.get("commits"), Mapping) else {}
             expected_heads = [commits.get("candidate"), *as_list(commits.get("fix"))]
             actual_heads = [item.get("headSha") for item in attempts or [] if isinstance(item, Mapping)]
             if actual_heads != expected_heads:
@@ -471,7 +540,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
             if not isinstance(summary, Mapping) or summary.get("complete") is not True:
                 result.error("quality.incomplete", "Integrated tracked task requires complete qualitySummary")
         else:
-            result.warn("quality.legacy", "Integrated task is legacy/incomplete: tracked quality fields are absent")
+            result.error("quality.required", "Integrated task requires execution attempts, reviewHistory, and qualitySummary")
         close = task.get("close") or {}
         if not close.get("mergeCommit") or close.get("integrationValidationPassed") is not True:
             result.error("integration.evidence", "Integrated requires mergeCommit and integrationValidationPassed")
@@ -481,10 +550,21 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
 def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
     if phase.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("phase.schema", "schemaVersion must be 1")
+        result.error("phase.schema", f"unsupported schemaVersion: {phase.get('schemaVersion')!r}; expected 2")
+        return result
     for name in ("phaseId", "baselineSha", "integrationBranch"):
         if not phase.get(name):
             result.error("phase.missing", f"missing phase field: {name}")
+    for name in ("contracts", "leases", "close"):
+        if name not in phase:
+            result.error("phase.missing", f"missing phase field: {name}")
+    if not isinstance(phase.get("contracts"), list):
+        result.error("phase.contracts", "contracts must be an array")
+    if not isinstance(phase.get("leases"), list):
+        result.error("phase.leases", "leases must be an array")
+    close = phase.get("close")
+    if not isinstance(close, Mapping) or not isinstance(close.get("mergeCommits"), list) or not isinstance(close.get("phaseValidation"), list):
+        result.error("phase.close", "close requires mergeCommits and phaseValidation arrays")
     if phase.get("contractsFrozen") is not True:
         result.error("phase.contracts", "Strict phase requires frozen contracts")
     if not phase.get("baselineReviewRef"):
@@ -531,7 +611,8 @@ def validate_review(
 ) -> ValidationResult:
     result = ValidationResult()
     if review.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("review.schema", "schemaVersion must be 1")
+        result.error("review.schema", f"unsupported schemaVersion: {review.get('schemaVersion')!r}; expected 2")
+        return result
     if not review.get("reviewId"):
         result.error("review.id", "reviewId is required")
     if review.get("status") not in REVIEW_STATES:
@@ -546,15 +627,13 @@ def validate_review(
                 result.error("review.finding", f"findings[{index}] must be an object")
                 continue
             priority = finding.get("priority")
-            if priority is None:
-                result.warn("review.finding_priority_missing", f"findings[{index}] is legacy/incomplete: priority is missing")
-            elif priority not in FINDING_PRIORITIES:
+            if priority not in FINDING_PRIORITIES:
                 result.error("review.finding_priority", f"findings[{index}].priority must be P0, P1, P2, or P3")
             origin = finding.get("origin")
-            if origin is None:
-                result.warn("review.finding_origin_missing", f"findings[{index}] is legacy/incomplete: origin is missing")
-            elif origin not in FINDING_ORIGINS:
+            if origin not in FINDING_ORIGINS:
                 result.error("review.finding_origin", f"findings[{index}].origin is invalid")
+            if not finding.get("summary"):
+                result.error("review.finding_summary", f"findings[{index}].summary is required")
     if not isinstance(review.get("validation"), list):
         result.error("review.validation", "review validation must be an array")
     cycle = review.get("cycle")

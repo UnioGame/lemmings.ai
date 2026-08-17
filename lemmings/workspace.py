@@ -93,7 +93,7 @@ def resolve_tool_root(repo: Path, profile: Mapping[str, Any] | None = None) -> d
     environment = git_common_dir(repo) / "lemmings" / "environment.json"
     if environment.is_file():
         value = read_object(environment)
-        root = resolve_path(repo, value.get("toolRoot")) if value.get("schemaVersion") == 1 else None
+        root = resolve_path(repo, value.get("toolRoot")) if value.get("schemaVersion") == 2 else None
         if root and root.is_dir():
             return {"available": True, "root": str(root), "source": "git-common-environment"}
     package = _package_root(repo, profile)

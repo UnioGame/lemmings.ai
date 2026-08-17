@@ -10,6 +10,7 @@ from .contracts import (
     FINDING_ORIGINS,
     FINDING_PRIORITIES,
     REVIEW_STATES,
+    SCHEMA_VERSION,
     read_object,
     resolve_path,
     write_object,
@@ -29,8 +30,7 @@ def _inside_repo(repo: Path, reference: str) -> Path | None:
 
 def _load_reviews(repo: Path, task: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     references = task.get("reviewHistory")
-    if not isinstance(references, list):
-        references = [task.get("reviewRef")] if task.get("reviewRef") else []
+    references = references if isinstance(references, list) else []
     reviews: list[dict[str, Any]] = []
     missing: list[str] = []
     for reference in references:
@@ -95,7 +95,6 @@ def summarize_quality(repo: Path, task: Mapping[str, Any], outcome: str | None =
     )
     review_statuses = [review.get("status") for review in reviews]
     incomplete: list[str] = []
-    legacy = "attempts" not in execution or "reviewHistory" not in task
     if not attempts:
         incomplete.append("execution.attempts")
     if not task.get("reviewHistory"):
@@ -123,7 +122,6 @@ def summarize_quality(repo: Path, task: Mapping[str, Any], outcome: str | None =
     first_pass = bool(review_statuses) and review_statuses[0] == "Accepted"
     return {
         "complete": not incomplete,
-        "legacy": legacy,
         "incompleteReasons": list(dict.fromkeys(incomplete)),
         "reviewCycles": len(reviews),
         "repeatedReviews": max(0, len(reviews) - 1),
@@ -133,8 +131,8 @@ def summarize_quality(repo: Path, task: Mapping[str, Any], outcome: str | None =
         "validationFailures": validation_failures,
         "findings": findings,
         "unclassifiedFindings": unattributed,
-        "initialWorkerModel": models[0] if models else (task.get("models") or {}).get("actual") or (task.get("models") or {}).get("assigned"),
-        "finalWorkerModel": models[-1] if models else (task.get("models") or {}).get("actual") or (task.get("models") or {}).get("assigned"),
+        "initialWorkerModel": models[0] if models else None,
+        "finalWorkerModel": models[-1] if models else None,
         "workerModelsByAttempt": [
             {
                 "attempt": item.get("attempt"),
@@ -157,6 +155,8 @@ def finalize_task_quality(repo: Path, task_reference: str, outcome: str) -> tupl
     if target is None or not target.is_file():
         raise ValueError("metrics finish requires a Task JSON path inside the repository")
     task = read_object(target)
+    if task.get("schemaVersion") != SCHEMA_VERSION:
+        raise ValueError(f"unsupported schemaVersion: {task.get('schemaVersion')!r}; expected 2")
     summary = summarize_quality(repo, task, outcome)
     task["qualitySummary"] = summary
     write_object(target, task)
@@ -190,7 +190,7 @@ def build_quality_report(repo: Path, profile: Mapping[str, Any], task_id: str | 
             task = read_object(path)
         except (OSError, ValueError):
             continue
-        if not task.get("taskId") or not isinstance(task.get("models"), Mapping):
+        if task.get("schemaVersion") != SCHEMA_VERSION or not task.get("taskId") or not isinstance(task.get("models"), Mapping):
             continue
         if task_id and str(task.get("taskId")) != task_id:
             continue
@@ -248,7 +248,7 @@ def build_quality_report(repo: Path, profile: Mapping[str, Any], task_id: str | 
     ]
     return {
         "tasks": task_rows,
-        "legacyOrIncompleteTasks": sum(not item["complete"] for item in task_rows),
+        "incompleteTasks": sum(not item["complete"] for item in task_rows),
         "attemptsByModel": dict(sorted(attempt_models.items())),
         "routesByInitialModel": dict(sorted(route_models.items())),
         "comparison": {

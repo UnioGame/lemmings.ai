@@ -12,17 +12,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from lemmings.contracts import (  # noqa: E402
-    DEFAULT_MODELS, DEFAULT_WORKER_POLICY, check_repository, detect_mode, runtime_marker,
-    validate_profile, validate_review, validate_task, validate_wave,
+    DEFAULT_CONTEXT_POLICY, DEFAULT_MODELS, DEFAULT_WORKER_POLICY, check_repository, detect_mode, runtime_marker,
+    validate_phase, validate_profile, validate_review, validate_task, validate_wave,
 )
 from lemmings.hooks import handle, host_output, hydrate, is_read_only_shell  # noqa: E402
 from lemmings import workspace as workspace_module  # noqa: E402
-from lemmings.cli import build_parser  # noqa: E402
+from lemmings.cli import build_parser, distribution_findings  # noqa: E402
 
 
 def task(**changes):
     value = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "taskId": "TASK-1",
         "goal": "change",
         "acceptance": ["tests pass"],
@@ -31,25 +31,33 @@ def task(**changes):
         "state": "Ready",
         "previousState": "Planned",
         "role": "worker",
+        "risks": [],
         "ownership": {"owned": ["lemmings/**"], "shared": [], "forbidden": ["secrets/**"]},
+        "workingSet": [{"ref": "lemmings/contracts.py#validate_task", "purpose": "task contract"}],
         "models": {"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": None},
-        "execution": {"handoff": None, "validationEvidence": []},
+        "execution": {"interfaces": [], "tests": [], "dependencyHandoffs": [], "handoff": None, "validationEvidence": [], "attempts": []},
         "workspace": {"policy": "auto", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "single writer"},
         "commits": {"candidate": None, "fix": []},
-        "validation": {"riskToTest": [], "debt": []},
+        "validation": {"riskToTest": [], "commands": [], "allowedOutputs": [], "debt": []},
         "reviewRef": None,
+        "reviewHistory": [],
         "close": {"mergeCommit": None, "integrationValidationPassed": False},
     }
+    for name in ("execution", "validation", "close"):
+        if name in changes and isinstance(changes[name], dict):
+            value[name].update(changes.pop(name))
     value.update(changes)
     return value
 
 
 def profile(mode="auto"):
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
+        "distributionVersion": "2.0.0",
         "mode": mode,
         "models": dict(DEFAULT_MODELS),
         "workerPolicy": dict(DEFAULT_WORKER_POLICY),
+        "contextPolicy": dict(DEFAULT_CONTEXT_POLICY),
         "fallback": {"allowed": []},
     }
 
@@ -81,6 +89,8 @@ class IdentityAndCliTests(unittest.TestCase):
         self.assertEqual("Lemmings", unity["displayName"])
         self.assertEqual("https://github.com/UnioGame/unigame.ai.tools.git", unity["repository"]["url"])
         self.assertEqual("lemmings", plugin["name"])
+        self.assertEqual("2.0.0", unity["version"])
+        self.assertEqual("2.0.0+codex.20260817", plugin["version"])
         self.assertEqual("https://github.com/UnioGame/unigame.ai.tools", plugin["repository"])
 
     def test_orchestrator_lifecycle_is_consistent(self):
@@ -105,7 +115,7 @@ class IdentityAndCliTests(unittest.TestCase):
             config.write_text(json.dumps(profile()), encoding="utf-8")
             marker = runtime_marker(repo)
             marker.parent.mkdir(parents=True)
-            marker.write_text(json.dumps({"schemaVersion": 1, "enabled": True}), encoding="utf-8")
+            marker.write_text(json.dumps({"schemaVersion": 2, "enabled": True}), encoding="utf-8")
             self.assertTrue(marker.is_file())
             self.assertEqual("lemmings", marker.parent.name)
             status = run_cli("status", "--repo", str(repo))
@@ -214,13 +224,13 @@ class IdentityAndCliTests(unittest.TestCase):
         self.assertIn("workspace.approval", {item.code for item in validate_task(value, profile()).findings})
 
     def test_canonical_baseline_and_candidate_reviews(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "base", "integrationBranch": "codex/p1", "contractsFrozen": True, "contracts": [], "baselineReviewRef": "reviews/base.json", "taskDag": [], "leases": [], "close": {"mergeCommits": [], "phaseValidation": []}}
-        baseline = {"schemaVersion": 1, "reviewId": "RB", "subject": {"kind": "baseline", "phaseId": "P1", "sha": "base"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        phase = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": "base", "integrationBranch": "codex/p1", "contractsFrozen": True, "contracts": [], "baselineReviewRef": "reviews/base.json", "taskDag": [], "leases": [], "close": {"mergeCommits": [], "phaseValidation": []}}
+        baseline = {"schemaVersion": 2, "reviewId": "RB", "subject": {"kind": "baseline", "phaseId": "P1", "sha": "base"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
         self.assertTrue(validate_review(baseline, phase=phase).ok)
         value = task(state="Candidate", previousState="Active", baseSha="base", commits={"candidate": "head", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["tests"]})
-        candidate = {"schemaVersion": 1, "reviewId": "RC", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "head"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        candidate = {"schemaVersion": 2, "reviewId": "RC", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "head"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
         self.assertTrue(validate_review(candidate, value).ok)
-        legacy = {"schemaVersion": 1, "taskId": "TASK-1", "base": "base", "head": "head", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
+        legacy = {"schemaVersion": 2, "taskId": "TASK-1", "base": "base", "head": "head", "status": "Accepted", "reviewerModel": DEFAULT_MODELS["reviewer"]}
         self.assertIn("review.subject", {item.code for item in validate_review(legacy, value).findings})
 
     def test_check_all_accepts_canonical_strict_lifecycle(self):
@@ -238,11 +248,11 @@ class IdentityAndCliTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(repo), "commit", "-m", "candidate"], check=True, capture_output=True)
             head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
             reviews = repo / "reviews"; reviews.mkdir()
-            baseline = {"schemaVersion": 1, "reviewId": "RB", "subject": {"kind": "baseline", "phaseId": "P1", "sha": base}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
-            candidate = {"schemaVersion": 1, "reviewId": "RC", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": base, "headSha": head}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+            baseline = {"schemaVersion": 2, "reviewId": "RB", "subject": {"kind": "baseline", "phaseId": "P1", "sha": base}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+            candidate = {"schemaVersion": 2, "reviewId": "RC", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": base, "headSha": head}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
             (reviews / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
             (reviews / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
-            phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": base, "integrationBranch": "codex/p1", "contractsFrozen": True, "contracts": [], "baselineReviewRef": "reviews/baseline.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": [], "close": {"mergeCommits": [], "phaseValidation": []}}
+            phase = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": base, "integrationBranch": "codex/p1", "contractsFrozen": True, "contracts": [], "baselineReviewRef": "reviews/baseline.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": [], "close": {"mergeCommits": [], "phaseValidation": []}}
             current = task(mode="strict", state="Accepted", previousState="Candidate", baseSha=base, ownership={"owned": ["candidate.txt"], "shared": [], "forbidden": []}, workspace={"policy": "isolated", "backend": "code-worktree", "path": str(repo), "estimatedGiB": 1, "approval": "not-required", "reason": "strict validation"}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, commits={"candidate": head, "fix": []}, execution={"handoff": "done", "validationEvidence": ["tests"]}, reviewRef="reviews/candidate.json")
             for name, value in (("profile.json", profile()), ("task.json", current), ("phase.json", phase)):
                 (repo / name).write_text(json.dumps(value), encoding="utf-8")
@@ -295,13 +305,52 @@ class IdentityAndCliTests(unittest.TestCase):
             config_path.write_text(json.dumps(profile("strict")), encoding="utf-8")
             marker = runtime_marker(repo)
             marker.parent.mkdir(parents=True)
-            marker.write_text(json.dumps({"schemaVersion": 1, "enabled": True, "mode": "strict", "profilePath": ".codex/lemmings.json", "taskPath": "docs/tasks/missing.json"}), encoding="utf-8")
+            marker.write_text(json.dumps({"schemaVersion": 2, "enabled": True, "mode": "strict", "profilePath": ".codex/lemmings.json", "taskPath": "docs/tasks/missing.json"}), encoding="utf-8")
             process = run_cli("status", "--repo", str(repo))
             output = json.loads(process.stdout)
             self.assertNotEqual(0, process.returncode)
             self.assertIn("runtime.task_missing", {item["code"] for item in output["findings"]})
 
 class ContractTests(unittest.TestCase):
+    def test_v1_artifacts_are_rejected_as_unsupported(self):
+        value = task(schemaVersion=1)
+        result = validate_task(value, profile())
+        self.assertIn("unsupported schemaVersion", result.findings[0].message)
+
+    def test_profile_requires_complete_model_routing(self):
+        value = profile()
+        value.pop("models")
+        value.pop("workerPolicy")
+        self.assertEqual(
+            {"profile.models", "profile.worker_policy"},
+            {item.code for item in validate_profile(value).findings},
+        )
+
+    def test_malformed_nested_task_blocks_without_crashing(self):
+        value = task(validation=["bad"])
+        self.assertIn("task.validation", {item.code for item in validate_task(value, profile()).findings})
+        dispatched = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
+        self.assertEqual("block", dispatched["decision"])
+
+    def test_every_risk_requires_a_typed_test_mapping(self):
+        malformed = task(risks=["sharedContract"], validation={"riskToTest": [42]})
+        malformed_codes = {item.code for item in validate_task(malformed, profile()).findings}
+        self.assertIn("validation.risk_to_test", malformed_codes)
+        self.assertIn("validation.risk_unmapped", malformed_codes)
+        mapped = task(risks=["sharedContract"], validation={"riskToTest": [{"risk": "sharedContract", "test": "python -m unittest"}]})
+        self.assertNotIn("validation.risk_unmapped", {item.code for item in validate_task(mapped, profile()).findings})
+
+    def test_phase_requires_canonical_collection_shapes(self):
+        value = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": "base", "integrationBranch": "task/p1", "contractsFrozen": True, "contracts": "broad", "baselineReviewRef": "reviews/base.json", "taskDag": [], "leases": "shared", "close": "done"}
+        self.assertEqual(
+            {"phase.contracts", "phase.leases", "phase.close"},
+            {item.code for item in validate_phase(value).findings},
+        )
+
+    def test_absolute_working_set_reference_is_invalid(self):
+        value = task(workingSet=[{"ref": "C:/repo/secret.py#Symbol", "purpose": "needed"}])
+        self.assertIn("task.working_set", {item.code for item in validate_task(value, profile()).findings})
+
     def test_mode_detection(self):
         self.assertEqual("simple", detect_mode(profile()))
         self.assertEqual("standard", detect_mode(profile(), task()))
@@ -330,9 +379,9 @@ class ContractTests(unittest.TestCase):
         value = task(role="complex-worker")
         self.assertIn("task.role", {item.code for item in validate_task(value, profile()).findings})
 
-    def test_historical_sol_medium_worker_assignment_remains_valid(self):
+    def test_unpinned_sol_medium_worker_assignment_is_rejected(self):
         value = task(models={"requested": None, "assigned": "gpt-5.6-sol:medium", "actual": None})
-        self.assertTrue(validate_task(value, profile()).ok)
+        self.assertIn("model.default_assignment", {item.code for item in validate_task(value, profile()).findings})
 
     def test_explicit_sol_worker_pins_are_preserved(self):
         for effort in ("medium", "high", "max"):
@@ -394,32 +443,32 @@ class ContractTests(unittest.TestCase):
             execution={"handoff": "done", "validationEvidence": [{"command": "test", "passed": True}]},
             reviewRef="reviews/TASK-1.json",
         )
-        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": None, "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        review = {"schemaVersion": 2, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": None, "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
         result = validate_review(review, value)
         self.assertIn("review.stale", {f.code for f in result.findings})
         self.assertNotIn("integration.evidence", {f.code for f in result.findings})
 
     def test_second_failed_review_requires_replan(self):
         value = task(state="Candidate", previousState="Candidate", baseSha="base", commits={"candidate": "aaa", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
-        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "ChangesRequested", "cycle": 2, "findings": [], "validation": []}
+        review = {"schemaVersion": 2, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "ChangesRequested", "cycle": 2, "findings": [], "validation": []}
         self.assertIn("review.replan", {f.code for f in validate_review(review, value).findings})
 
     def test_review_findings_require_valid_quality_classification(self):
         value = task(state="Candidate", previousState="Active", baseSha="base", commits={"candidate": "aaa", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
-        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "ChangesRequested", "cycle": 1, "findings": [{"priority": "P2", "origin": "implementation"}], "validation": []}
+        review = {"schemaVersion": 2, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "ChangesRequested", "cycle": 1, "findings": [{"priority": "P2", "origin": "implementation", "summary": "broken behavior"}], "validation": []}
         self.assertTrue(validate_review(review, value).ok)
         review["findings"][0]["origin"] = "unknown"
         self.assertIn("review.finding_origin", {f.code for f in validate_review(review, value).findings})
 
-    def test_legacy_review_finding_is_valid_but_warned_incomplete(self):
+    def test_unclassified_review_finding_is_invalid(self):
         value = task(state="Candidate", previousState="Active", baseSha="base", commits={"candidate": "aaa", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
-        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [{"summary": "legacy"}], "validation": []}
+        review = {"schemaVersion": 2, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "base", "headSha": "aaa"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [{"summary": "legacy"}], "validation": []}
         result = validate_review(review, value)
-        self.assertTrue(result.ok)
-        self.assertIn("review.finding_origin_missing", {f.code for f in result.findings})
+        self.assertFalse(result.ok)
+        self.assertIn("review.finding_origin", {f.code for f in result.findings})
 
     def test_strict_wave_requires_unique_worktrees_and_nonoverlap(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [], "leases": []}
+        phase = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [], "leases": []}
         isolated = {"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 1, "approval": "not-required", "reason": "parallel"}
         left = task(mode="strict", workspace=isolated)
         right = task(taskId="TASK-2", mode="strict", workspace=isolated)
@@ -429,12 +478,12 @@ class ContractTests(unittest.TestCase):
         self.assertIn("ownership.overlap", codes)
 
     def test_external_resource_requires_unique_lease(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [], "leases": []}
+        phase = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [], "leases": []}
         value = task(mode="strict", workspace={"policy": "isolated", "backend": "code-worktree", "path": "C:/wt/one", "estimatedGiB": 1, "approval": "not-required", "reason": "external"}, risks=["externalResources"])
         self.assertIn("lease.required", {f.code for f in validate_wave(ROOT, [value], phase).findings})
 
     def test_blocked_declined_workspace_is_valid_without_provisioned_path(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": []}
+        phase = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": []}
         for backend in ("code-worktree", "package-worktree", "unity-clone"):
             with self.subTest(backend=backend):
                 value = task(mode="strict", state="Blocked", previousState="Ready", risks=["sharedContracts"], workspace={"policy": "isolated", "backend": backend, "path": None, "estimatedGiB": 12, "approval": "declined", "reason": "workspace-dependent step has no safe fallback"})
@@ -445,15 +494,15 @@ class ContractTests(unittest.TestCase):
                 self.assertNotIn("workspace.path", codes)
 
     def test_ready_strict_serial_writer_may_use_current_checkout(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": []}
-        value = task(mode="strict", risks=["sharedContracts"], workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "safe serial writer"})
+        phase = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}], "leases": []}
+        value = task(mode="strict", risks=["sharedContracts"], validation={"riskToTest": [{"risk": "sharedContracts", "test": "contract tests"}]}, workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "safe serial writer"})
         codes = {item.code for item in validate_wave(ROOT, [value], phase).findings}
         self.assertNotIn("worktree.required", codes)
         output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement serially in current checkout.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
         self.assertEqual("allow", output["decision"])
 
     def test_active_strict_writers_cannot_share_current_checkout(self):
-        phase = {"schemaVersion": 1, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}, {"taskId": "TASK-2", "dependencies": []}], "leases": []}
+        phase = {"schemaVersion": 2, "phaseId": "P1", "baselineSha": "abc", "integrationBranch": "main", "contractsFrozen": True, "baselineReviewRef": "missing.json", "taskDag": [{"taskId": "TASK-1", "dependencies": []}, {"taskId": "TASK-2", "dependencies": []}], "leases": []}
         left = task(mode="strict", state="Active", previousState="Ready", ownership={"owned": ["src/left/**"], "shared": [], "forbidden": []}, workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "current"})
         right = task(taskId="TASK-2", mode="strict", state="Active", previousState="Ready", ownership={"owned": ["src/right/**"], "shared": [], "forbidden": []}, workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "current"})
         self.assertIn("workspace.parallel", {item.code for item in validate_wave(ROOT, [left, right], phase).findings})
@@ -468,7 +517,7 @@ class ContractTests(unittest.TestCase):
         value = task(mode="strict", risks=["parallelWriters"], workspace={"policy": "current", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "invalid parallel current"})
         output = handle({"event": "PreToolUse", "toolName": "Agent", "cwd": str(ROOT), "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_worker", "message": "Implement in parallel.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
         self.assertEqual("block", output["decision"])
-        self.assertIn("isolated worktree", output["reason"])
+        self.assertIn("current checkout", output["reason"])
 
     def test_workspace_approval_gate_does_not_block_read_only_roles(self):
         cases = (("pending", "Ready", "Planned"), ("declined", "Blocked", "Ready"))
@@ -476,7 +525,7 @@ class ContractTests(unittest.TestCase):
             value = task(state=state, previousState=previous_state, workspace={"policy": "isolated", "backend": "code-worktree", "path": None, "estimatedGiB": 12, "approval": approval, "reason": "workspace not provisioned"})
             for role in ("explorer", "validator"):
                 with self.subTest(approval=approval, role=role):
-                    output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "toolInput": {"task_name": f"lemmings_{role}", "message": "Read-only work.", "role": role}})
+                    output = handle({"event": "PreToolUse", "toolName": "Agent", "task": value, "profile": profile(), "toolInput": {"task_name": f"lemmings_{role}", "message": "Read-only work.", "role": role}})
                     self.assertEqual("allow", output["decision"])
 
     def test_declined_blocked_workspace_still_blocks_writer(self):
@@ -493,7 +542,7 @@ class ContractTests(unittest.TestCase):
 
     def test_review_base_and_nonempty_range_are_required(self):
         value = task(state="Accepted", previousState="Candidate", baseSha="base", commits={"candidate": "base", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]}, reviewRef="review.json")
-        review = {"schemaVersion": 1, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "other", "headSha": "base"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
+        review = {"schemaVersion": 2, "reviewId": "R1", "subject": {"kind": "candidate", "taskId": "TASK-1", "baseSha": "other", "headSha": "base"}, "reviewerModel": DEFAULT_MODELS["reviewer"], "status": "Accepted", "cycle": 1, "findings": [], "validation": []}
         codes = {item.code for item in validate_review(review, value).findings}
         self.assertIn("review.base", codes)
         review["subject"]["baseSha"] = "base"
@@ -663,12 +712,12 @@ class HookTests(unittest.TestCase):
         configured = profile()
         writer = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "profile": configured, "toolInput": {"task_name": "lemmings_worker", "message": "Implement the Ready task.", "model": "gpt-5.6-luna", "reasoning_effort": "max"}})
         self.assertEqual("allow", writer["decision"])
-        candidate = task(state="Candidate", previousState="Active", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
-        reviewer = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "high", "head": "abc"}})
+        candidate = task(state="Candidate", previousState="Active", baseSha="base", commits={"candidate": "abc", "fix": []}, models={"requested": None, "assigned": DEFAULT_MODELS["worker"], "actual": DEFAULT_MODELS["worker"]}, execution={"handoff": "done", "validationEvidence": ["test"]})
+        reviewer = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "profile": configured, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "high", "head": "abc"}})
         self.assertEqual("allow", reviewer["decision"])
-        wrong_model = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "medium", "head": "abc"}})
+        wrong_model = handle({"event": "PreToolUse", "toolName": "Agent", "task": candidate, "profile": configured, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review head abc.", "model": "gpt-5.6-sol", "reasoning_effort": "medium", "head": "abc"}})
         self.assertEqual("block", wrong_model["decision"])
-        wrong_state = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review current candidate.", "model": "gpt-5.6-sol", "reasoning_effort": "high"}})
+        wrong_state = handle({"event": "PreToolUse", "toolName": "Agent", "task": worker, "profile": configured, "toolInput": {"task_name": "lemmings_reviewer", "message": "Review current candidate.", "model": "gpt-5.6-sol", "reasoning_effort": "high"}})
         self.assertEqual("block", wrong_state["decision"])
 
     def test_explicit_sol_high_worker_pin_uses_same_worker_role(self):
@@ -749,7 +798,7 @@ class HookTests(unittest.TestCase):
 
     def test_actual_shaped_summarizer_is_bounded_read_only_role(self):
         value = task(state="Active", previousState="Ready")
-        output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": value, "toolInput": {"task_name": "lemmings_summarizer", "message": "Summarize supplied evidence.", "model": "gpt-5.6-terra", "reasoning_effort": "low"}})
+        output = handle({"event": "PreToolUse", "toolName": "Agent", "mode": "strict", "task": value, "profile": profile(), "toolInput": {"task_name": "lemmings_summarizer", "message": "Summarize supplied evidence.", "model": "gpt-5.6-terra", "reasoning_effort": "low"}})
         self.assertEqual("allow", output["decision"])
 
     def test_strict_spawn_requires_explicit_role(self):
@@ -805,7 +854,7 @@ class HookTests(unittest.TestCase):
             task_path.write_text(json.dumps(task()), encoding="utf-8")
             marker = runtime_marker(repo)
             marker.parent.mkdir(parents=True)
-            marker.write_text(json.dumps({"schemaVersion": 1, "taskPath": "docs/tasks/TASK-1.json"}), encoding="utf-8")
+            marker.write_text(json.dumps({"schemaVersion": 2, "taskPath": "docs/tasks/TASK-1.json"}), encoding="utf-8")
             payload = hydrate({"cwd": str(nested), "hook_event_name": "SubagentStart"})
             self.assertTrue(payload["_lemmingsActive"])
             self.assertEqual("TASK-1", payload["task"]["taskId"])
@@ -838,6 +887,82 @@ class HookTests(unittest.TestCase):
         self.assertIn("TASK-1", context)
         self.assertIn("lemmings/core.py", context)
         self.assertNotIn("must-not-leak", context)
+
+    def test_soft_context_budget_warning_still_injects_compact_packet(self):
+        value = task(workingSet=[{"ref": f"src/{index}.py#Symbol", "purpose": "needed"} for index in range(13)])
+        result = handle({"event": "SubagentStart", "task": value, "profile": profile()})
+        self.assertEqual("warn", result["decision"])
+        output = host_output(result, "SubagentStart", {"task": value})
+        context = output["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('"schemaVersion":2', context)
+        self.assertIn("working set has 13 items", output["systemMessage"])
+
+    def test_context_packets_are_role_specific(self):
+        value = task()
+        value["execution"].update({
+            "interfaces": ["src/api.py#Api"],
+            "tests": ["tests/test_api.py#test_api"],
+            "dependencyHandoffs": ["TASK-0 accepted"],
+            "handoff": "candidate ready",
+            "validationEvidence": ["tests pass"],
+        })
+        phase = {"contractsFrozen": True, "contracts": ["src/contracts.py#Contract"]}
+
+        def packet(role, **extra):
+            result = handle({"event": "SubagentStart", "task": value, "profile": profile(), "phase": phase, "requestedRole": role, **extra})
+            self.assertIn(result["decision"], {"allow", "warn"})
+            return result["contextPacket"]
+
+        explorer = packet("explorer", focus="Api decision")
+        self.assertEqual({"schemaVersion", "role", "task", "focus", "workingSet", "budget"}, set(explorer))
+        self.assertEqual({"id": "TASK-1"}, explorer["task"])
+        self.assertLessEqual(len(explorer["workingSet"]), 3)
+
+        worker = packet("worker")
+        self.assertEqual({"schemaVersion", "role", "task", "scope", "workingSet", "validation", "execution", "budget"}, set(worker))
+        self.assertIn("ownership", worker["scope"])
+
+        validator = packet("validator")
+        self.assertEqual({"schemaVersion", "role", "task", "scope", "validation", "budget"}, set(validator))
+        self.assertEqual({"id": "TASK-1", "acceptance": ["tests pass"]}, validator["task"])
+        self.assertEqual({"risks"}, set(validator["scope"]))
+
+        reviewer = packet("reviewer")
+        self.assertEqual({"schemaVersion", "role", "task", "execution", "budget"}, set(reviewer))
+        self.assertEqual({"id": "TASK-1", "acceptance": ["tests pass"]}, reviewer["task"])
+        self.assertIn("range", reviewer["execution"])
+
+        summarizer = packet("summarizer", evidence=["tests pass", "password=must-not-leak"])
+        self.assertEqual({"schemaVersion", "role", "task", "evidence"}, set(summarizer))
+        self.assertEqual({"id": "TASK-1"}, summarizer["task"])
+        self.assertNotIn("must-not-leak", json.dumps(summarizer))
+
+    def test_distribution_integrity_detects_skill_and_agent_drift(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            package = repo / "tool"
+            (package / "skills/lemmings").mkdir(parents=True)
+            (package / "agents").mkdir()
+            (package / "lemmings").mkdir()
+            (package / ".codex-plugin").mkdir()
+            (repo / ".agents/skills/lemmings").mkdir(parents=True)
+            (repo / ".codex/agents").mkdir(parents=True)
+            (package / "package.json").write_text('{"version":"2.0.0"}', encoding="utf-8")
+            (package / "pyproject.toml").write_text('[project]\nversion = "2.0.0"\n', encoding="utf-8")
+            (package / "lemmings/__init__.py").write_text('__version__ = "2.0.0"\n', encoding="utf-8")
+            (package / ".codex-plugin/plugin.json").write_text('{"version":"2.0.0+codex.20260817"}', encoding="utf-8")
+            (package / "skills/lemmings/SKILL.md").write_text("source", encoding="utf-8")
+            (repo / ".agents/skills/lemmings/SKILL.md").write_text("drift", encoding="utf-8")
+            (package / "agents/lemmings-worker.toml").write_text("source", encoding="utf-8")
+            (repo / ".codex/agents/lemmings-worker.toml").write_text("drift", encoding="utf-8")
+            result = distribution_findings(repo, {"tooling": {"root": "tool"}})
+            self.assertEqual({"distribution.skill", "distribution.agents"}, {item.code for item in result.findings})
+
+    def test_distribution_integrity_rejects_missing_or_unresolved_installation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.assertEqual("distribution.profile", distribution_findings(repo, None).findings[0].code)
+            self.assertEqual("distribution.package", distribution_findings(repo, profile()).findings[0].code)
 
 
 if __name__ == "__main__":

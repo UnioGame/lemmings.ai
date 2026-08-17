@@ -51,7 +51,7 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
 
 def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
     value = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "taskId": "TASK-17",
         "goal": "measure delivery",
         "acceptance": ["report is complete"],
@@ -59,13 +59,17 @@ def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
         "mode": "standard",
         "state": state,
         "role": "worker",
+        "risks": [],
+        "ownership": {"owned": ["lemmings/**"], "shared": [], "forbidden": []},
+        "workingSet": [{"ref": "lemmings/telemetry.py#record_event", "purpose": "telemetry contract"}],
         "models": {"requested": None, "assigned": "gpt-5.6-luna:max", "actual": "gpt-5.6-luna:max"},
         "baseSha": "base",
         "commits": {"candidate": "head", "fix": []},
-        "execution": {"validationEvidence": [{"passed": True}]},
+        "execution": {"interfaces": [], "tests": [], "dependencyHandoffs": [], "handoff": "done", "validationEvidence": [{"passed": True}], "attempts": []},
         "workspace": {"policy": "auto", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "serial"},
-        "validation": {"debt": []},
+        "validation": {"riskToTest": [], "commands": [], "allowedOutputs": [], "debt": []},
         "reviewRef": "reviews/TASK-17.json",
+        "reviewHistory": [],
         "close": {"integrationValidationPassed": state == "Integrated"},
     }
     if cohort:
@@ -75,7 +79,7 @@ def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
 
 def quality() -> dict:
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "taskId": "TASK-17",
         "baseSha": "base",
         "headSha": "head",
@@ -133,14 +137,14 @@ class TelemetryTests(unittest.TestCase):
             self.assertTrue(output["taskQuality"]["complete"])
             self.assertTrue(json.loads(packet.read_text(encoding="utf-8"))["qualitySummary"]["firstPassAccepted"])
 
-    def test_legacy_task_is_reported_but_not_comparable(self):
+    def test_incomplete_v2_task_is_reported_but_not_comparable(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo)
             packets = repo / "docs/tasks"; packets.mkdir(parents=True)
-            legacy = task("Integrated")
-            (packets / "legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
+            incomplete = task("Integrated")
+            (packets / "incomplete.json").write_text(json.dumps(incomplete), encoding="utf-8")
             report = build_quality_report(repo, {"taskGlobs": ["docs/tasks/*.json"]})
-            self.assertEqual(1, report["legacyOrIncompleteTasks"])
+            self.assertEqual(1, report["incompleteTasks"])
             self.assertEqual([], report["comparison"]["recommendations"])
 
     def test_routing_recommendation_waits_for_five_integrated_tasks_per_model(self):
@@ -165,7 +169,7 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual([], report["comparison"]["recommendations"])
 
     def test_telemetry_cohort_contract_is_optional_but_typed(self):
-        value = task(); value["schemaVersion"] = 1; value["ownership"] = {"owned": [], "shared": [], "forbidden": []}
+        value = task(); value["ownership"] = {"owned": [], "shared": [], "forbidden": []}
         self.assertNotIn("telemetry.cohort", {item.code for item in validate_task(value).findings})
         value["telemetryCohort"] = []
         self.assertIn("telemetry.cohort", {item.code for item in validate_task(value).findings})
@@ -295,7 +299,7 @@ class TelemetryTests(unittest.TestCase):
             first.write_text(json.dumps({**task(), "taskId": "TASK-1"}), encoding="utf-8")
             second.write_text(json.dumps({**task(), "taskId": "TASK-2"}), encoding="utf-8")
             marker = runtime_marker(repo); marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(json.dumps({"schemaVersion": 1, "taskPath": str(first)}), encoding="utf-8")
+            marker.write_text(json.dumps({"schemaVersion": 2, "taskPath": str(first)}), encoding="utf-8")
             bind_run(repo, repo, task_id="TASK-2", task_path=str(second))
             hydrated = hooks.hydrate({"cwd": str(repo), "hook_event_name": "SubagentStart"})
             self.assertEqual("TASK-1", hydrated["task"]["taskId"])

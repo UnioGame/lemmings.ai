@@ -13,11 +13,11 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.contracts import as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile
-    from lemmings.telemetry import read_binding, record_hook_event, record_telemetry_error
+    from lemmings.contracts import DEFAULT_CONTEXT_POLICY, as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile, validate_task
+    from lemmings.telemetry import contains_sensitive_text, looks_absolute_path, read_binding, record_hook_event, record_telemetry_error
 else:
-    from .contracts import as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile
-    from .telemetry import read_binding, record_hook_event, record_telemetry_error
+    from .contracts import DEFAULT_CONTEXT_POLICY, as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile, validate_task
+    from .telemetry import contains_sensitive_text, looks_absolute_path, read_binding, record_hook_event, record_telemetry_error
 
 READ_ONLY_COMMANDS = {
     "rg", "grep", "ls", "dir", "pwd", "type", "cat", "head", "tail",
@@ -339,6 +339,94 @@ def ownership_violation(task: Mapping[str, Any], paths: list[str], cwd: str | Pa
     return None
 
 
+def sanitize_context(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): sanitize_context(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [sanitize_context(item) for item in value]
+    if isinstance(value, str) and (contains_sensitive_text(value) or looks_absolute_path(value)):
+        return "[redacted]"
+    return value
+
+
+def derive_context_packet(
+    task: Mapping[str, Any],
+    phase: Mapping[str, Any] | None,
+    role: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project schema-v2 artifacts into the smallest role-specific dispatch packet."""
+    phase = phase or {}
+    execution = task.get("execution") if isinstance(task.get("execution"), Mapping) else {}
+    validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
+    ownership = task.get("ownership") if isinstance(task.get("ownership"), Mapping) else {}
+    packet: dict[str, Any] = {"schemaVersion": 2, "role": role, "task": {"id": task.get("taskId")}}
+    if role == "summarizer":
+        packet["evidence"] = payload.get("evidence") or []
+        return sanitize_context(packet)
+    working_set = task.get("workingSet") or []
+    if role == "explorer":
+        packet["focus"] = payload.get("focus") or payload.get("question")
+        packet["workingSet"] = working_set[:3]
+    elif role == "worker":
+        packet["task"].update({
+            "state": task.get("state"),
+            "goal": task.get("goal"),
+            "acceptance": task.get("acceptance"),
+            "dependencies": task.get("dependencies"),
+        })
+        packet["scope"] = {
+            "ownership": ownership,
+            "risks": task.get("risks"),
+            "frozenContracts": phase.get("contracts") if phase.get("contractsFrozen") else [],
+        }
+        packet["workingSet"] = {
+            "references": working_set,
+            "interfaces": execution.get("interfaces") or [],
+            "tests": execution.get("tests") or [],
+            "dependencyHandoffs": execution.get("dependencyHandoffs") or [],
+        }
+    elif role == "validator":
+        packet["task"]["acceptance"] = task.get("acceptance")
+        packet["scope"] = {"risks": task.get("risks")}
+    if role in {"worker", "validator"}:
+        packet["validation"] = {
+            "riskToTest": validation.get("riskToTest") or [],
+            "commands": validation.get("commands") or [],
+            "allowedOutputs": validation.get("allowedOutputs") or [],
+        }
+    if role == "reviewer":
+        packet["task"]["acceptance"] = task.get("acceptance")
+        packet["execution"] = {
+            "range": {"baseSha": task.get("baseSha"), "headSha": candidate_head(task)},
+            "handoff": execution.get("handoff"),
+            "validationEvidence": execution.get("validationEvidence") or [],
+            "actualModel": (task.get("models") or {}).get("actual"),
+        }
+    elif role == "worker":
+        packet["execution"] = {"assignedModel": (task.get("models") or {}).get("assigned")}
+    packet["budget"] = {"expansionsRemaining": max(0, 1 - int(payload.get("expansionsUsed", 0) or 0))}
+    return sanitize_context(packet)
+
+
+def context_warnings(packet: Mapping[str, Any], task: Mapping[str, Any], profile: Mapping[str, Any], payload: Mapping[str, Any]) -> list[str]:
+    policy = profile.get("contextPolicy") if isinstance(profile.get("contextPolicy"), Mapping) else DEFAULT_CONTEXT_POLICY
+    warnings: list[str] = []
+    size = len(json.dumps(packet, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    working_count = len(task.get("workingSet") or [])
+    expansions = int(payload.get("expansionsUsed", 0) or 0) + (1 if payload.get("contextExpansion") else 0)
+    if size > int(policy.get("maxPacketBytes", 16384)):
+        warnings.append(f"context packet is {size} bytes (limit {policy.get('maxPacketBytes', 16384)})")
+    if working_count > int(policy.get("maxWorkingSetItems", 12)):
+        warnings.append(f"working set has {working_count} items (limit {policy.get('maxWorkingSetItems', 12)})")
+    if expansions > int(policy.get("maxExpansions", 1)):
+        warnings.append(f"context expansions are {expansions} (limit {policy.get('maxExpansions', 1)})")
+    expansion = payload.get("contextExpansion")
+    if isinstance(expansion, Mapping) and (expansion.get("broad") or not expansion.get("symbolOrDecision")):
+        warnings.append("context expansion must name one symbol or decision")
+    return warnings
+
+
 def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
     if payload.get("_lemmingsActive") is False:
         return decision("allow", "Lemmings inactive")
@@ -353,6 +441,13 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 if mode == "strict":
                     return decision("block", "Strict spawn requires an explicit writer, reviewer, explorer, or validator role")
                 role = str(task.get("role", "worker"))
+            profile = payload.get("profile") or {}
+            profile_result = validate_profile(profile)
+            if not profile_result.ok:
+                return decision("block", profile_result.findings[0].message)
+            task_result = validate_task(task, profile)
+            if not task_result.ok:
+                return decision("block", task_result.findings[0].message)
             tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
             requested = requested_model(payload)
             assigned = (task.get("models") or {}).get("assigned")
@@ -376,10 +471,6 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("allow", f"bounded {role} dispatch accepted")
             if task.get("state") != "Ready":
                 return decision("block", "writer requires a Ready task")
-            profile = payload.get("profile") or {}
-            profile_result = validate_profile(profile)
-            if not profile_result.ok:
-                return decision("block", profile_result.findings[0].message)
             model_result = validate_models(task, profile)
             if not model_result.ok:
                 return decision("block", model_result.findings[0].message)
@@ -427,32 +518,23 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("block" if mode == "strict" else "warn", "shell write-set cannot be proven")
             return decision("allow", "write invariants satisfied")
     if event == "SubagentStart":
-        context = payload.get("contextPacket") or {}
-        if not context and task:
-            phase = payload.get("phase") or {}
-            profile = payload.get("profile") or {}
-            context = {
-                "taskPacket": {
-                    key: task.get(key)
-                    for key in ("taskId", "state", "role", "plan", "ownership", "models")
-                    if task.get(key) is not None
-                },
-                "agentsInstructions": {"mode": payload.get("mode") or task.get("mode") or profile.get("mode", "auto")},
-            }
-            if phase.get("contractsFrozen") and phase.get("contracts"):
-                context["frozenContracts"] = phase.get("contracts")
-            execution = task.get("execution") or {}
-            for key in ("interfaces", "tests", "dependencyHandoffs"):
-                if execution.get(key):
-                    context[key] = execution[key]
-        allowed = {"taskPacket", "agentsInstructions", "frozenContracts", "interfaces", "tests", "dependencyHandoffs"}
-        extras = sorted(set(context) - allowed)
-        if extras:
-            return decision("warn", "unbounded context: " + ", ".join(extras))
-        expansion = payload.get("contextExpansion") or {}
-        if expansion and (int(payload.get("expansionsUsed", 0)) >= 1 or expansion.get("broad") or not expansion.get("symbolOrDecision")):
-            return decision("warn", "focused context expansion budget is exhausted or unbounded")
-        return decision("allow", "bounded context accepted", contextPacket=context)
+        if not task:
+            return decision("block", "SubagentStart requires a schema-v2 Task")
+        profile = payload.get("profile") or {}
+        task_result = validate_task(task, profile)
+        if not task_result.ok:
+            return decision("block", task_result.findings[0].message)
+        role = requested_role(payload) or str(task.get("role") or "worker")
+        if role == "explorer" and not (payload.get("focus") or payload.get("question")):
+            return decision("block", "explorer ContextPacket requires one focus or question")
+        context = derive_context_packet(task, payload.get("phase") or {}, role, payload)
+        warnings = context_warnings(context, task, profile, payload)
+        return decision(
+            "warn" if warnings else "allow",
+            "; ".join(warnings) if warnings else "bounded context accepted",
+            contextPacket=context,
+            warningCount=len(warnings),
+        )
     if event == "SubagentStop":
         role = requested_role(payload)
         if not role:
@@ -530,6 +612,8 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
                     record_telemetry_error(repo, telemetry_error)
         return combined
     state = read_object(marker)
+    if state.get("schemaVersion") != 2:
+        return {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
     combined = {**state, **payload, "_lemmingsActive": True, "_repoRoot": str(repo)}
     for name in ("profile", "task", "phase", "review"):
         value = state.get(name + "Path")
@@ -559,11 +643,14 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
 
 def host_output(result: Mapping[str, Any], event: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     action, reason = result.get("decision"), str(result.get("reason", ""))
+    if event == "SubagentStart" and action in {"allow", "warn"}:
+        context = result.get("contextPacket") or {}
+        compact = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        output = {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "Lemmings ContextPacket v2\n" + compact}}
+        if action == "warn":
+            output["systemMessage"] = reason
+        return output
     if action == "allow":
-        if event == "SubagentStart":
-            context = result.get("contextPacket") or payload.get("contextPacket") or {}
-            lines = [f"{name}: {value}" for name, value in context.items()]
-            return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "Lemmings context\n" + "\n".join(lines)}}
         return {}
     if event == "PreToolUse":
         if action == "block":

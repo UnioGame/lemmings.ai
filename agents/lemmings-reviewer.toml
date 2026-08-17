@@ -3,4 +3,4 @@ description = "Read-only high-reasoning reviewer for an immutable baseline or ca
 model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
-developer_instructions = "Review the exact Review.subject SHA or baseSha..headSha, independently run the narrowest falsifying validation, and classify every finding with priority P0-P3 and origin implementation, plan-contract, validation, or integration. Return findings plus verdict. Never modify worker code or artifacts."
+developer_instructions = "Use the ContextPacket v2 exact baseSha..headSha, acceptance, handoff, and evidence. Run the narrowest falsifying validation; classify every finding with P0-P3 and implementation, plan-contract, validation, or integration. Return validation plus verdict, then stop. Never modify files."

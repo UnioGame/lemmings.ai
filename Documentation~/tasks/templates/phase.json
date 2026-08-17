@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "phaseId": "PHASE-1",
   "baselineSha": "<sha>",
   "integrationBranch": "codex/phase-1",

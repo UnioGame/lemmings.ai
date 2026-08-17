@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from .contracts import ValidationResult, as_list, check_repository, read_object, resolve_path, runtime_marker, task_worktree, validate_wave
+from .contracts import SCHEMA_VERSION, ValidationResult, as_list, check_repository, read_object, resolve_path, runtime_marker, task_worktree, validate_wave
 from .quality import build_quality_report, finalize_task_quality
 from .telemetry import (
     ANNOTATION_KINDS,
@@ -59,10 +60,57 @@ def load_artifacts(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | Non
 
 def runtime_findings(repo: Path, marker: dict[str, Any] | None) -> ValidationResult:
     result = ValidationResult()
+    if marker and marker.get("schemaVersion") != SCHEMA_VERSION:
+        result.error("runtime.schema", f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; reactivate Lemmings for v2")
     if marker and marker.get("taskPath"):
         path = resolve_path(repo, str(marker["taskPath"]))
         if not path or not path.is_file():
             result.error("runtime.task_missing", f"active runtime task does not exist: {marker['taskPath']}")
+    return result
+
+
+def _tree_fingerprint(root: Path) -> str | None:
+    if not root.is_dir():
+        return None
+    digest = hashlib.sha256()
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(root).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def distribution_findings(repo: Path, profile: dict[str, Any] | None) -> ValidationResult:
+    result = ValidationResult()
+    if profile is None:
+        result.error("distribution.profile", "installed .codex/lemmings.json is missing")
+        return result
+    tooling = (profile or {}).get("tooling") or {}
+    package = resolve_path(repo, tooling.get("root")) if isinstance(tooling, dict) else None
+    if not package or not (package / "package.json").is_file():
+        result.error("distribution.package", "profile tooling.root does not resolve to a Lemmings 2.0.0 package")
+        return result
+    versions = {
+        "package.json": read_object(package / "package.json").get("version"),
+        "pyproject.toml": next((line.split('=', 1)[1].strip().strip('"') for line in (package / "pyproject.toml").read_text(encoding="utf-8").splitlines() if line.startswith("version = ")), None),
+        "lemmings.__version__": next((line.split('=', 1)[1].strip().strip('"') for line in (package / "lemmings" / "__init__.py").read_text(encoding="utf-8").splitlines() if line.startswith("__version__ = ")), None),
+    }
+    if set(versions.values()) != {"2.0.0"}:
+        result.error("distribution.version", f"package versions differ from 2.0.0: {versions}")
+    plugin_version = read_object(package / ".codex-plugin" / "plugin.json").get("version")
+    if plugin_version != "2.0.0+codex.20260817":
+        result.error("distribution.plugin_version", f"plugin version differs from 2.0.0+codex.20260817: {plugin_version}")
+    source_skill = package / "skills" / "lemmings"
+    installed_skill = repo / ".agents" / "skills" / "lemmings"
+    if _tree_fingerprint(source_skill) != _tree_fingerprint(installed_skill):
+        result.error("distribution.skill", "installed Lemmings skill differs from package")
+    source_agents = package / "agents"
+    installed_agents = repo / ".codex" / "agents"
+    expected = {path.name: path.read_bytes() for path in source_agents.glob("lemmings-*.toml")}
+    actual = {path.name: path.read_bytes() for path in installed_agents.glob("lemmings-*.toml")} if installed_agents.is_dir() else {}
+    if expected != actual:
+        result.error("distribution.agents", "installed Lemmings agent profiles differ from package")
     return result
 
 
@@ -105,6 +153,10 @@ def command_check(args: argparse.Namespace) -> int:
         if args.all and phase:
             result.extend(validate_wave(repo, tasks.values(), phase, profile, complete=True))
     result.extend(runtime_findings(repo, marker))
+    profile_argument = getattr(args, "profile", None)
+    installed_profile = (repo / ".codex" / "lemmings.json").resolve()
+    if not profile_argument or resolve_path(repo, str(profile_argument)) == installed_profile:
+        result.extend(distribution_findings(repo, profile))
     emit(result.as_dict())
     return 0 if result.ok else 1
 

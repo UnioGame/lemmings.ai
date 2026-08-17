@@ -63,7 +63,8 @@ def safe_label(value: Any) -> str | None:
 
 
 def telemetry_root(repo: Path) -> Path:
-    return git_common_dir(repo) / "lemmings" / "telemetry"
+    # v1 data is intentionally left untouched and never mixed into v2 reports.
+    return git_common_dir(repo) / "lemmings" / "telemetry-v2"
 
 
 def settings_path(repo: Path) -> Path:
@@ -103,7 +104,7 @@ def load_settings(repo: Path) -> dict[str, Any]:
     merged = default_settings()
     merged.update(value)
     if merged.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError("telemetry settings schemaVersion must be 1")
+        raise ValueError(f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 2")
     if merged.get("mode") not in TELEMETRY_MODES:
         raise ValueError("telemetry mode must be off, basic, or full")
     return merged
@@ -489,7 +490,7 @@ def parse_period(value: str) -> timedelta:
 
 def normalize_quality_observation(value: Mapping[str, Any], expected_task_id: str | None = None, task: Mapping[str, Any] | None = None) -> dict[str, Any]:
     if value.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError("quality observation schemaVersion must be 1")
+        raise ValueError(f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 2")
     for field in ("taskId", "baseSha", "headSha", "recordedAt", "signals"):
         if not value.get(field):
             raise ValueError(f"quality observation requires {field}")
@@ -941,7 +942,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "## Tracked implementation quality",
             "",
             f"- Tasks: {len(tracked.get('tasks') or [])}",
-            f"- Legacy or incomplete tasks: {tracked.get('legacyOrIncompleteTasks', 0)}",
+            f"- Incomplete tasks: {tracked.get('incompleteTasks', 0)}",
         ))
         for model, values in (tracked.get("attemptsByModel") or {}).items():
             lines.append(
@@ -1036,6 +1037,18 @@ def record_hook_event(repo: Path, payload: Mapping[str, Any], policy_result: Map
         data["correlationId"] = str(correlation)
     if policy_result:
         data["policyDecision"] = policy_result.get("decision")
+        if hook_event == "SubagentStart" and isinstance(policy_result.get("contextPacket"), Mapping):
+            packet = policy_result["contextPacket"]
+            encoded = json.dumps(packet, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            context_task = payload.get("task") if isinstance(payload.get("task"), Mapping) else {}
+            working = context_task.get("workingSet") or []
+            data["context"] = {
+                "bytes": len(encoded),
+                "sections": len(packet),
+                "workingSetCount": len(working),
+                "expansions": int(payload.get("expansionsUsed", 0) or 0) + (1 if payload.get("contextExpansion") else 0),
+                "warningCount": int(policy_result.get("warningCount") or 0),
+            }
     if hook_event in {"SessionStart", "UserPromptSubmit"}:
         data["bootstrap"] = True
     elif hook_event == "PreToolUse":

@@ -73,7 +73,7 @@ bash <lemmings>/scripts/install.sh --repo <repository>
 The bootstrap:
 
 - copies the self-contained skill to `.agents/skills/lemmings`;
-- creates or merges `.codex/lemmings.json` with portable game-workspace defaults;
+- installs the canonical schema-v2 `.codex/lemmings.json` together with matching skill and agent profiles; existing drift requires `--force`/`-Force` and is fully replaced;
 - records where optional tooling lives;
 - supports embedded packages, submodules, external clones, and linked worktrees;
 - does not install Python, change `PATH`, enable hooks, stage files, or create commits.
