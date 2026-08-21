@@ -1,7 +1,8 @@
 # Lemmings roadmap
 
-| Priority | Task | Dependencies |
+| Priority | Task | Gate |
 | --- | --- | --- |
-| P1 | Forward-test skill-only bootstrap in clean Windows, macOS, and Linux repositories | Smart Skill cutover |
-| P2 | Pilot optional hooks with the four bounded agent profiles | Bootstrap forward-test |
-| P3 | Review telemetry benchmark evidence for one comparable cohort | Five complete Integrated observations |
+| P1 | Forward-test v3 installers and registry on Windows, macOS, and Linux | Unit and skill validation |
+| P2 | Pilot pool reuse and persistent Unity validation clone | No contamination/recovery regression |
+| P3 | Compare equivalent Codex/OpenCode/Kilo cohorts | At least five complete tasks per route |
+| P3 | Propose route or pool changes offline | Explicit user confirmation |

@@ -1,19 +1,13 @@
-# Context-contract v2
+# Dispatch context
 
-Derive dispatch context deterministically from the canonical Task, optional Phase, and requested role. Use compact JSON.
+`AgentInvocation v3` is a value object created once per invocation. It contains identifiers, Task revision, attempt, role, base SHA, profile/context digests, one objective, acceptance criteria, owned/forbidden paths, up to 12 `{ref,purpose,contentHash}` references, validation commands, role limits, and output schema version. It is at most 16 KiB.
 
-## Required projections
+Do not embed Task, Phase, Review, AGENTS, role prompt, source content, logs, telemetry, registry data, absolute paths, or the original user transcript. References identify the smallest starting set. A worker may request one expansion naming one unresolved symbol or decision; the manager supplies only that focused result.
 
-- Explorer: one question/focus and at most three starting references.
-- Worker: goal, acceptance, dependencies, owned/shared/forbidden paths, risks, frozen contracts, working set, assigned model, and declared validation.
-- Validator: acceptance, risks, working set, risk-to-test map, commands, and allowed outputs.
-- Reviewer: exact `baseSha..headSha`, acceptance, embedded handoff, actual model, and validation evidence.
-- Summarizer: task identifier and explicitly supplied evidence only.
+Limits are bounded by role: worker 24 tool calls/one expansion; reviewer 16/one; explorer 12/one. Hosts without token accounting use those counts and elapsed time. Deterministic code extracts diagnostics and truncates logs before model input.
 
-Never include transcripts, reasoning, tool payloads, raw logs, secrets, absolute paths, or unrelated Task fields.
+`AgentResult v3` returns only invocation id, attempt, status, candidate head when applicable, changed paths, acceptance/validation evidence, findings, blockers, and remaining risks. It never repeats the assignment or returns transcript/reasoning.
 
-## Budget
+After a capacity failure, create a new invocation. Continue in the same workspace and add only a deterministic checkpoint reference covering HEAD, Git status, changed paths, and existing evidence. Never transfer the failed model's conversation history or repeat the complete Task.
 
-Canonical profile values are 16,384 encoded bytes, 12 working-set entries, and one focused expansion. Exceeding a limit emits a warning and still injects the packet. Missing required schema-v2 fields blocks dispatch. Record only packet bytes, section count, working-set count, expansions, and warning count.
-
-Each working-set entry is `{ "ref": "repo/path#Symbol", "purpose": "why needed" }`. Expansion requests must name one symbol or decision.
+The manager rejects late or stale results unless invocation id, attempt, Task revision, base SHA, context digest, and profile digest match the dispatch record. If structured output is unavailable, allow one local schema-correction attempt without rereading repository context.

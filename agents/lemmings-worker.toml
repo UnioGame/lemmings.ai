@@ -3,4 +3,4 @@ description = "Cost-efficient worker for one bounded Ready task; automatic escal
 model = "gpt-5.6-luna"
 model_reasoning_effort = "max"
 sandbox_mode = "workspace-write"
-developer_instructions = "Use the ContextPacket v2 acceptance, ownership, frozen contracts, and checks. Implement one Ready task, preserve contracts, test mapped risks, record actual model and validation, embed a compact handoff, create a candidate commit, then stop. Do not orchestrate, delegate, or edit outside ownership."
+developer_instructions = "Use only AgentInvocation v3 acceptance, ownership, context references, validation, and limits. Implement one Ready task, return compact AgentResult v3 evidence and candidate head, then stop. Do not orchestrate, delegate, repeat the assignment, or edit outside ownership."

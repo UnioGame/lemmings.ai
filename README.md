@@ -1,168 +1,165 @@
-# Lemmings
+# Lemmings 3.0
 
-**Proportional orchestration for agent-assisted repository delivery.**
+Lemmings is a repository skill for proportional agent delivery. `Auto` resolves Simple, Standard, or Strict after discovery. The current agent remains the sole manager; bounded worker, reviewer, and explorer invocations receive compact assignments.
 
-Lemmings guides work through **Discover → Plan → Refine → Implement → Verify** and adds process only when risk justifies it. A small change stays small; parallel or contract-sensitive delivery gains isolation, independent review, and integration evidence.
-
-## Contents
-
-- [Core idea](#core-idea)
-- [Modes](#modes)
-- [Workspace strategy](#workspace-strategy)
-- [Install](#install)
-- [Use the skill](#use-the-skill)
-- [Optional tooling](#optional-tooling)
-- [Advanced enforcement](#advanced-enforcement)
-- [Artifacts](#artifacts)
-- [Documentation](#documentation)
-
-## Core idea
-
-The **Smart Skill** is the product and the only orchestrator. It selects a mode, assigns models, creates the necessary artifacts, delegates bounded work, operates Git, reviews the real candidate range, and verifies integration.
-
-Python tooling is optional. It validates contracts, finalizes tracked Task quality, reports status, estimates workspace size, and records opt-in timing telemetry. Optional hooks enforce decisions already made by the skill; neither tooling nor hooks implement a second workflow.
+## How Lemmings works
 
 ```mermaid
-flowchart LR
-  D["Discover"] --> P["Plan"] --> R["Refine"] --> I["Implement"] --> V["Verify"]
-  V -. "bounded repair" .-> I
-  V -. "invalid premise" .-> D
+flowchart TD
+    U[User request] --> D[Manager: Discover]
+    D --> A{Auto resolves mode}
+
+    A -->|Simple| S[Manager implements directly]
+    A -->|Standard| T[Task + bounded worker]
+    A -->|Strict| P[Phase + dependency-ready writer wave]
+
+    S --> V[Focused validation]
+    T --> W[Claim pooled or provision workspace]
+    P --> W
+    W --> I[Worker invocation]
+    I --> O{Invocation outcome}
+
+    O -->|Capacity failure| RP[Propose temporary role plans]
+    RP --> C{User confirms?}
+    C -->|Yes| TR[Apply task-local route chain]
+    TR --> I
+    C -->|No| PA[Task paused]
+
+    O -->|Candidate| V
+    V --> R{Review required?}
+    R -->|No| AC[Accepted]
+    R -->|Yes| IR[Immutable reviewer]
+    IR -->|Accepted| AC
+    IR -->|One repair| I
+    IR -->|Replan required| D
+
+    AC --> IN[Integrated + integration evidence]
+    IN --> WS[Pool, safe removal, retain, or external]
+    IN -. optional offline .-> TM[Telemetry and benchmark]
 ```
+
+Text fallback: `Discover → Plan → Refine → Implement → Verify`.
+
+The manager is the only orchestrator. Contracts, hooks, and the CLI only validate or atomically execute a decision already made by the manager. Telemetry is optional, offline, and never part of the delivery critical path.
 
 ## Modes
 
 | Mode | Best fit | Added structure |
 | --- | --- | --- |
-| **Simple** | One local, low-risk change | No Lemmings artifact by default |
-| **Standard** | One writer with meaningful implementation or validation | Task, candidate commit, immutable high-model Review |
-| **Strict** | Parallel writers, shared contracts, serialized assets, submodules, code generation, or leased resources | Phase baseline, frozen contracts, isolated writers when required, leases, Reviews, integration evidence |
+| **Simple** | One low-risk ownership domain | Direct manager implementation and focused validation |
+| **Standard** | One bounded writer, medium risk, or independent review | Task, candidate, handoff, validation, optional immutable review |
+| **Strict** | Parallel writers, shared contracts/assets, submodules, codegen, multiple repositories, or high risk | Phase, task DAG, isolation, leases, mandatory review and integration evidence |
 
-`auto` is the default. Explicit user mode and model choices remain in force until changed.
+`Auto` is the default. It may escalate after new discovery but does not downgrade after the first mutation. Explicit mode pins remain explicit.
 
-## Workspace strategy
+## Configure models by role
 
-Lemmings chooses the narrowest safe backend:
+The canonical project configuration is `.agents/lemmings.json`. Routes are ordered per host and role:
 
-| Backend | Use when |
-| --- | --- |
-| `current` | One safe serial writer can use the current checkout |
-| `code-worktree` | Code needs an isolated branch without launching the full validation environment |
-| `package-worktree` | The owned change is fully contained in a package or submodule repository |
-| validation clone | A persistent, warmed full-project environment must own integration validation |
+```json
+{
+  "modelRoutes": {
+    "codex": {
+      "worker": [
+        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max" },
+        { "providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max" }
+      ],
+      "reviewer": [
+        { "providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high" }
+      ],
+      "explorer": [
+        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "high" }
+      ]
+    },
+    "opencode": {
+      "worker": [
+        { "providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "max" }
+      ],
+      "reviewer": [
+        { "providerId": "anthropic", "modelId": "claude-opus", "variantId": "deep" }
+      ],
+      "explorer": [
+        { "providerId": "anthropic", "modelId": "claude-sonnet", "variantId": "fast" }
+      ]
+    }
+  }
+}
+```
 
-For large game repositories, the default is **hybrid**: writers use code or package worktrees, while one warmed validation clone owns full-project checks. Only one editor or batch process uses shared validation resources at a time, and shared serialized files have one owner.
+Model identifiers are opaque host catalog values. A larger catalog does not raise the orchestration mode. Permanent route changes are stale-safe and require confirmation:
 
-The pipeline, subagents, and safe serial work in the current checkout need no special workspace approval. Concurrent implementation writers never share that checkout; each needs an isolated workspace. Before creating any code worktree, package worktree, or full validation clone, Lemmings estimates the new workspace; estimates above **10 GiB** require approval in Unity and non-Unity repositories alike. If approval is declined, the pipeline continues in the current checkout where safe, and only workspace-dependent work becomes `Blocked` when no safe fallback exists.
+```text
+python -m lemmings models inspect --repo <repo>
+python -m lemmings models propose --repo <repo> --catalog catalog.json --routes routes.json
+python -m lemmings models apply --repo <repo> --catalog catalog.json --routes routes.json --confirm <proposalDigest>
+```
 
-## Install
+`apply` changes only `modelRoutes`; it cannot change prompts, topology, workspaces, concurrency, telemetry, or Task state.
 
-Run the bootstrap from the Lemmings package or external clone.
+## Recover when model limits are exhausted
 
-### PowerShell
+Hosts may report an optional `capacityProbe` before dispatch. `unknown` is fail-open. Runtime failures are normalized as `quota_exhausted`, `rate_limited`, `model_unavailable`, `auth_or_billing`, `context_limit`, or `transient_transport`.
+
+The manager responds with two to four choices: the same model through another source, a replacement for only the unavailable role, a new map for all remaining roles, and—when a reset time is known—waiting. Each choice states its expected quality, cost, speed, and limitations.
+
+A selected route plan is stored only in the current Task. It does not mutate `.agents/lemmings.json` and expires when the Task finishes. One confirmation approves its ordered worker/reviewer/explorer chains; `advance` can only move to the next already approved route:
+
+```text
+python -m lemmings models recover propose --repo <repo> --task task.json --failure failure.json --plan recovery.json --catalog codex.json --catalog opencode.json
+python -m lemmings models recover apply --repo <repo> --task task.json --failure failure.json --plan recovery.json --catalog codex.json --catalog opencode.json --option same-model-other-host --confirm <proposalDigest>
+python -m lemmings models recover advance --repo <repo> --task task.json --failure next-failure.json --role worker --expected-revision 4
+```
+
+Before confirmation, dispatch is blocked. A short rate limit up to 30 seconds or one transport failure receives one retry; context overflow receives one focused context reduction. Exhausting an approved chain pauses the Task and requires a new proposal.
+
+A replacement worker continues in the same workspace with a new invocation and no transferred conversation history. Its checkpoint is limited to HEAD, Git status, changed paths, and existing evidence. A replacement reviewer inspects the same immutable candidate range; required review is never replaced by manager self-review.
+
+Permanent adoption of a successful temporary map is a separate `models propose/apply` operation after the Task.
+
+## Workspace lifecycle
+
+| Workspace | Reuse | Cleanup |
+| --- | --- | --- |
+| Current or user-provided checkout | User-controlled serial work | Never removed by Lemmings |
+| Code/package worktree | Same Task, then bounded shared writer pool | Safe removal on eviction |
+| Task Unity clone | Same Phase while strictly clean | Safe removal after Phase |
+| Validation clone | Project-wide integration validation | Persistent; never automatically removed |
+
+The default pool keeps at most two idle worktrees and 10 GiB per Git common directory. Reuse requires exact registration, a clean tracked/untracked/submodule state, no unfinished Git operation, process, invocation, or lease, and the exact integration head.
+
+Cleanup never uses force, reset-hard, automatic `git clean`, or SessionStart deletion. Unsafe or locked workspaces are quarantined without reopening an Integrated Task.
+
+## Install and validate
+
+From the package root:
 
 ```powershell
-pwsh -File <lemmings>/scripts/install.ps1 -Repo <repository>
+./scripts/install.ps1 -Repo <consumer-repo> -Project <unity-project>
 ```
 
-### Bash
+The installer writes `.agents/lemmings.json`, the skill, and three optional bounded role profiles. It does not enable telemetry, create worktrees, mutate Git history, install Python, or clean files.
 
-```bash
-bash <lemmings>/scripts/install.sh --repo <repository>
-```
-
-The bootstrap:
-
-- copies the self-contained skill to `.agents/skills/lemmings`;
-- installs the canonical schema-v2 `.codex/lemmings.json` together with matching skill and agent profiles; existing drift requires `--force`/`-Force` and is fully replaced;
-- records where optional tooling lives;
-- supports embedded packages, submodules, external clones, and linked worktrees;
-- does not install Python, change `PATH`, enable hooks, stage files, or create commits.
-
-PowerShell uses `-DryRun`, `-Force`, and `-Project <path>`; Bash uses `--dry-run`, `--force`, and `--project <path>`. The project argument is optional when exactly one supported game project is found, and required when discovery finds zero or multiple candidates. Python is **not required** for skill-only operation.
-
-## Use the skill
-
-Skill controls are written in chat, not executed in a shell:
+Useful checks:
 
 ```text
-$lemmings auto
-$lemmings status
-
-$lemmings models worker=gpt-5.6-luna:max
-$lemmings models task TASK-17 worker=gpt-5.6-sol:medium
-
-$lemmings workspace auto
-$lemmings workspace current
-$lemmings workspace isolated
-$lemmings workspace status
-$lemmings workspace task TASK-17 isolated
+python -m lemmings check --repo <repo>
+python -m lemmings workspace inspect --repo <repo>
+python -m lemmings models inspect --repo <repo>
+python -m lemmings metrics usage --host opencode --file usage.json
 ```
 
-Enable or disable Lemmings for the current task with `$lemmings on` and `$lemmings off`. Discover/Plan/Refine, orchestration, and independent review use `gpt-5.6-sol:high`. A bounded Ready worker defaults to `gpt-5.6-luna:max`; large-context, multi-subsystem, or failed-Luna implementation escalates to `gpt-5.6-terra:max`. Sol Medium/High/Max are explicit worker pins only and always override automatic routing. Plan defects return to Refine without worker escalation. Explorer uses Luna High, validator uses Terra Medium, and evidence summarization uses Luna Medium.
+## Optional telemetry
 
-Example:
+Telemetry is off by default, local, fail-open, and out-of-band. It records only minimal run/invocation completion events when enabled. Prompts, source, model reasoning, registry contents, and workspace paths are not recorded or injected into agent context.
 
-```text
-$lemmings auto
-Implement TASK-17 and verify the resulting commit range.
-```
+Codex, OpenCode, and Kilo token exports can be normalized offline. Missing fields remain `null`. Reports and benchmark-driven route suggestions run manually after completion and never choose a model, change pool limits, gate review, cleanup, or `Integrated`.
 
-Lemmings discovers the affected scope, explains its selected mode and workspace, refines the task to `Ready`, implements it, and verifies the actual candidate or fix head.
-
-## Optional tooling
-
-When Python 3.10+ is available, run tooling directly from the discovered Lemmings root—installation is unnecessary:
-
-```bash
-python -m lemmings check
-python -m lemmings status
-python -m lemmings workspace estimate
-python -m lemmings workspace inspect
-```
-
-`workspace estimate` defaults to the Git worktree estimate. Pass `--backend package-worktree --package <repo-relative-package>` for the target package, or `--backend unity-clone` after full-clone validation has been selected. Every isolated backend reports whether its estimated copy exceeds the approval threshold.
-
-Telemetry is local, off by default, and independent of the orchestration mode:
-
-```bash
-python -m lemmings metrics basic
-python -m lemmings metrics stage discover --task TASK-17
-python -m lemmings metrics finish --outcome completed --task TASK-17
-python -m lemmings metrics report --benchmark
-```
-
-Tool discovery checks the Git-common environment file, then the repo-relative profile path, then package metadata. If Python or tooling is unavailable, the skill continues with native Git and shell capabilities.
-
-## Advanced enforcement
-
-The optional [hook layer](hooks/hooks.json) can enforce:
-
-- reviewer read-only behavior;
-- writer path ownership;
-- selected model assignment;
-- bounded subagent context;
-- candidate and validation evidence;
-- isolated-workspace binding;
-- privacy-bounded telemetry events.
-
-Hooks are **not enabled by bootstrap**. They fail open on telemetry recording errors; safety policy remains separate from telemetry. See [game-project workspace policy](skills/lemmings/references/game-projects.md) for resource ownership and large-repository constraints.
-
-Six optional [agent profiles](agents) cover orchestrator, worker, reviewer, validator, explorer, and summarizer.
-
-## Artifacts
-
-| Artifact | Created when | Owns |
-| --- | --- | --- |
-| **Task** | Standard and Strict | Goal, acceptance, ownership, models, workspace decision, execution handoff, commits, validation debt, review reference, close evidence |
-| **Phase** | Strict only | Baseline, frozen shared contracts, task DAG, leases, integration branch and close evidence |
-| **Review** | Independent baseline or candidate review | Immutable subject SHA/range, high-model verdict, findings and validation |
-
-`Accepted` means the latest candidate range passed independent review. `Integrated` additionally means the accepted work was merged and integration validation passed. **Accepted ≠ Integrated.**
-
-## Documentation
+## References
 
 - [Smart Skill](skills/lemmings/SKILL.md)
 - [Artifact contracts](skills/lemmings/references/contracts.md)
+- [Context contract](skills/lemmings/references/context-contract.md)
+- [Model routing and recovery](skills/lemmings/references/model-routing.md)
 - [Game-project workspaces](skills/lemmings/references/game-projects.md)
-- [Telemetry and benchmarking](skills/lemmings/references/telemetry.md)
+- [Optional telemetry](skills/lemmings/references/telemetry.md)
 - [Task, Phase, and Review templates](Documentation~/tasks/templates)

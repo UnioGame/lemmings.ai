@@ -1,8 +1,8 @@
 {
   "name": "unigame.ai.lemmings",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "displayName": "Lemmings",
-  "description": "Proportional repository orchestration for Codex agents.",
+  "description": "Proportional repository orchestration for multiple agent hosts.",
   "unity": "6000.0",
   "author": {
     "name": "Lemmings Maintainers"

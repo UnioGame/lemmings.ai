@@ -292,7 +292,7 @@ class TelemetryTests(unittest.TestCase):
             expected = bind_run(repo, repo, task_id="TASK-17")
             self.assertEqual(expected["runId"], read_binding(repo, nested)["runId"])
 
-    def test_active_hook_runtime_prefers_current_worktree_binding(self):
+    def test_active_hook_runtime_ignores_telemetry_binding(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo); set_telemetry_mode(repo, "basic")
             first = repo / "TASK-1.json"; second = repo / "TASK-2.json"
@@ -303,7 +303,7 @@ class TelemetryTests(unittest.TestCase):
             bind_run(repo, repo, task_id="TASK-2", task_path=str(second))
             hydrated = hooks.hydrate({"cwd": str(repo), "hook_event_name": "SubagentStart"})
             self.assertEqual("TASK-1", hydrated["task"]["taskId"])
-            self.assertEqual("TASK-2", hydrated["_telemetryTask"]["taskId"])
+            self.assertNotIn("_telemetryTask", hydrated)
 
     def test_unbound_hook_is_visible_as_incomplete(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -335,15 +335,16 @@ class TelemetryTests(unittest.TestCase):
             cleanup_events(repo, "90d", True)
             self.assertFalse(event_file.exists())
 
-    def test_hook_telemetry_failure_is_fail_open(self):
+    def test_hooks_do_not_write_telemetry(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo); set_telemetry_mode(repo, "basic")
             raw = {"hook_event_name": "Stop", "cwd": str(repo), "session_id": "s1", "turn_id": "t1"}
             stdout = io.StringIO()
-            with patch("sys.stdin", io.StringIO(json.dumps(raw))), patch.object(hooks, "record_hook_event", side_effect=OSError("disk full")), redirect_stdout(stdout):
+            with patch("sys.stdin", io.StringIO(json.dumps(raw))), redirect_stdout(stdout):
                 self.assertEqual(0, hooks.main())
             self.assertEqual({}, json.loads(stdout.getvalue()))
-            self.assertEqual("OSError", telemetry_status(repo)["lastError"]["type"])
+            self.assertIsNone(telemetry_status(repo)["lastError"])
+            self.assertFalse(hasattr(hooks, "record_hook_event"))
 
     def test_malformed_telemetry_task_binding_cannot_block_inactive_policy(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -355,7 +356,7 @@ class TelemetryTests(unittest.TestCase):
             with patch("sys.stdin", io.StringIO(json.dumps(raw))), redirect_stdout(stdout):
                 self.assertEqual(0, hooks.main())
             self.assertEqual({}, json.loads(stdout.getvalue()))
-            self.assertEqual("JSONDecodeError", telemetry_status(repo)["lastError"]["type"])
+            self.assertIsNone(telemetry_status(repo)["lastError"])
 
     def test_analysis_requires_five_integrated_comparable_tasks(self):
         with tempfile.TemporaryDirectory() as temp:

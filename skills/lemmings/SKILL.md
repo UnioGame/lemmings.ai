@@ -1,27 +1,38 @@
 ---
 name: lemmings
-description: Coordinate repository delivery with proportional Simple, Standard, or Strict orchestration. Use when a user invokes $lemmings, asks to enable or inspect Lemmings, delegates repository implementation, needs commit-range review, isolated writers, shared-contract safety, integration evidence, or pipeline metrics.
+description: Coordinate repository delivery with proportional Auto, Simple, Standard, or Strict orchestration. Use when a user invokes $lemmings, delegates repository implementation, needs isolated writers, commit-range review, shared-contract safety, model routing, worktree pooling, integration evidence, or optional pipeline metrics.
 ---
 
 # Lemmings
 
-Own orchestration as the sole manager. Never delegate orchestration. Select the lightest safe mode:
+Act as the sole manager. Tooling validates or atomically executes an already recorded decision; it never chooses mode, model, task, batch, verdict, or acceptance.
 
-- Simple: one local writer, no canonical artifacts.
-- Standard: one writer, one schema-v2 Task, immutable Reviews.
-- Strict: parallel writers, shared contracts, serialized assets, submodules, codegen, or external resources; add a schema-v2 Phase, isolation, leases, baseline review, and integration evidence.
+Run `Discover → Plan → Refine → Implement → Verify`. Default `requestedMode` to `auto` and resolve it after Discover:
 
-Run `Discover → Plan → Refine → Implement → Verify`. Dispatch implementation only after the Task is `Ready`. Freeze shared contracts before parallel work. Preserve explicit user mode/model/workspace pins. Treat `Accepted` and `Integrated` as different states; a second failed review becomes `Replan Required`.
+1. Strict for two writers, shared/frozen contracts, overlapping domains, submodules, codegen, multi-repository integration, shared serialized assets, exclusive resources, high risk, an integration branch, or baseline review.
+2. Otherwise Standard for one bounded worker, a public contract with one owner, medium risk, candidate/repair/review, or validation wider than one focused check.
+3. Otherwise Simple for one low-risk ownership domain that the manager can change directly.
 
-Derive a role-specific ContextPacket v2 from Task/Phase. Never forward transcripts, reasoning, raw logs, secrets, absolute paths, or unrelated documents. Malformed schema-v2 artifacts block lifecycle operations. Context budget excesses warn but do not suppress packet injection. Read [context-contract.md](references/context-contract.md) before dispatch.
+Do not silently change an explicit mode pin. Auto may escalate after new discovery, but never downgrade after the first mutation. Host capability gaps change topology, not guarantees: serialize writers without isolation/slots; ignore late results without cancellation; use count/time limits without token accounting; ask the user when a required reviewer is unavailable.
 
-Require every worker to stay inside owned paths, test mapped risks, record actual model and validation, embed a concise handoff, and create a candidate/fix commit. Review the exact candidate range. Validate integration before close. Run `lemmings check`; use `lemmings check --all` for Strict work.
+On a model capacity failure, stop new dispatch and read [model-routing.md](references/model-routing.md). Retry one short rate/transport failure or reduce context once when applicable; otherwise present two to four task-local role plans. Apply nothing before user confirmation. One confirmation permits only the selected ordered route chains for the current Task; keep the workspace, start a fresh invocation without model history, and request new confirmation when the chain is exhausted. Capacity probes and recovery never depend on telemetry.
 
-Read only the relevant reference:
+Use only `manager`, `worker`, `reviewer`, and `explorer`. Delegation depth is one. Reserve the manager slot; run at most two isolated writers and two read-only agents. Select each writer wave only from dependency-ready tasks, require explicit independence, and wait for the whole wave before integration. Allow one focused context expansion, one repair, and one transient transport retry.
 
-- [contracts.md](references/contracts.md): schema-v2 artifact fields and state rules.
-- [model-routing.md](references/model-routing.md): role defaults, pins, and escalation.
-- [game-projects.md](references/game-projects.md): code worktree, package worktree, or Unity clone selection.
-- [telemetry.md](references/telemetry.md): optional privacy-bounded v2 metrics.
+The manager alone updates Task/Phase using `revision` compare-and-set. Accept `AgentResult v3` only when invocation id, attempt, Task revision, base SHA, context digest, and profile digest still match. Never transfer model conversation history across tasks or pooled workspaces.
 
-Controls: `$lemmings on|off|auto|simple|standard|strict|status`; `$lemmings models ...`; `$lemmings workspace ...`. Enabling writes a schema-v2 runtime marker when hooks are installed. A v1 marker or artifact is unsupported and must be replaced, never migrated.
+Keep dispatch under 16 KiB and 12 context references. Send references plus hashes and role-unique rules, never Task/Phase copies, transcripts, reasoning, raw logs, telemetry, registry contents, secrets, or absolute paths. Summarize logs deterministically. Read [context-contract.md](references/context-contract.md) before dispatch.
+
+For Standard/Strict, use the v3 templates. `Draft → Ready → Active → Candidate → Accepted → Integrated`; use `Repair`, `Replan Required`, `Blocked`, or `Cancelled` when applicable. Review only when mode/risk requires it, and review the immutable candidate range. `Integrated` requires integration evidence, not telemetry or cleanup success.
+
+Read only the reference needed for the current decision:
+
+- [contracts.md](references/contracts.md): artifacts, Auto signals, lifecycle, CAS, and batch checks.
+- [context-contract.md](references/context-contract.md): AgentInvocation/AgentResult and context limits.
+- [game-projects.md](references/game-projects.md): workspace registry, pool, reuse, leases, and safe cleanup.
+- [model-routing.md](references/model-routing.md): host capabilities and confirmation-gated routes.
+- [telemetry.md](references/telemetry.md): optional offline usage and benchmark collection.
+
+Run the narrowest falsifying validation, then `python -m lemmings check`; add `--all` for a complete Strict Phase. Keep reusable policy here/references, canonical data only in Task/Phase/Review, and compact evidence in the Task.
+
+Controls: `$lemmings on|off|auto|simple|standard|strict|status`; `lemmings models inspect|propose|apply|recover`; `lemmings workspace estimate|inspect|register|claim|release|remove`; optional `lemmings metrics ...`. A v3 runtime marker enables hooks. Schema v2 is read-only migration input.

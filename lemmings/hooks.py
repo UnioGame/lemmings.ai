@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shlex
@@ -13,11 +14,15 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.contracts import DEFAULT_CONTEXT_POLICY, as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile, validate_task
-    from lemmings.telemetry import contains_sensitive_text, looks_absolute_path, read_binding, record_hook_event, record_telemetry_error
+    from lemmings.contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from lemmings.models import normalize_capacity_probe, normalize_route_failure, route_failure_action
+    from lemmings.telemetry import contains_sensitive_text, looks_absolute_path
+    from lemmings.workspace import load_registry
 else:
-    from .contracts import DEFAULT_CONTEXT_POLICY, as_list, candidate_head, path_matches, read_object, runtime_marker, task_worktree, validate_models, validate_profile, validate_task
-    from .telemetry import contains_sensitive_text, looks_absolute_path, read_binding, record_hook_event, record_telemetry_error
+    from .contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from .models import normalize_capacity_probe, normalize_route_failure, route_failure_action
+    from .telemetry import contains_sensitive_text, looks_absolute_path
+    from .workspace import load_registry
 
 READ_ONLY_COMMANDS = {
     "rg", "grep", "ls", "dir", "pwd", "type", "cat", "head", "tail",
@@ -57,14 +62,14 @@ def requested_role(payload: Mapping[str, Any]) -> str | None:
     if isinstance(tool_input, dict):
         candidates.extend(tool_input.get(key) for key in ("role", "agent_type", "subagent_type", "task_name", "profile"))
         message = str(tool_input.get("message") or "").lower()
-        match = re.search(r"(?:role\s*[:=]\s*|as\s+|lemmings[-_])(reviewer|explorer|validator|summarizer|orchestrator|worker)\b", message)
+        match = re.search(r"(?:role\s*[:=]\s*|as\s+|lemmings[-_])(reviewer|explorer|validator|summarizer|manager|orchestrator|worker)\b", message)
         if match:
             candidates.append(match.group(1))
     for explicit in candidates:
         if not explicit:
             continue
         value = str(explicit).lower().replace(" ", "-")
-        for role in ("reviewer", "explorer", "validator", "summarizer", "orchestrator", "worker"):
+        for role in ("reviewer", "explorer", "validator", "summarizer", "manager", "orchestrator", "worker"):
             token = role.replace("-", "[-_]")
             if re.search(rf"(?:^|[-_]){token}(?:$|[-_])", value):
                 return role
@@ -89,6 +94,14 @@ def requested_model(payload: Mapping[str, Any]) -> str | None:
             return f"{value}#conflicting-effort:{effort}"
         return value
     return value if not effort else f"{value}:{effort}"
+
+
+def requested_host(payload: Mapping[str, Any]) -> str | None:
+    tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+    value = payload.get("requestedHostId") or payload.get("hostId")
+    if isinstance(tool_input, Mapping):
+        value = value or tool_input.get("hostId") or tool_input.get("host_id")
+    return str(value) if value else None
 
 
 def changed_paths(payload: Mapping[str, Any]) -> list[str]:
@@ -355,7 +368,44 @@ def derive_context_packet(
     role: str,
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Project schema-v2 artifacts into the smallest role-specific dispatch packet."""
+    """Project canonical artifacts into a bounded role-specific invocation."""
+    if task.get("schemaVersion") == 3:
+        ownership = task.get("ownership") if isinstance(task.get("ownership"), Mapping) else {}
+        validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
+        references = []
+        for entry in as_list(task.get("workingSet")):
+            if not isinstance(entry, Mapping):
+                continue
+            body = {"ref": entry.get("ref"), "purpose": entry.get("purpose")}
+            content_hash = entry.get("contentHash") or hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            references.append({**body, "contentHash": content_hash})
+        profile = payload.get("profile") if isinstance(payload.get("profile"), Mapping) else {}
+        attempt = int(payload.get("attempt", 0) or 0)
+        seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
+        invocation = {
+            "schemaVersion": 3,
+            "runId": str(payload.get("runId") or task.get("runId") or task.get("taskId")),
+            "taskId": task.get("taskId"),
+            "taskRevision": task.get("revision"),
+            "invocationId": str(payload.get("invocationId") or hashlib.sha256(seed.encode()).hexdigest()[:24]),
+            "attempt": attempt,
+            "role": role,
+            "baseSha": task.get("baseSha") or payload.get("baseSha") or "uncommitted",
+            "profileDigest": hashlib.sha256(json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "contextDigest": "",
+            "objective": payload.get("focus") or payload.get("question") or task.get("goal"),
+            "acceptanceCriteria": as_list(task.get("acceptance")),
+            "ownedPaths": as_list(ownership.get("owned")) if role == "worker" else [],
+            "forbiddenPaths": as_list(ownership.get("forbidden")),
+            "contextRefs": references,
+            "validationCommands": as_list(validation.get("commands")),
+            "candidateHead": candidate_head(task) if role == "reviewer" else None,
+            "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
+            "outputSchemaVersion": 3,
+        }
+        digest_body = {key: value for key, value in invocation.items() if key != "contextDigest"}
+        invocation["contextDigest"] = hashlib.sha256(json.dumps(digest_body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return sanitize_context(invocation)
     phase = phase or {}
     execution = task.get("execution") if isinstance(task.get("execution"), Mapping) else {}
     validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
@@ -432,15 +482,29 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
         return decision("allow", "Lemmings inactive")
     event = event_name(payload)
     task = payload.get("task") or {}
-    mode = str(payload.get("mode") or task.get("mode") or "standard").lower()
+    mode = str(payload.get("mode") or task.get("resolvedMode") or task.get("mode") or "standard").lower()
     tool = str(payload.get("tool_name") or payload.get("toolName") or "")
     if event == "PreToolUse":
         if tool in {"Agent", "spawn_agent"}:
             role = requested_role(payload)
             if not role:
                 if mode == "strict":
-                    return decision("block", "Strict spawn requires an explicit writer, reviewer, explorer, or validator role")
+                    return decision("block", "Strict spawn requires an explicit worker, reviewer, or explorer role")
                 role = str(task.get("role", "worker"))
+            if task.get("schemaVersion") == 3 and role not in {"worker", "reviewer", "explorer"}:
+                return decision("block", "v3 dispatch role must be worker, reviewer, or explorer")
+            recovery_status = (task.get("routingRecovery") or {}).get("status")
+            if recovery_status in {"pending-confirmation", "paused"}:
+                return decision("block", f"model routing recovery is {recovery_status}; user confirmation is required")
+            tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+            probe_value = payload.get("capacityProbe") or (tool_input.get("capacityProbe") if isinstance(tool_input, Mapping) else None)
+            if isinstance(probe_value, Mapping):
+                try:
+                    probe = normalize_capacity_probe(probe_value)
+                except ValueError as error:
+                    return decision("block", str(error))
+                if probe["status"] == "depleted":
+                    return decision("block", "selected route capacity is depleted; create a recovery proposal", capacityProbe=probe)
             profile = payload.get("profile") or {}
             profile_result = validate_profile(profile)
             if not profile_result.ok:
@@ -448,14 +512,20 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             task_result = validate_task(task, profile)
             if not task_result.ok:
                 return decision("block", task_result.findings[0].message)
-            tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
             requested = requested_model(payload)
             assigned = (task.get("models") or {}).get("assigned")
             writer = role not in {"reviewer", "explorer", "validator", "summarizer"}
             if role == "reviewer":
                 if task.get("state") != "Candidate":
                     return decision("block", "reviewer requires a Candidate task")
-                if requested != "gpt-5.6-sol:high":
+                if task.get("schemaVersion") == 3:
+                    recovery_route = current_recovery_route(task, "reviewer")
+                    host_id = requested_host(payload) or (recovery_route or {}).get("hostId") or (task.get("models") or {}).get("hostId")
+                    allowed = [route_name(item) for item in (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or []) if isinstance(item, Mapping)]
+                    recovery_allowed = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == requested)
+                    if requested not in allowed and not recovery_allowed:
+                        return decision("block", "reviewer model must be an approved per-host or task-local recovery route")
+                elif requested != "gpt-5.6-sol:high":
                     return decision("block", "reviewer must use gpt-5.6-sol:high")
                 head = candidate_head(task)
                 review_head = (tool_input.get("head") if isinstance(tool_input, dict) else None) or payload.get("reviewHead")
@@ -476,6 +546,9 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("block", model_result.findings[0].message)
             if requested != assigned:
                 return decision("block", "writer spawn model must be explicit and equal models.assigned")
+            requested_host_id = requested_host(payload)
+            if requested_host_id and requested_host_id != (task.get("models") or {}).get("hostId"):
+                return decision("block", "writer spawn host must equal models.hostId")
             if mode == "strict" and not as_list((task.get("ownership") or {}).get("owned")):
                 return decision("block", "Strict writer requires non-empty ownership.owned")
             backend = ((task.get("workspace") or {}).get("backend"))
@@ -486,6 +559,12 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 if isinstance(estimated, (int, float)) and not isinstance(estimated, bool) and estimated > 10 and workspace.get("approval") != "approved":
                     return decision("block", "workspace estimates above 10 GiB require explicit user approval before writer dispatch")
                 declared = task_worktree(task)
+                if task.get("schemaVersion") == 3 and not declared:
+                    workspace_id = workspace.get("workspaceId")
+                    repo_root = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd()))
+                    registry = load_registry(repo_root)
+                    matches = [entry for entry in registry.get("entries", []) if entry.get("workspaceId") == workspace_id]
+                    declared = str(matches[0].get("path")) if len(matches) == 1 else None
                 if not declared:
                     return decision("block", "Declared isolation, parallel writing, or a dirty primary checkout requires an isolated worktree")
                 cwd = Path(str(payload.get("cwd") or os.getcwd())).resolve()
@@ -519,18 +598,24 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             return decision("allow", "write invariants satisfied")
     if event == "SubagentStart":
         if not task:
-            return decision("block", "SubagentStart requires a schema-v2 Task")
+            return decision("block", "SubagentStart requires a canonical Task")
+        recovery_status = (task.get("routingRecovery") or {}).get("status")
+        if recovery_status in {"pending-confirmation", "paused"}:
+            return decision("block", f"model routing recovery is {recovery_status}; user confirmation is required")
         profile = payload.get("profile") or {}
         task_result = validate_task(task, profile)
         if not task_result.ok:
             return decision("block", task_result.findings[0].message)
         role = requested_role(payload) or str(task.get("role") or "worker")
+        if task.get("schemaVersion") == 3 and role not in {"worker", "reviewer", "explorer"}:
+            return decision("block", "v3 invocation role must be worker, reviewer, or explorer")
         if role == "explorer" and not (payload.get("focus") or payload.get("question")):
             return decision("block", "explorer ContextPacket requires one focus or question")
         context = derive_context_packet(task, payload.get("phase") or {}, role, payload)
         warnings = context_warnings(context, task, profile, payload)
+        hard = task.get("schemaVersion") == 3 and bool(warnings)
         return decision(
-            "warn" if warnings else "allow",
+            "block" if hard else ("warn" if warnings else "allow"),
             "; ".join(warnings) if warnings else "bounded context accepted",
             contextPacket=context,
             warningCount=len(warnings),
@@ -541,6 +626,25 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             if mode == "strict":
                 return decision("warn", "Strict subagent stop has no safely inferred role; evidence was not accepted")
             role = str(task.get("role", "worker"))
+        if task.get("schemaVersion") == 3:
+            route_failure = payload.get("routeFailure") or payload.get("route_failure")
+            if isinstance(route_failure, Mapping):
+                try:
+                    normalized = normalize_route_failure(route_failure)
+                    action = route_failure_action(
+                        normalized,
+                        transient_retries=int(payload.get("transientRetries", 0) or 0),
+                        context_reductions=int(payload.get("contextReductions", 0) or 0),
+                    )
+                except (TypeError, ValueError) as error:
+                    return decision("block", str(error))
+                return decision("allow", f"RouteFailure accepted; next action: {action}", routeFailure=normalized, recoveryAction=action)
+            result_value = payload.get("agentResult") or payload.get("agent_result")
+            invocation = payload.get("agentInvocation") or payload.get("agent_invocation") or derive_context_packet(task, payload.get("phase") or {}, role, payload)
+            if not isinstance(result_value, Mapping):
+                return decision("block", "v3 subagent stop requires structured AgentResult")
+            checked = validate_agent_result(result_value, invocation, task)
+            return decision("allow", "AgentResult accepted") if checked.ok else decision("block", checked.findings[0].message)
         if role == "reviewer":
             head = candidate_head(task)
             evidence = payload.get("reviewEvidence") or payload.get("verdict")
@@ -594,25 +698,9 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
     except ValueError:
         return {**payload, "_lemmingsActive": False}
     if not marker.is_file():
-        combined = {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
-        try:
-            binding = read_binding(repo, cwd)
-        except Exception as telemetry_error:
-            record_telemetry_error(repo, telemetry_error)
-            binding = None
-        if binding and not binding.get("finished"):
-            combined["_telemetryBinding"] = binding
-            task_path = binding.get("taskPath")
-            if task_path:
-                try:
-                    path = Path(str(task_path))
-                    if path.is_file():
-                        combined["_telemetryTask"] = read_object(path)
-                except Exception as telemetry_error:
-                    record_telemetry_error(repo, telemetry_error)
-        return combined
+        return {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
     state = read_object(marker)
-    if state.get("schemaVersion") != 2:
+    if state.get("schemaVersion") not in {2, 3}:
         return {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
     combined = {**state, **payload, "_lemmingsActive": True, "_repoRoot": str(repo)}
     for name in ("profile", "task", "phase", "review"):
@@ -620,21 +708,6 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
         if value:
             path = Path(value)
             combined[name] = read_object(path if path.is_absolute() else repo / path)
-    try:
-        binding = read_binding(repo, cwd)
-    except Exception as telemetry_error:
-        record_telemetry_error(repo, telemetry_error)
-        binding = None
-    if binding and not binding.get("finished"):
-        combined["_telemetryBinding"] = binding
-        task_path = binding.get("taskPath")
-        if task_path:
-            try:
-                path = Path(str(task_path))
-                if path.is_file():
-                    combined["_telemetryTask"] = read_object(path)
-            except Exception as telemetry_error:
-                record_telemetry_error(repo, telemetry_error)
     tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
     if isinstance(tool_input, dict) and tool_input.get("model"):
         combined["requestedModel"] = tool_input["model"]
@@ -646,7 +719,7 @@ def host_output(result: Mapping[str, Any], event: str, payload: Mapping[str, Any
     if event == "SubagentStart" and action in {"allow", "warn"}:
         context = result.get("contextPacket") or {}
         compact = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        output = {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "Lemmings ContextPacket v2\n" + compact}}
+        output = {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "Lemmings AgentInvocation\n" + compact}}
         if action == "warn":
             output["systemMessage"] = reason
         return output
@@ -667,13 +740,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("hook payload must be an object")
         payload = hydrate(raw)
         result = handle(payload)
-        try:
-            repo_value = payload.get("_repoRoot")
-            if repo_value:
-                record_hook_event(Path(str(repo_value)), payload, result)
-        except Exception as telemetry_error:
-            if payload.get("_repoRoot"):
-                record_telemetry_error(Path(str(payload["_repoRoot"])), telemetry_error)
         output = host_output(result, event_name(raw), payload)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         output = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": f"invalid Lemmings hook input: {error}"}}

@@ -74,9 +74,9 @@ class IdentityAndCliTests(unittest.TestCase):
         process = run_cli("--help")
         self.assertEqual(0, process.returncode, process.stderr)
         self.assertIn("lemmings", process.stdout)
-        for command in ("check", "status", "workspace", "metrics"):
+        for command in ("check", "status", "workspace", "models", "metrics"):
             self.assertIn(command, process.stdout)
-        for removed in ("worktree", "scorecard", "models", "mode", "phase", "wave", "close"):
+        for removed in ("worktree", "scorecard", "phase", "wave", "close"):
             self.assertNotIn("  " + removed, process.stdout)
         self.assertFalse((ROOT / "scripts" / "orchestration_cli.py").exists())
         parsed = build_parser().parse_args(["check", "--task", "a.json", "--task", "b.json", "--all"])
@@ -89,8 +89,8 @@ class IdentityAndCliTests(unittest.TestCase):
         self.assertEqual("Lemmings", unity["displayName"])
         self.assertEqual("https://github.com/UnioGame/unigame.ai.tools.git", unity["repository"]["url"])
         self.assertEqual("lemmings", plugin["name"])
-        self.assertEqual("2.0.0", unity["version"])
-        self.assertEqual("2.0.0+codex.20260817", plugin["version"])
+        self.assertEqual("3.0.0", unity["version"])
+        self.assertEqual("3.0.0+codex.20260821", plugin["version"])
         self.assertEqual("https://github.com/UnioGame/unigame.ai.tools", plugin["repository"])
 
     def test_orchestrator_lifecycle_is_consistent(self):
@@ -947,10 +947,10 @@ class HookTests(unittest.TestCase):
             (package / ".codex-plugin").mkdir()
             (repo / ".agents/skills/lemmings").mkdir(parents=True)
             (repo / ".codex/agents").mkdir(parents=True)
-            (package / "package.json").write_text('{"version":"2.0.0"}', encoding="utf-8")
-            (package / "pyproject.toml").write_text('[project]\nversion = "2.0.0"\n', encoding="utf-8")
-            (package / "lemmings/__init__.py").write_text('__version__ = "2.0.0"\n', encoding="utf-8")
-            (package / ".codex-plugin/plugin.json").write_text('{"version":"2.0.0+codex.20260817"}', encoding="utf-8")
+            (package / "package.json").write_text('{"version":"3.0.0"}', encoding="utf-8")
+            (package / "pyproject.toml").write_text('[project]\nversion = "3.0.0"\n', encoding="utf-8")
+            (package / "lemmings/__init__.py").write_text('__version__ = "3.0.0"\n', encoding="utf-8")
+            (package / ".codex-plugin/plugin.json").write_text('{"version":"3.0.0+codex.20260821"}', encoding="utf-8")
             (package / "skills/lemmings/SKILL.md").write_text("source", encoding="utf-8")
             (repo / ".agents/skills/lemmings/SKILL.md").write_text("drift", encoding="utf-8")
             (package / "agents/lemmings-worker.toml").write_text("source", encoding="utf-8")

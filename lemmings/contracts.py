@@ -1,4 +1,4 @@
-"""Canonical schema-v2 orchestration contracts for Lemmings."""
+"""Canonical, backwards-readable orchestration contracts for Lemmings."""
 
 from __future__ import annotations
 
@@ -10,19 +10,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+LEGACY_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}
+DISTRIBUTION_VERSION = "3.0.0"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
-    "Planned", "Ready", "Active", "Candidate", "Accepted", "Integrated",
+    "Draft", "Planned", "Ready", "Active", "Repair", "Candidate", "Accepted", "Integrated",
     "Blocked", "Replan Required", "Cancelled", "Superseded",
 }
 TERMINAL_STATES = {"Integrated", "Replan Required", "Cancelled", "Superseded"}
 TRANSITIONS = {
+    "Draft": {"Ready", "Blocked", "Cancelled", "Superseded"},
     "Planned": {"Ready", "Blocked", "Cancelled", "Superseded"},
     "Ready": {"Active", "Blocked", "Cancelled", "Superseded"},
-    "Active": {"Candidate", "Blocked", "Cancelled", "Replan Required"},
-    "Candidate": {"Candidate", "Accepted", "Blocked", "Cancelled", "Replan Required"},
+    "Active": {"Candidate", "Repair", "Blocked", "Cancelled", "Replan Required"},
+    "Repair": {"Candidate", "Blocked", "Cancelled", "Replan Required"},
+    "Candidate": {"Candidate", "Repair", "Accepted", "Blocked", "Cancelled", "Replan Required"},
     "Accepted": {"Integrated", "Replan Required"},
     "Blocked": {"Ready", "Active", "Cancelled", "Replan Required"},
     "Integrated": set(), "Replan Required": set(), "Cancelled": set(), "Superseded": set(),
@@ -30,8 +35,11 @@ TRANSITIONS = {
 REVIEW_STATES = {"Pending", "ChangesRequested", "Accepted"}
 STRICT_RISKS = {
     "parallelWriters", "sharedContracts", "unitySerializedAssets", "submodules",
-    "codegen", "externalResources",
+    "codegen", "externalResources", "multiRepository", "exclusiveResources",
+    "highRisk", "baselineReview", "overlappingOwnership", "sharedSerializedAssets",
+    "integrationBranch", "resourceLeases",
 }
+STANDARD_RISKS = {"mediumRisk", "publicContract", "isolatedWriter", "wideValidation", "candidateReview", "repair", "independentReview"}
 DEFAULT_MODELS = {
     "orchestrator": "gpt-5.6-sol:high",
     "reviewer": "gpt-5.6-sol:high",
@@ -46,12 +54,30 @@ DEFAULT_WORKER_POLICY = {
 FINDING_ORIGINS = {"implementation", "plan-contract", "validation", "integration"}
 FINDING_PRIORITIES = {"P0", "P1", "P2", "P3"}
 ORCHESTRATOR_EFFORTS = {"high", "xhigh", "max", "ultra"}
-TASK_ROLES = {"orchestrator", "worker", "reviewer", "validator", "explorer", "summarizer", "shared-contract-owner"}
+TASK_ROLES = {"manager", "worker", "reviewer", "explorer"}
+LEGACY_TASK_ROLES = TASK_ROLES | {"orchestrator", "validator", "summarizer", "shared-contract-owner"}
 DEFAULT_CONTEXT_POLICY = {
     "maxPacketBytes": 16384,
     "maxWorkingSetItems": 12,
     "maxExpansions": 1,
 }
+DEFAULT_INVOCATION_LIMITS = {
+    "explorer": {"maxTurns": 6, "maxToolCalls": 12, "deadlineSeconds": 600},
+    "reviewer": {"maxTurns": 8, "maxToolCalls": 16, "deadlineSeconds": 1200},
+    "worker": {"maxTurns": 12, "maxToolCalls": 24, "deadlineSeconds": 2700},
+}
+MODE_RISK_CLASSES = {"low", "medium", "high"}
+MODE_ORDER = {"simple": 0, "standard": 1, "strict": 2}
+WORKSPACE_RELEASE_ACTIONS = {"current", "released-to-pool", "removed", "retained", "external"}
+HOST_CAPABILITY_FIELDS = {
+    "isolation", "parallelAgents", "cancellation", "structuredOutput",
+    "usageAccounting", "capacityProbe", "modelCatalog", "toolCallLimits", "approvals",
+}
+ROUTE_FAILURE_CATEGORIES = {
+    "quota_exhausted", "rate_limited", "model_unavailable",
+    "auth_or_billing", "context_limit", "transient_transport",
+}
+ROUTING_RECOVERY_STATUSES = {"pending-confirmation", "approved", "paused", "completed"}
 
 
 @dataclass
@@ -119,6 +145,19 @@ def as_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     return [value]
+
+
+def schema_version(value: Mapping[str, Any]) -> int | None:
+    version = value.get("schemaVersion")
+    return version if isinstance(version, int) and not isinstance(version, bool) else None
+
+
+def schema_supported(value: Mapping[str, Any]) -> bool:
+    return schema_version(value) in SUPPORTED_SCHEMA_VERSIONS
+
+
+def schema_error(kind: str, value: Mapping[str, Any]) -> str:
+    return f"unsupported schemaVersion: {value.get('schemaVersion')!r}; expected 2 or 3"
 
 
 def normalize_path(value: str) -> str:
@@ -196,20 +235,195 @@ def detect_mode(
     phase: Mapping[str, Any] | None = None,
 ) -> str:
     profile = profile or {}
-    requested = str((task or {}).get("mode") or profile.get("mode") or "auto").lower()
+    current = task or {}
+    resolved = current.get("resolvedMode")
+    if isinstance(resolved, str) and resolved.lower() in {"simple", "standard", "strict"}:
+        return resolved.lower()
+    requested = str(current.get("requestedMode") or current.get("mode") or profile.get("mode") or "auto").lower()
     if requested in {"simple", "standard", "strict"}:
         return requested
-    risks = set(as_list((task or {}).get("risks"))) | set(as_list(profile.get("risks")))
+    risks = set(as_list(current.get("risks"))) | set(as_list(profile.get("risks")))
     if phase or risks.intersection(STRICT_RISKS):
         return "strict"
-    return "standard" if task else "simple"
+    if risks.intersection(STANDARD_RISKS) or task:
+        return "standard"
+    return "simple"
+
+
+def resolve_auto_mode(
+    signals: Mapping[str, Any] | None = None,
+    *,
+    requested: str = "auto",
+    phase: bool = False,
+) -> dict[str, Any]:
+    """Resolve Auto with an explainable priority ladder, without inspecting telemetry."""
+    values = signals or {}
+    requested_mode = str(requested or "auto").lower()
+    if requested_mode not in MODES:
+        raise ValueError(f"unknown requested mode: {requested_mode}")
+    risk_class = str(values.get("riskClass") or "low").lower()
+    if risk_class not in MODE_RISK_CLASSES:
+        raise ValueError(f"unknown risk class: {risk_class}")
+    risks = {str(item) for item in as_list(values.get("risks"))}
+    strict_reasons = sorted(risks.intersection(STRICT_RISKS))
+    standard_reasons = sorted(risks.intersection(STANDARD_RISKS))
+    ownership = values.get("ownership") if isinstance(values.get("ownership"), Mapping) else {}
+    resources = values.get("resources") if isinstance(values.get("resources"), Mapping) else {}
+    workspace = values.get("workspace") if isinstance(values.get("workspace"), Mapping) else {}
+    if phase:
+        strict_reasons.append("phase")
+    if int(values.get("writerCount") or 0) > 1:
+        strict_reasons.append("parallelWriters")
+    if as_list(ownership.get("shared")):
+        strict_reasons.append("sharedContracts")
+    if as_list(resources.get("exclusive")):
+        strict_reasons.append("exclusiveResources")
+    if risk_class == "high":
+        strict_reasons.append("highRisk")
+    elif risk_class == "medium":
+        standard_reasons.append("mediumRisk")
+    if values.get("workerRequired"):
+        standard_reasons.append("workerRequired")
+    if int(values.get("ownershipDomainCount") or 1) > 1:
+        standard_reasons.append("multipleOwnershipDomains")
+    if workspace.get("backend") in {"code-worktree", "package-worktree", "unity-clone"}:
+        standard_reasons.append("isolatedWriter")
+    if values.get("reviewRequired") or values.get("state") in {"Repair", "Candidate", "Accepted"}:
+        standard_reasons.append("candidateReview")
+    if requested_mode != "auto":
+        resolved = requested_mode
+        reasons = ["explicit-mode-pin"]
+    elif strict_reasons:
+        resolved, reasons = "strict", sorted(set(strict_reasons))
+    elif standard_reasons:
+        resolved, reasons = "standard", sorted(set(standard_reasons))
+    else:
+        resolved, reasons = "simple", ["single-domain-low-risk"]
+    return {
+        "requestedMode": requested_mode,
+        "resolvedMode": resolved,
+        "riskClass": risk_class,
+        "reasons": reasons,
+        "capabilityDegradations": [str(item) for item in as_list(values.get("capabilityDegradations"))],
+    }
+
+
+def route_name(route: Mapping[str, Any]) -> str | None:
+    provider = route.get("providerId")
+    model = route.get("modelId")
+    if not isinstance(provider, str) or not provider.strip() or not isinstance(model, str) or not model.strip():
+        return None
+    variant = route.get("variantId")
+    return f"{provider}/{model}" + (f":{variant}" if isinstance(variant, str) and variant.strip() else "")
+
+
+def validate_model_routes(routes: Any) -> ValidationResult:
+    result = ValidationResult()
+    if not isinstance(routes, Mapping) or not routes:
+        result.error("profile.model_routes", "modelRoutes must be a non-empty host map")
+        return result
+    for host_id, roles in routes.items():
+        if not isinstance(host_id, str) or not host_id.strip() or not isinstance(roles, Mapping):
+            result.error("profile.model_routes", "each modelRoutes host requires a non-empty id and role map")
+            continue
+        unknown = sorted(set(roles) - {"worker", "reviewer", "explorer"})
+        if unknown:
+            result.error("profile.model_routes", f"unsupported {host_id} roles: {', '.join(unknown)}")
+        for role in ("worker", "reviewer", "explorer"):
+            choices = roles.get(role)
+            if not isinstance(choices, list) or not choices:
+                result.error("profile.model_routes", f"modelRoutes.{host_id}.{role} must be a non-empty ordered route array")
+                continue
+            names: list[str] = []
+            for index, choice in enumerate(choices):
+                name = route_name(choice) if isinstance(choice, Mapping) else None
+                if not name:
+                    result.error("profile.model_route", f"modelRoutes.{host_id}.{role}[{index}] requires providerId and modelId")
+                elif name in names:
+                    result.error("profile.model_route", f"duplicate route in modelRoutes.{host_id}.{role}: {name}")
+                else:
+                    names.append(name)
+    return result
+
+
+def validate_host_capabilities(value: Mapping[str, Any]) -> ValidationResult:
+    result = ValidationResult()
+    if not isinstance(value.get("hostId"), str) or not value.get("hostId"):
+        result.error("host.id", "host capabilities require hostId")
+    capabilities = value.get("capabilities")
+    if not isinstance(capabilities, Mapping):
+        result.error("host.capabilities", "capabilities must be an object")
+        return result
+    missing = HOST_CAPABILITY_FIELDS - set(capabilities)
+    unknown = set(capabilities) - HOST_CAPABILITY_FIELDS
+    if missing:
+        result.error("host.capabilities", "missing host capabilities: " + ", ".join(sorted(missing)))
+    if unknown:
+        result.error("host.capabilities", "unknown host capabilities: " + ", ".join(sorted(unknown)))
+    for name in HOST_CAPABILITY_FIELDS.intersection(capabilities):
+        if not isinstance(capabilities[name], bool):
+            result.error("host.capability", f"capabilities.{name} must be boolean")
+    return result
+
+
+def host_degradations(value: Mapping[str, Any]) -> list[str]:
+    """Translate missing host mechanics into topology changes, never weaker guarantees."""
+    capabilities = value.get("capabilities") if isinstance(value.get("capabilities"), Mapping) else {}
+    degradations: list[str] = []
+    if not capabilities.get("isolation") or not capabilities.get("parallelAgents"):
+        degradations.append("serialize-writers")
+    if not capabilities.get("cancellation"):
+        degradations.append("ignore-late-results")
+    if not capabilities.get("structuredOutput"):
+        degradations.append("one-local-schema-correction")
+    if not capabilities.get("usageAccounting"):
+        degradations.append("count-time-budgets")
+    if not capabilities.get("capacityProbe"):
+        degradations.append("reactive-capacity-recovery")
+    if not capabilities.get("approvals"):
+        degradations.append("user-confirmation-required")
+    return degradations
+
+
+def _validate_v3_profile(profile: Mapping[str, Any]) -> ValidationResult:
+    result = ValidationResult()
+    if profile.get("distributionVersion") != DISTRIBUTION_VERSION:
+        result.error("profile.distribution", f"distributionVersion must be {DISTRIBUTION_VERSION}")
+    mode = str(profile.get("mode", "auto")).lower()
+    if mode not in MODES:
+        result.error("profile.mode", f"mode must be one of {sorted(MODES)}")
+    result.extend(validate_model_routes(profile.get("modelRoutes")))
+    context_policy = profile.get("contextPolicy")
+    if not isinstance(context_policy, Mapping):
+        result.error("profile.context_policy", "contextPolicy is required")
+    else:
+        for name, expected in DEFAULT_CONTEXT_POLICY.items():
+            if context_policy.get(name) != expected:
+                result.error("profile.context_policy", f"contextPolicy.{name} must be {expected}")
+    orchestration = profile.get("orchestration")
+    if not isinstance(orchestration, Mapping):
+        result.error("profile.orchestration", "orchestration is required")
+    else:
+        expected = {"maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1}
+        for name, value in expected.items():
+            if orchestration.get(name) != value:
+                result.error("profile.orchestration", f"orchestration.{name} must be {value}")
+    pool = profile.get("workspacePool")
+    if not isinstance(pool, Mapping):
+        result.error("profile.workspace_pool", "workspacePool is required")
+    else:
+        if pool.get("enabled") is not True or pool.get("maxIdle") != 2 or pool.get("maxIdleGiB") != 10 or pool.get("eviction") != "lru":
+            result.error("profile.workspace_pool", "workspacePool must enable lru with maxIdle=2 and maxIdleGiB=10")
+    return result
 
 
 def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
-    if profile.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("profile.schema", f"unsupported schemaVersion: {profile.get('schemaVersion')!r}; expected 2")
+    if not schema_supported(profile):
+        result.error("profile.schema", schema_error("profile", profile))
         return result
+    if schema_version(profile) == SCHEMA_VERSION:
+        return _validate_v3_profile(profile)
     if profile.get("distributionVersion") != "2.0.0":
         result.error("profile.distribution", "distributionVersion must be 2.0.0")
     mode = str(profile.get("mode", "auto")).lower()
@@ -294,6 +508,104 @@ def model_pin_violation(role: str, model: str) -> str | None:
     return None
 
 
+def _route_ref_valid(value: Any) -> bool:
+    return isinstance(value, Mapping) and isinstance(value.get("hostId"), str) and bool(value.get("hostId")) and bool(route_name(value))
+
+
+def current_recovery_route(task: Mapping[str, Any], role: str) -> Mapping[str, Any] | None:
+    recovery = task.get("routingRecovery")
+    if not isinstance(recovery, Mapping) or recovery.get("status") not in {"approved", "paused", "completed"}:
+        return None
+    routes = (recovery.get("roleRoutes") or {}).get(role)
+    index = (recovery.get("currentIndex") or {}).get(role, 0)
+    if not isinstance(routes, list) or not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= len(routes):
+        return None
+    route = routes[index]
+    return route if _route_ref_valid(route) else None
+
+
+def validate_routing_recovery(task: Mapping[str, Any]) -> ValidationResult:
+    result = ValidationResult()
+    recovery = task.get("routingRecovery")
+    if recovery is None:
+        return result
+    if not isinstance(recovery, Mapping):
+        result.error("routing_recovery.shape", "routingRecovery must be an object or null")
+        return result
+    allowed_fields = {
+        "status", "trigger", "proposalDigest", "selectedOptionId", "approvedTaskRevision",
+        "scope", "roleRoutes", "currentIndex", "attempts", "resumeAt", "exhaustedRole",
+    }
+    unknown = sorted(set(recovery) - allowed_fields)
+    if unknown:
+        result.error("routing_recovery.compact", "routingRecovery contains unsupported fields: " + ", ".join(unknown))
+    status = recovery.get("status")
+    if status not in ROUTING_RECOVERY_STATUSES:
+        result.error("routing_recovery.status", "routingRecovery status is invalid")
+    if recovery.get("scope") != "task":
+        result.error("routing_recovery.scope", "routingRecovery.scope must be task")
+    trigger = recovery.get("trigger")
+    if not isinstance(trigger, Mapping):
+        result.error("routing_recovery.trigger", "routingRecovery requires a RouteFailure trigger")
+    else:
+        if trigger.get("category") not in ROUTE_FAILURE_CATEGORIES:
+            result.error("routing_recovery.trigger", "RouteFailure category is invalid")
+        if not isinstance(trigger.get("invocationId"), str) or not trigger.get("invocationId"):
+            result.error("routing_recovery.trigger", "RouteFailure requires invocationId")
+        if not _route_ref_valid(trigger.get("route")):
+            result.error("routing_recovery.trigger", "RouteFailure requires a valid RouteRef")
+        retry_after = trigger.get("retryAfter")
+        if retry_after is not None and (not isinstance(retry_after, (int, float)) or isinstance(retry_after, bool) or retry_after < 0):
+            result.error("routing_recovery.trigger", "RouteFailure.retryAfter must be non-negative")
+    if not isinstance(recovery.get("proposalDigest"), str) or not recovery.get("proposalDigest"):
+        result.error("routing_recovery.digest", "routingRecovery requires proposalDigest")
+    if status in {"approved", "paused", "completed"}:
+        if not isinstance(recovery.get("selectedOptionId"), str) or not recovery.get("selectedOptionId"):
+            result.error("routing_recovery.option", "approved recovery requires selectedOptionId")
+        approved_revision = recovery.get("approvedTaskRevision")
+        if not isinstance(approved_revision, int) or isinstance(approved_revision, bool) or approved_revision < 0:
+            result.error("routing_recovery.revision", "approvedTaskRevision must be a non-negative integer")
+        elif isinstance(task.get("revision"), int) and approved_revision >= task["revision"]:
+            result.error("routing_recovery.revision", "approvedTaskRevision must precede the current Task revision")
+    role_routes = recovery.get("roleRoutes")
+    if role_routes:
+        if not isinstance(role_routes, Mapping) or set(role_routes) != {"worker", "reviewer", "explorer"}:
+            result.error("routing_recovery.routes", "roleRoutes must contain worker, reviewer, and explorer")
+        else:
+            indexes = recovery.get("currentIndex")
+            if not isinstance(indexes, Mapping):
+                result.error("routing_recovery.cursor", "route recovery requires currentIndex")
+                indexes = {}
+            for role in ("worker", "reviewer", "explorer"):
+                routes = role_routes.get(role)
+                if not isinstance(routes, list) or not routes:
+                    result.error("routing_recovery.routes", f"routingRecovery requires at least one {role} route")
+                    continue
+                names: list[str] = []
+                for route in routes:
+                    if not _route_ref_valid(route):
+                        result.error("routing_recovery.route", f"routingRecovery {role} contains an invalid RouteRef")
+                        continue
+                    name = f"{route['hostId']}::{route_name(route)}"
+                    if name in names:
+                        result.error("routing_recovery.route", f"routingRecovery {role} contains duplicate routes")
+                    names.append(name)
+                index = indexes.get(role)
+                if not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= len(routes):
+                    result.error("routing_recovery.cursor", f"currentIndex.{role} is outside its route chain")
+    elif status == "approved":
+        result.error("routing_recovery.routes", "approved routingRecovery requires roleRoutes")
+    attempts = recovery.get("attempts")
+    if not isinstance(attempts, list) or len(attempts) > 12:
+        result.error("routing_recovery.attempts", "routingRecovery.attempts must contain at most 12 entries")
+    else:
+        for attempt in attempts:
+            if not isinstance(attempt, Mapping) or attempt.get("role") not in {"worker", "reviewer", "explorer"} or not _route_ref_valid(attempt.get("route")) or attempt.get("resultCode") not in ROUTE_FAILURE_CATEGORIES:
+                result.error("routing_recovery.attempt", "routingRecovery attempt is invalid")
+                break
+    return result
+
+
 def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None = None) -> ValidationResult:
     result = ValidationResult()
     models = task.get("models") or {}
@@ -304,10 +616,39 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
     if not assigned:
         result.error("model.assigned", "models.assigned is required before dispatch")
     role = str(task.get("role", "worker"))
-    if role not in TASK_ROLES:
+    version = schema_version(task)
+    allowed_roles = TASK_ROLES if version == SCHEMA_VERSION else LEGACY_TASK_ROLES
+    if role not in allowed_roles:
         result.error("task.role", f"unsupported task role: {role}")
-    task_id = str(task.get("taskId", ""))
     profile = profile or {}
+    if version == SCHEMA_VERSION:
+        if role in {"manager", "orchestrator"}:
+            return result
+        host_id = models.get("hostId")
+        if not isinstance(host_id, str) or not host_id.strip():
+            result.error("model.host", "v3 models.hostId is required")
+            return result
+        roles = (profile.get("modelRoutes") or {}).get(host_id, {})
+        choices = roles.get(role) if isinstance(roles, Mapping) else None
+        allowed = [route_name(item) for item in choices or [] if isinstance(item, Mapping)]
+        allowed = [item for item in allowed if item]
+        recovery_route = current_recovery_route(task, role)
+        recovery_override = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == assigned)
+        if assigned not in allowed and not recovery_override:
+            result.error("model.assignment", f"models.assigned is not an approved {host_id}/{role} route")
+        if requested and requested != assigned and not recovery_override:
+            result.error("model.pin", "models.requested must take priority over assignment")
+        if recovery_route and not recovery_override:
+            result.error("model.recovery_assignment", "models assignment must match the current approved recovery route")
+        if recovery_override and not models.get("fallbackReason"):
+            result.error("model.fallback_reason", "approved recovery assignment requires models.fallbackReason")
+        if actual and actual != assigned:
+            if actual not in allowed[1:]:
+                result.error("model.actual", "models.actual differs from assigned and is not an explicit fallback")
+            if not models.get("fallbackReason"):
+                result.error("model.fallback_reason", "fallback requires models.fallbackReason")
+        return result
+    task_id = str(task.get("taskId", ""))
     task_pins = (profile.get("taskModels") or {}).get(task_id, {})
     task_pin = task_pins.get(role) if isinstance(task_pins, dict) else None
     global_pin = (profile.get("requestedModels") or {}).get(role)
@@ -367,11 +708,156 @@ def task_worktree(task: Mapping[str, Any]) -> str | None:
     return str(value) if value else None
 
 
+def validate_mode_decision(task: Mapping[str, Any], phase: Mapping[str, Any] | None = None) -> ValidationResult:
+    result = ValidationResult()
+    requested = task.get("requestedMode")
+    resolved = task.get("resolvedMode")
+    floor = task.get("modeFloor")
+    risk_class = task.get("riskClass")
+    reasons = task.get("modeReasons")
+    degradations = task.get("capabilityDegradations")
+    if requested not in MODES:
+        result.error("mode.requested", f"requestedMode must be one of {sorted(MODES)}")
+    if resolved not in {"simple", "standard", "strict"}:
+        result.error("mode.resolved", "resolvedMode must be simple, standard, or strict")
+    if floor not in {"simple", "standard", "strict"}:
+        result.error("mode.floor", "modeFloor must be simple, standard, or strict")
+    if risk_class not in MODE_RISK_CLASSES:
+        result.error("mode.risk", f"riskClass must be one of {sorted(MODE_RISK_CLASSES)}")
+    if not isinstance(reasons, list) or not reasons or any(not isinstance(item, str) or not item.strip() for item in reasons):
+        result.error("mode.reasons", "modeReasons must be a non-empty string array")
+    if not isinstance(degradations, list) or any(not isinstance(item, str) or not item.strip() for item in degradations):
+        result.error("mode.degradations", "capabilityDegradations must be a string array")
+    if requested in MODES and risk_class in MODE_RISK_CLASSES:
+        expected = resolve_auto_mode(task, requested=str(requested), phase=bool(phase))
+        if resolved in MODE_ORDER:
+            expected_mode = expected["resolvedMode"]
+            if requested == "auto" and MODE_ORDER[resolved] < MODE_ORDER[expected_mode]:
+                result.error("mode.resolution", f"resolvedMode cannot be below {expected_mode} for the declared signals")
+            if requested != "auto" and resolved != expected_mode:
+                result.error("mode.resolution", f"resolvedMode must equal explicit pin {expected_mode}")
+            if requested != "auto":
+                natural = resolve_auto_mode(task, requested="auto", phase=bool(phase))["resolvedMode"]
+                if MODE_ORDER[resolved] < MODE_ORDER[natural]:
+                    result.error("mode.pin_unsafe", f"explicit {resolved} pin conflicts with required {natural} guarantees; ask the user")
+            if floor in MODE_ORDER and MODE_ORDER[resolved] < MODE_ORDER[floor]:
+                result.error("mode.downgrade", "resolvedMode cannot fall below modeFloor after mutation")
+    return result
+
+
+def validate_workspace_v3(task: Mapping[str, Any], workspace: Mapping[str, Any], state: str) -> ValidationResult:
+    result = ValidationResult()
+    backend = workspace.get("backend")
+    isolated = backend in {"code-worktree", "package-worktree", "unity-clone"}
+    if workspace.get("managedBy") not in {"lemmings", "user", "external"}:
+        result.error("workspace.manager", "workspace.managedBy must be lemmings, user, or external")
+    if workspace.get("lifetime") not in {"task", "phase", "project", "external"}:
+        result.error("workspace.lifetime", "workspace.lifetime must be task, phase, project, or external")
+    if isolated and state not in {"Blocked", "Cancelled"} and not workspace.get("workspaceId"):
+        result.error("workspace.id", f"{backend} requires workspaceId")
+    if workspace.get("path"):
+        result.error("workspace.path", "v3 Task stores workspaceId, not an absolute workspace path")
+    close = task.get("close") if isinstance(task.get("close"), Mapping) else {}
+    if state == "Integrated":
+        disposition = close.get("workspaceDisposition")
+        if not isinstance(disposition, Mapping):
+            result.error("workspace.disposition", "Integrated v3 Task requires close.workspaceDisposition")
+        else:
+            action = disposition.get("releaseAction")
+            if action not in WORKSPACE_RELEASE_ACTIONS:
+                result.error("workspace.disposition", f"releaseAction must be one of {sorted(WORKSPACE_RELEASE_ACTIONS)}")
+            if not disposition.get("releaseReason"):
+                result.error("workspace.disposition", "workspaceDisposition.releaseReason is required")
+    return result
+
+
+def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
+    result = ValidationResult()
+    if schema_version(invocation) != SCHEMA_VERSION:
+        result.error("invocation.schema", "AgentInvocation requires schemaVersion 3")
+        return result
+    for field_name in ("runId", "taskId", "invocationId", "role", "baseSha", "profileDigest", "contextDigest", "objective", "outputSchemaVersion"):
+        if not invocation.get(field_name):
+            result.error("invocation.missing", f"missing invocation field: {field_name}")
+    if invocation.get("role") not in {"worker", "reviewer", "explorer"}:
+        result.error("invocation.role", "invocation role must be worker, reviewer, or explorer")
+    for field_name in ("taskRevision", "attempt"):
+        value = invocation.get(field_name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            result.error("invocation.counter", f"{field_name} must be a non-negative integer")
+    for field_name in ("acceptanceCriteria", "ownedPaths", "forbiddenPaths", "contextRefs", "validationCommands"):
+        if not isinstance(invocation.get(field_name), list):
+            result.error("invocation.shape", f"{field_name} must be an array")
+    context_refs = invocation.get("contextRefs")
+    if isinstance(context_refs, list):
+        if len(context_refs) > DEFAULT_CONTEXT_POLICY["maxWorkingSetItems"]:
+            result.error("context.entries", "AgentInvocation exceeds 12 context references")
+        for index, item in enumerate(context_refs):
+            if not isinstance(item, Mapping) or not item.get("ref") or not item.get("purpose") or not item.get("contentHash"):
+                result.error("context.reference", f"contextRefs[{index}] requires ref, purpose, and contentHash")
+    encoded = json.dumps(invocation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > DEFAULT_CONTEXT_POLICY["maxPacketBytes"]:
+        result.error("context.bytes", "AgentInvocation exceeds 16 KiB")
+    limits = invocation.get("limits")
+    role_limits = DEFAULT_INVOCATION_LIMITS.get(str(invocation.get("role")))
+    if not isinstance(limits, Mapping) or not role_limits:
+        result.error("invocation.limits", "role limits are required")
+    else:
+        for name, maximum in role_limits.items():
+            value = limits.get(name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1 or value > maximum:
+                result.error("invocation.limits", f"limits.{name} must be between 1 and {maximum}")
+    return result
+
+
+def validate_agent_result(
+    result_value: Mapping[str, Any],
+    invocation: Mapping[str, Any],
+    task: Mapping[str, Any],
+    *,
+    current_profile_digest: str | None = None,
+    current_context_digest: str | None = None,
+) -> ValidationResult:
+    result = ValidationResult()
+    if schema_version(result_value) != SCHEMA_VERSION:
+        result.error("result.schema", "AgentResult requires schemaVersion 3")
+        return result
+    if result_value.get("invocationId") != invocation.get("invocationId"):
+        result.error("result.invocation", "AgentResult invocationId is stale or mismatched")
+    if result_value.get("attempt") != invocation.get("attempt"):
+        result.error("result.attempt", "AgentResult attempt is stale or mismatched")
+    if invocation.get("taskRevision") != task.get("revision"):
+        result.error("result.revision", "Task revision changed after dispatch")
+    if invocation.get("baseSha") != task.get("baseSha"):
+        result.error("result.base", "Task base changed after dispatch")
+    if current_profile_digest is not None and invocation.get("profileDigest") != current_profile_digest:
+        result.error("result.profile", "profile changed after dispatch")
+    if current_context_digest is not None and invocation.get("contextDigest") != current_context_digest:
+        result.error("result.context", "context changed after dispatch")
+    if result_value.get("status") not in {"succeeded", "failed", "blocked", "cancelled"}:
+        result.error("result.status", "AgentResult status is invalid")
+    for field_name in ("changedPaths", "acceptanceEvidence", "validationEvidence", "findings", "blockers", "remainingRisks"):
+        if not isinstance(result_value.get(field_name), list):
+            result.error("result.shape", f"{field_name} must be an array")
+    if result_value.get("status") == "succeeded" and invocation.get("role") == "worker" and not result_value.get("candidateHead"):
+        result.error("result.candidate", "successful worker result requires candidateHead")
+    return result
+
+
 def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = None) -> ValidationResult:
     result = ValidationResult()
-    if task.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("task.schema", f"unsupported schemaVersion: {task.get('schemaVersion')!r}; expected 2")
+    if not schema_supported(task):
+        result.error("task.schema", schema_error("task", task))
         return result
+    version = schema_version(task)
+    if version == SCHEMA_VERSION:
+        revision = task.get("revision")
+        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+            result.error("task.revision", "v3 Task requires non-negative integer revision")
+        result.extend(validate_mode_decision(task))
+        domains = task.get("ownershipDomainCount")
+        if not isinstance(domains, int) or isinstance(domains, bool) or domains < 1:
+            result.error("ownership.domains", "v3 Task requires positive ownershipDomainCount")
     for name in ("taskId", "goal", "acceptance", "dependencies", "risks", "state", "ownership", "models", "workspace", "workingSet", "validation", "execution", "reviewHistory", "close"):
         if name not in task or task.get(name) is None:
             result.error("task.missing", f"missing task field: {name}")
@@ -395,7 +881,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     state = str(task.get("state", ""))
     if state not in TASK_STATES:
         result.error("state.unknown", f"unknown task state: {state}")
-    if state not in {"Planned", "Cancelled", "Superseded"}:
+    if state not in {"Draft", "Planned", "Cancelled", "Superseded"}:
         if not isinstance(task.get("goal"), str) or not str(task.get("goal")).strip():
             result.error("task.goal", f"{state} requires a non-empty goal")
         acceptance = task.get("acceptance")
@@ -407,6 +893,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     cohort = task.get("telemetryCohort")
     if cohort is not None and (not isinstance(cohort, str) or not cohort.strip()):
         result.error("telemetry.cohort", "telemetryCohort must be null or a non-empty string")
+    result.extend(validate_routing_recovery(task))
     result.extend(validate_models(task, profile))
     result.extend(validate_debt(task))
     execution = task.get("execution") or {}
@@ -480,7 +967,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("workspace.approval", "workspace.approval must be not-required, pending, approved, or declined")
     if not workspace.get("reason"):
         result.error("workspace.reason", "workspace.reason is required")
-    if isolated_backend and not workspace.get("path") and not unprovisioned_workspace:
+    if version != SCHEMA_VERSION and isolated_backend and not workspace.get("path") and not unprovisioned_workspace:
         result.error("workspace.path", f"{backend} requires workspace.path")
     if isolated_backend and estimated is None:
         result.error("workspace.estimate", f"{backend} requires workspace.estimatedGiB")
@@ -488,6 +975,8 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("workspace.declined", "declined workspace must fall back to safe current work or set the Task to Blocked")
     if "parallelWriters" in as_list(task.get("risks")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
         result.error("workspace.parallel", "parallel writers cannot share the current checkout")
+    if version == SCHEMA_VERSION:
+        result.extend(validate_workspace_v3(task, workspace, state))
     validation = task.get("validation")
     if not isinstance(validation, Mapping):
         result.error("task.validation", "validation must be an object")
@@ -525,22 +1014,28 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
             result.error("model.actual_required", f"{state} requires models.actual")
         if not execution.get("handoff"):
             result.error("execution.handoff", f"{state} requires embedded execution.handoff")
-    if state in {"Accepted", "Integrated"} and not task.get("reviewRef"):
+    review_required = bool(task.get("reviewRequired")) if version == SCHEMA_VERSION else True
+    if detect_mode(profile, task) == "strict":
+        review_required = True
+    if state in {"Accepted", "Integrated"} and review_required and not task.get("reviewRef"):
         result.error("review.reference", f"{state} requires reviewRef")
     if state == "Integrated":
-        tracked_quality = isinstance(execution, Mapping) and "attempts" in execution or "reviewHistory" in task or "qualitySummary" in task
+        tracked_quality = isinstance(execution, Mapping) and bool(execution.get("attempts"))
+        if version == LEGACY_SCHEMA_VERSION:
+            legacy_tracked = isinstance(execution, Mapping) and "attempts" in execution or "reviewHistory" in task or "qualitySummary" in task
+            if legacy_tracked:
+                if not isinstance(summary, Mapping) or summary.get("complete") is not True:
+                    result.error("quality.incomplete", "Integrated tracked task requires complete qualitySummary")
+            else:
+                result.error("quality.required", "Integrated task requires execution attempts, reviewHistory, and qualitySummary")
         if tracked_quality:
             commits = task.get("commits") if isinstance(task.get("commits"), Mapping) else {}
             expected_heads = [commits.get("candidate"), *as_list(commits.get("fix"))]
             actual_heads = [item.get("headSha") for item in attempts or [] if isinstance(item, Mapping)]
             if actual_heads != expected_heads:
                 result.error("quality.attempt_heads", "Integrated execution attempts must match the candidate/fix commit sequence")
-            if any(not item.get("reviewRef") or not item.get("reviewStatus") for item in attempts or [] if isinstance(item, Mapping)):
+            if review_required and any(not item.get("reviewRef") or not item.get("reviewStatus") for item in attempts or [] if isinstance(item, Mapping)):
                 result.error("quality.attempt_review", "Integrated execution attempts require reviewRef and reviewStatus")
-            if not isinstance(summary, Mapping) or summary.get("complete") is not True:
-                result.error("quality.incomplete", "Integrated tracked task requires complete qualitySummary")
-        else:
-            result.error("quality.required", "Integrated task requires execution attempts, reviewHistory, and qualitySummary")
         close = task.get("close") or {}
         if not close.get("mergeCommit") or close.get("integrationValidationPassed") is not True:
             result.error("integration.evidence", "Integrated requires mergeCommit and integrationValidationPassed")
@@ -549,9 +1044,20 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
 
 def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
-    if phase.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("phase.schema", f"unsupported schemaVersion: {phase.get('schemaVersion')!r}; expected 2")
+    if not schema_supported(phase):
+        result.error("phase.schema", schema_error("phase", phase))
         return result
+    if schema_version(phase) == SCHEMA_VERSION:
+        revision = phase.get("revision")
+        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+            result.error("phase.revision", "v3 Phase requires non-negative integer revision")
+        workspaces = (phase.get("close") or {}).get("workspaceDispositions") if isinstance(phase.get("close"), Mapping) else None
+        if not isinstance(workspaces, list):
+            result.error("phase.workspaces", "v3 Phase close requires workspaceDispositions array")
+        else:
+            for index, disposition in enumerate(workspaces):
+                if not isinstance(disposition, Mapping) or disposition.get("releaseAction") not in WORKSPACE_RELEASE_ACTIONS or not disposition.get("releaseReason"):
+                    result.error("phase.workspace", f"workspaceDispositions[{index}] requires releaseAction and releaseReason")
     for name in ("phaseId", "baselineSha", "integrationBranch"):
         if not phase.get(name):
             result.error("phase.missing", f"missing phase field: {name}")
@@ -565,6 +1071,10 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
     close = phase.get("close")
     if not isinstance(close, Mapping) or not isinstance(close.get("mergeCommits"), list) or not isinstance(close.get("phaseValidation"), list):
         result.error("phase.close", "close requires mergeCommits and phaseValidation arrays")
+    elif schema_version(phase) == SCHEMA_VERSION and (close.get("mergeCommits") or close.get("phaseValidation")):
+        active_leases = [lease for lease in as_list(phase.get("leases")) if isinstance(lease, Mapping) and lease.get("active", True)]
+        if active_leases:
+            result.error("phase.lease_close", "Phase close requires every lease to be released")
     if phase.get("contractsFrozen") is not True:
         result.error("phase.contracts", "Strict phase requires frozen contracts")
     if not phase.get("baselineReviewRef"):
@@ -608,17 +1118,32 @@ def validate_review(
     review: Mapping[str, Any],
     task: Mapping[str, Any] | None = None,
     phase: Mapping[str, Any] | None = None,
+    profile: Mapping[str, Any] | None = None,
 ) -> ValidationResult:
     result = ValidationResult()
-    if review.get("schemaVersion") != SCHEMA_VERSION:
-        result.error("review.schema", f"unsupported schemaVersion: {review.get('schemaVersion')!r}; expected 2")
+    if not schema_supported(review):
+        result.error("review.schema", schema_error("review", review))
         return result
+    if schema_version(review) == SCHEMA_VERSION:
+        revision = review.get("revision")
+        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+            result.error("review.revision", "v3 Review requires non-negative integer revision")
     if not review.get("reviewId"):
         result.error("review.id", "reviewId is required")
     if review.get("status") not in REVIEW_STATES:
         result.error("review.status", f"review status must be one of {sorted(REVIEW_STATES)}")
-    if review.get("reviewerModel") != DEFAULT_MODELS["reviewer"]:
+    if schema_version(review) == LEGACY_SCHEMA_VERSION and review.get("reviewerModel") != DEFAULT_MODELS["reviewer"]:
         result.error("review.model", f"reviewer must use {DEFAULT_MODELS['reviewer']}")
+    if schema_version(review) == SCHEMA_VERSION and (not review.get("reviewerModel") or not review.get("hostId")):
+        result.error("review.model", "v3 Review requires hostId and actual reviewerModel")
+    elif schema_version(review) == SCHEMA_VERSION and profile:
+        host_id = review.get("hostId")
+        choices = (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or [])
+        allowed = [route_name(item) for item in choices if isinstance(item, Mapping)]
+        recovery_route = current_recovery_route(task or {}, "reviewer")
+        recovery_allowed = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == review.get("reviewerModel"))
+        if review.get("reviewerModel") not in allowed and not recovery_allowed:
+            result.error("review.model", "reviewerModel is not an approved host reviewer route")
     if not isinstance(review.get("findings"), list):
         result.error("review.findings", "review findings must be an array")
     else:
@@ -690,8 +1215,11 @@ def validate_repository_commits(repo: Path, task: Mapping[str, Any], phase: Mapp
             result.error("commit.sequence", "each fix commit must descend from the preceding candidate/fix commit")
     head = candidate_head(task)
     baseline = task.get("baseSha") or (phase or {}).get("baselineSha")
-    if phase and task.get("baseSha") and task.get("baseSha") != phase.get("baselineSha"):
+    if phase and schema_version(task) == LEGACY_SCHEMA_VERSION and task.get("baseSha") and task.get("baseSha") != phase.get("baselineSha"):
         result.error("commit.phase_base", "Strict task baseSha must equal phase baselineSha")
+    if phase and schema_version(task) == SCHEMA_VERSION and task.get("baseSha") and phase.get("baselineSha"):
+        if git(repo, "merge-base", "--is-ancestor", str(phase.get("baselineSha")), str(task.get("baseSha"))).returncode:
+            result.error("commit.phase_base", "v3 task baseSha must contain the Phase baseline")
     if baseline and head:
         baseline_process = git(repo, "rev-parse", "--verify", f"{baseline}^{{commit}}")
         if baseline_process.returncode:
@@ -794,6 +1322,82 @@ def validate_repository_ownership(repo: Path, task: Mapping[str, Any]) -> Valida
     return result
 
 
+def dispatchable_tasks(tasks: Iterable[Mapping[str, Any]], phase: Mapping[str, Any]) -> dict[str, Any]:
+    """Return eligibility; the manager still chooses the batch."""
+    task_map = {str(task.get("taskId") or ""): task for task in tasks}
+    dag = {
+        str(node.get("taskId")): [str(value) for value in node.get("dependencies", [])]
+        for node in as_list(phase.get("taskDag")) if isinstance(node, Mapping) and node.get("taskId")
+    }
+    eligible: list[str] = []
+    blocked: dict[str, list[str]] = {}
+    for task_id, task in task_map.items():
+        reasons: list[str] = []
+        if task.get("state") != "Ready":
+            reasons.append(f"state:{task.get('state')}")
+        for dependency in dag.get(task_id, as_list(task.get("dependencies"))):
+            current = task_map.get(str(dependency))
+            if not current or current.get("state") != "Integrated":
+                reasons.append(f"dependency:{dependency}")
+        if reasons:
+            blocked[task_id] = reasons
+        else:
+            eligible.append(task_id)
+    return {"eligible": sorted(eligible), "blocked": blocked}
+
+
+def validate_batch(
+    repo: Path,
+    tasks: Iterable[Mapping[str, Any]],
+    phase: Mapping[str, Any],
+    selected: Iterable[str],
+    profile: Mapping[str, Any] | None = None,
+) -> ValidationResult:
+    result = ValidationResult()
+    task_map = {str(task.get("taskId") or ""): task for task in tasks}
+    ids = [str(item) for item in selected]
+    if not ids or len(ids) > 2:
+        result.error("batch.size", "a writer batch must contain one or two tasks")
+        return result
+    eligibility = dispatchable_tasks(task_map.values(), phase)
+    for task_id in ids:
+        if task_id not in task_map:
+            result.error("batch.task", f"unknown batch task: {task_id}")
+        elif task_id not in eligibility["eligible"]:
+            reasons = ", ".join(eligibility["blocked"].get(task_id, ["not eligible"]))
+            result.error("batch.ineligible", f"task {task_id} is not dispatchable: {reasons}")
+    chosen = [task_map[item] for item in ids if item in task_map]
+    if len(chosen) > 1 and not all(task.get("parallelReason") in {"independent_paths", "independent_validation", "critical_path_latency"} for task in chosen):
+        result.error("batch.reason", "parallel tasks require a declared parallelReason")
+    workspaces: set[str] = set()
+    current: list[str] = []
+    for task in chosen:
+        result.extend(validate_task(task, profile))
+        workspace = task.get("workspace") if isinstance(task.get("workspace"), Mapping) else {}
+        backend = workspace.get("backend", "current")
+        identity = workspace.get("workspaceId") or workspace.get("path")
+        if backend == "current":
+            current.append(str(task.get("taskId")))
+        if identity:
+            normalized = normalize_path(str(identity))
+            if normalized in workspaces:
+                result.error("worktree.duplicate", f"duplicate workspace: {identity}")
+            workspaces.add(normalized)
+    if len(current) > 1:
+        result.error("workspace.parallel", f"parallel writers cannot share current checkout: {', '.join(current)}")
+    for index, task in enumerate(chosen):
+        left = as_list((task.get("ownership") or {}).get("owned"))
+        left_resources = set(as_list((task.get("resources") or {}).get("exclusive")))
+        for other in chosen[index + 1:]:
+            right = as_list((other.get("ownership") or {}).get("owned"))
+            if any(paths_overlap(str(a), str(b)) for a in left for b in right):
+                result.error("ownership.overlap", f"owned paths overlap: {task.get('taskId')} and {other.get('taskId')}")
+            overlap = left_resources.intersection(as_list((other.get("resources") or {}).get("exclusive")))
+            if overlap:
+                result.error("lease.conflict", f"exclusive resources overlap: {', '.join(sorted(map(str, overlap)))}")
+    return result
+
+
 def validate_wave(
     repo: Path,
     tasks: Iterable[Mapping[str, Any]],
@@ -834,14 +1438,16 @@ def validate_wave(
             result.error("phase.task_missing", f"Strict task {task_id} is absent from phase.taskDag")
         elif [str(value) for value in as_list(task.get("dependencies"))] != dag[task_id]:
             result.error("phase.dependency_drift", f"task {task_id} dependencies differ from phase.taskDag")
-        worktree = str(task_worktree(task) or "")
+        workspace = task.get("workspace") if isinstance(task.get("workspace"), Mapping) else {}
+        worktree = str((workspace.get("workspaceId") if schema_version(task) == SCHEMA_VERSION else task_worktree(task)) or "")
         dispatchable = task.get("state") in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}
         role = str(task.get("role") or "worker")
         backend = str((task.get("workspace") or {}).get("backend") or "current")
         if task.get("state") == "Active" and role not in {"reviewer", "explorer", "validator", "summarizer"} and backend == "current":
             active_current_writers.append(task_id)
         normalized = normalize_path(worktree)
-        if worktree:
+        compare_now = schema_version(task) == LEGACY_SCHEMA_VERSION or task.get("state") == "Active"
+        if worktree and compare_now:
             if normalized in worktrees:
                 result.error("worktree.duplicate", f"duplicate worktree: {worktree}")
             worktrees.add(normalized)
@@ -849,9 +1455,10 @@ def validate_wave(
             result.error("lease.required", f"external-resource task {task.get('taskId')} requires an active lease")
     if len(active_current_writers) > 1:
         result.error("workspace.parallel", f"active writers cannot share the current checkout: {', '.join(active_current_writers)}")
-    for index, task in enumerate(tasks):
+    conflict_tasks = tasks if any(schema_version(task) == LEGACY_SCHEMA_VERSION for task in tasks) else [task for task in tasks if task.get("state") == "Active"]
+    for index, task in enumerate(conflict_tasks):
         left = as_list((task.get("ownership") or {}).get("owned"))
-        for other in tasks[index + 1:]:
+        for other in conflict_tasks[index + 1:]:
             right = as_list((other.get("ownership") or {}).get("owned"))
             if any(paths_overlap(str(a), str(b)) for a in left for b in right):
                 result.error("ownership.overlap", f"owned paths overlap: {task.get('taskId')} and {other.get('taskId')}")
@@ -891,7 +1498,7 @@ def check_repository(
             result.extend(validate_phase(phase))
             result.extend(validate_repository_evidence(repo, {}, phase, None))
         if review:
-            result.extend(validate_review(review, phase=phase))
+            result.extend(validate_review(review, phase=phase, profile=profile))
         return result
     result.data["idle"] = False
     result.extend(validate_task(task, profile))
@@ -913,8 +1520,10 @@ def check_repository(
             elif not info["registered"]:
                 result.error("worktree.unregistered", f"declared path is not an exact Git worktree: {worktree_value}")
     if review:
-        result.extend(validate_review(review, task, phase))
-    elif task.get("state") in {"Accepted", "Integrated"}:
+        result.extend(validate_review(review, task, phase, profile))
+    elif task.get("state") in {"Accepted", "Integrated"} and (
+        schema_version(task) == LEGACY_SCHEMA_VERSION or detect_mode(profile, task, phase) == "strict" or task.get("reviewRequired") is True
+    ):
         result.error("review.required", "Accepted and Integrated tasks require immutable review evidence")
     if review:
         result.extend(validate_repository_evidence(repo, task, None, review))

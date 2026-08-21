@@ -122,26 +122,26 @@ if (-not (Test-IsWithin -Child $projectPath -Parent $repoRoot)) { throw "Unity p
 $repoName = Split-Path -Leaf $repoRoot
 $projectRelative = Get-RelativeSlashPath -From $repoRoot -To $projectPath
 $profileDefaults = [pscustomobject]@{
-    schemaVersion = 2
-    distributionVersion = '2.0.0'
+    schemaVersion = 3
+    distributionVersion = '3.0.0'
     mode = 'auto'
     roadmap = 'docs/tasks/ROADMAP.md'
     taskGlobs = @('docs/tasks/**/*.json')
     reviewGlobs = @('docs/tasks/reviews/*.json')
     worktreeRoot = '../lemmings-worktrees'
-    models = [pscustomobject]@{
-        orchestrator = 'gpt-5.6-sol:high'
-        reviewer = 'gpt-5.6-sol:high'
-        worker = 'gpt-5.6-luna:max'
-        validator = 'gpt-5.6-terra:medium'
-        explorer = 'gpt-5.6-luna:high'
-        summarizer = 'gpt-5.6-luna:medium'
-    }
-    workerPolicy = [pscustomobject]@{
-        elevatedModel = 'gpt-5.6-terra:max'
+    modelRoutes = [pscustomobject]@{
+        codex = [pscustomobject]@{
+            worker = @(
+                [pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-luna'; variantId = 'max' },
+                [pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-terra'; variantId = 'max' }
+            )
+            reviewer = @([pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-sol'; variantId = 'high' })
+            explorer = @([pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-luna'; variantId = 'high' })
+        }
     }
     contextPolicy = [pscustomobject]@{ maxPacketBytes = 16384; maxWorkingSetItems = 12; maxExpansions = 1 }
-    fallback = [pscustomobject]@{ allowed = @() }
+    orchestration = [pscustomobject]@{ maxDelegationDepth = 1; maxConcurrentWriters = 2; maxConcurrentReaders = 2; managerSlots = 1; maxRepairs = 1; maxTransportRetries = 1 }
+    workspacePool = [pscustomobject]@{ enabled = $true; maxIdle = 2; maxIdleGiB = 10; eviction = 'lru' }
     game = [pscustomobject]@{
         engine = 'unity'
         projectPath = $projectRelative
@@ -162,7 +162,7 @@ if ($packageInsideRepo) {
         root = Get-RelativeSlashPath -From $repoRoot -To $packageRoot
     })
 }
-$profilePath = Join-Path $repoRoot '.codex/lemmings.json'
+$profilePath = Join-Path $repoRoot '.agents/lemmings.json'
 $profileJson = $profileDefaults | ConvertTo-Json -Depth 20
 $skillTarget = Join-Path $repoRoot '.agents/skills/lemmings'
 $agentsTarget = Join-Path $repoRoot '.codex/agents'
@@ -180,7 +180,7 @@ if ($installedAgentFiles.Count -gt 0) {
 $configDrift = (Test-Path -LiteralPath $profilePath) -and ([IO.File]::ReadAllText($profilePath).Trim() -ne $profileJson.Trim())
 $bundlePresent = (Test-Path -LiteralPath $skillTarget) -or $installedAgentFiles.Count -gt 0 -or (Test-Path -LiteralPath $profilePath)
 $bundleDrift = $skillDrift -or $agentDrift -or $configDrift -or ($bundlePresent -and ((-not (Test-Path -LiteralPath $skillTarget)) -or $installedAgentFiles.Count -eq 0 -or (-not (Test-Path -LiteralPath $profilePath))))
-if ($bundleDrift -and -not $Force) { throw 'Lemmings bundle differs from the canonical v2 distribution. Re-run with -Force to replace it.' }
+if ($bundleDrift -and -not $Force) { throw 'Lemmings bundle differs from the canonical v3 distribution. Re-run with -Force to replace it.' }
 
 if ($DryRun) {
     Write-Host 'stage and replace the Lemmings bundle atomically'
@@ -234,7 +234,7 @@ if (-not $packageInsideRepo) {
     $commonPath = Resolve-FullPath -Path $commonDir -Base $repoRoot
     $environmentPath = Join-Path $commonPath 'lemmings/environment.json'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $environmentPath) | Out-Null
-    [IO.File]::WriteAllText($environmentPath, (([pscustomobject]@{ schemaVersion = 2; toolRoot = $packageRoot } | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($environmentPath, (([pscustomobject]@{ schemaVersion = 3; toolRoot = $packageRoot } | ConvertTo-Json -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 }
 
 Write-Host $(if ($DryRun) { 'Lemmings bootstrap dry run complete.' } else { 'Lemmings skill bootstrap complete.' })

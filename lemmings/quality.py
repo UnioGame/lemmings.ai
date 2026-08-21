@@ -155,8 +155,8 @@ def finalize_task_quality(repo: Path, task_reference: str, outcome: str) -> tupl
     if target is None or not target.is_file():
         raise ValueError("metrics finish requires a Task JSON path inside the repository")
     task = read_object(target)
-    if task.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError(f"unsupported schemaVersion: {task.get('schemaVersion')!r}; expected 2")
+    if task.get("schemaVersion") not in {2, 3}:
+        raise ValueError(f"unsupported schemaVersion: {task.get('schemaVersion')!r}; expected 2 or 3")
     summary = summarize_quality(repo, task, outcome)
     task["qualitySummary"] = summary
     write_object(target, task)
@@ -190,7 +190,7 @@ def build_quality_report(repo: Path, profile: Mapping[str, Any], task_id: str | 
             task = read_object(path)
         except (OSError, ValueError):
             continue
-        if task.get("schemaVersion") != SCHEMA_VERSION or not task.get("taskId") or not isinstance(task.get("models"), Mapping):
+        if task.get("schemaVersion") not in {2, 3} or not task.get("taskId") or not isinstance(task.get("models"), Mapping):
             continue
         if task_id and str(task.get("taskId")) != task_id:
             continue

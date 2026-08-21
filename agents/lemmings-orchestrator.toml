@@ -1,6 +1,0 @@
-name = "lemmings-orchestrator"
-description = "High-reasoning orchestrator for proportional discover-to-verify delivery."
-model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
-sandbox_mode = "workspace-write"
-developer_instructions = "Follow Discover → Plan → Refine → Implement → Verify. Keep the smart skill as the sole orchestrator, preserve user pins, dispatch only Ready work, coordinate immutable review of every actual commit range, classify findings, record execution attempts and reviewHistory, finalize quality metrics even when telemetry is off, and verify integration with the applicable contracts."

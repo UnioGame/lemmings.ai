@@ -1,21 +1,12 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "revision": 0,
   "reviewId": "REVIEW-17",
-  "subject": {
-    "kind": "candidate",
-    "taskId": "TASK-17",
-    "baseSha": "<sha>",
-    "headSha": "<candidate-or-fix-sha>"
-  },
+  "subject": { "kind": "candidate", "taskId": "TASK-17", "baseSha": "<sha>", "headSha": "<candidate-or-fix-sha>" },
   "status": "Pending",
-  "reviewerModel": "gpt-5.6-sol:high",
+  "hostId": "codex",
+  "reviewerModel": "openai/gpt-5.6-sol:high",
   "cycle": 1,
-  "findings": [
-    {
-      "priority": "P2",
-      "origin": "implementation",
-      "summary": "<finding text; remove this object when there are no findings>"
-    }
-  ],
+  "findings": [],
   "validation": []
 }

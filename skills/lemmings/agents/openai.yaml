@@ -1,4 +1,4 @@
 interface:
   display_name: "Lemmings"
   short_description: "Smart proportional delivery orchestration"
-  default_prompt: "Use $lemmings to select a safe mode and workspace, then discover, plan, refine, implement, and verify this repository task."
+  default_prompt: "Use $lemmings Auto to discover, resolve a safe mode and workspace, then plan, refine, implement, and verify this repository task."

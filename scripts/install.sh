@@ -127,26 +127,26 @@ defaults_file=$(mktemp)
 trap 'rm -f -- "$defaults_file"' EXIT
 cat >"$defaults_file" <<JSON
 {
-  "schemaVersion": 2,
-  "distributionVersion": "2.0.0",
+  "schemaVersion": 3,
+  "distributionVersion": "3.0.0",
   "mode": "auto",
   "roadmap": "docs/tasks/ROADMAP.md",
   "taskGlobs": ["docs/tasks/**/*.json"],
   "reviewGlobs": ["docs/tasks/reviews/*.json"],
   "worktreeRoot": "../lemmings-worktrees",
-  "models": {
-    "orchestrator": "gpt-5.6-sol:high",
-    "reviewer": "gpt-5.6-sol:high",
-    "worker": "gpt-5.6-luna:max",
-    "validator": "gpt-5.6-terra:medium",
-    "explorer": "gpt-5.6-luna:high",
-    "summarizer": "gpt-5.6-luna:medium"
-  },
-  "workerPolicy": {
-    "elevatedModel": "gpt-5.6-terra:max"
+  "modelRoutes": {
+    "codex": {
+      "worker": [
+        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max" },
+        { "providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max" }
+      ],
+      "reviewer": [{ "providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high" }],
+      "explorer": [{ "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "high" }]
+    }
   },
   "contextPolicy": { "maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1 },
-  "fallback": { "allowed": [] },
+  "orchestration": { "maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1 },
+  "workspacePool": { "enabled": true, "maxIdle": 2, "maxIdleGiB": 10, "eviction": "lru" },
   "game": {
     "engine": "unity",
     "projectPath": "$project_relative",
@@ -173,7 +173,7 @@ if is_within "$package_root" "$repo_root"; then
 fi
 skill_target="$repo_root/.agents/skills/lemmings"
 agents_target="$repo_root/.codex/agents"
-profile_target="$repo_root/.codex/lemmings.json"
+profile_target="$repo_root/.agents/lemmings.json"
 shopt -s nullglob
 source_agents=("$agents_source"/lemmings-*.toml)
 installed_agents=("$agents_target"/lemmings-*.toml)
@@ -195,7 +195,7 @@ bundle_drift=0
 (( skill_drift || agent_drift || config_drift )) && bundle_drift=1
 if (( bundle_present )) && [[ ! -d "$skill_target" || ! -f "$profile_target" || ${#installed_agents[@]} -eq 0 ]]; then bundle_drift=1; fi
 if (( bundle_drift && ! force )); then
-  echo "Lemmings bundle differs from the canonical v2 distribution. Re-run with --force to replace it." >&2
+  echo "Lemmings bundle differs from the canonical v3 distribution. Re-run with --force to replace it." >&2
   exit 1
 fi
 
@@ -246,7 +246,7 @@ if (( ! package_inside_repo )); then
   package_root_json=$package_root
   if command -v cygpath >/dev/null 2>&1; then package_root_json=$(cygpath -w "$package_root"); fi
   mkdir -p "$common_path/lemmings"
-  printf '{"schemaVersion": 2, "toolRoot": "%s"}\n' "$(json_escape "$package_root_json")" >"$common_path/lemmings/environment.json"
+  printf '{"schemaVersion": 3, "toolRoot": "%s"}\n' "$(json_escape "$package_root_json")" >"$common_path/lemmings/environment.json"
 fi
 
 if (( dry_run )); then echo "Lemmings bootstrap dry run complete."; else echo "Lemmings skill bootstrap complete."; fi

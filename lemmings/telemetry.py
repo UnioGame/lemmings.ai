@@ -103,8 +103,8 @@ def load_settings(repo: Path) -> dict[str, Any]:
     value = read_object(path)
     merged = default_settings()
     merged.update(value)
-    if merged.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError(f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 2")
+    if merged.get("schemaVersion") not in {2, 3}:
+        raise ValueError(f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 2 or 3")
     if merged.get("mode") not in TELEMETRY_MODES:
         raise ValueError("telemetry mode must be off, basic, or full")
     return merged
@@ -489,8 +489,8 @@ def parse_period(value: str) -> timedelta:
 
 
 def normalize_quality_observation(value: Mapping[str, Any], expected_task_id: str | None = None, task: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    if value.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError(f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 2")
+    if value.get("schemaVersion") not in {2, 3}:
+        raise ValueError(f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 2 or 3")
     for field in ("taskId", "baseSha", "headSha", "recordedAt", "signals"):
         if not value.get(field):
             raise ValueError(f"quality observation requires {field}")

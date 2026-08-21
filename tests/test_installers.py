@@ -101,7 +101,7 @@ class InstallerTests(unittest.TestCase):
         for kind, executable in installers():
             with self.subTest(installer=kind):
                 repo = self.make_repo(f"external-{kind}")
-                profile_path = repo / ".codex/lemmings.json"
+                profile_path = repo / ".agents/lemmings.json"
                 profile_path.parent.mkdir()
                 profile_path.write_text(
                     json.dumps(
@@ -121,20 +121,18 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual(0, repeated.returncode, repeated.stdout + repeated.stderr)
 
                 profile = json.loads(profile_path.read_text(encoding="utf-8-sig"))
-                self.assertEqual(2, profile["schemaVersion"])
+                self.assertEqual(3, profile["schemaVersion"])
                 self.assertEqual("auto", profile["mode"])
                 self.assertNotIn("unknown", profile)
                 self.assertEqual("unity", profile["game"]["engine"])
                 self.assertEqual("GameClient", profile["game"]["projectPath"])
                 self.assertEqual(1, profile["game"]["workspace"]["maxUnityEditors"])
                 self.assertEqual("hybrid", profile["game"]["workspace"]["parallelStrategy"])
-                self.assertEqual("gpt-5.6-luna:max", profile["models"]["worker"])
-                self.assertEqual("gpt-5.6-terra:medium", profile["models"]["validator"])
-                self.assertEqual("gpt-5.6-luna:high", profile["models"]["explorer"])
-                self.assertEqual("gpt-5.6-luna:medium", profile["models"]["summarizer"])
-                self.assertEqual("gpt-5.6-terra:max", profile["workerPolicy"]["elevatedModel"])
-                self.assertNotIn("highRiskModel", profile["workerPolicy"])
-                self.assertNotIn("complex-worker", profile["models"])
+                self.assertEqual("gpt-5.6-luna", profile["modelRoutes"]["codex"]["worker"][0]["modelId"])
+                self.assertEqual("gpt-5.6-sol", profile["modelRoutes"]["codex"]["reviewer"][0]["modelId"])
+                self.assertEqual("gpt-5.6-luna", profile["modelRoutes"]["codex"]["explorer"][0]["modelId"])
+                self.assertEqual(2, profile["orchestration"]["maxConcurrentWriters"])
+                self.assertEqual(2, profile["workspacePool"]["maxIdle"])
                 self.assertNotIn("tooling", profile)
                 self.assertEqual({"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1}, profile["contextPolicy"])
                 self.assertTrue((repo / ".agents/skills/lemmings/SKILL.md").is_file())
@@ -150,7 +148,7 @@ class InstallerTests(unittest.TestCase):
                 ).stdout.strip()
                 environment_path = (repo / common_dir / "lemmings/environment.json").resolve()
                 environment = json.loads(environment_path.read_text(encoding="utf-8-sig"))
-                self.assertEqual(2, environment["schemaVersion"])
+                self.assertEqual(3, environment["schemaVersion"])
                 self.assertEqual(self.tool.resolve(), Path(environment["toolRoot"]).resolve())
                 staged = subprocess.run(
                     ["git", "-C", str(repo), "diff", "--cached", "--name-only"],
@@ -168,7 +166,7 @@ class InstallerTests(unittest.TestCase):
                 embedded = repo / "GameClient/Game.Packages/lemmings"
                 shutil.copytree(self.tool, embedded)
                 self.run_installer(kind, executable, embedded, cwd=repo)
-                profile = json.loads((repo / ".codex/lemmings.json").read_text(encoding="utf-8-sig"))
+                profile = json.loads((repo / ".agents/lemmings.json").read_text(encoding="utf-8-sig"))
                 self.assertEqual("GameClient/Game.Packages/lemmings", profile["tooling"]["root"])
                 self.assertFalse((repo / ".git/lemmings/environment.json").exists())
 
@@ -181,7 +179,7 @@ class InstallerTests(unittest.TestCase):
                 self.assertIn("Multiple Unity game projects", ambiguous.stderr + ambiguous.stdout)
 
                 self.run_installer(kind, executable, self.tool, repo, "GameOne", "dry-run")
-                self.assertFalse((repo / ".codex/lemmings.json").exists())
+                self.assertFalse((repo / ".agents/lemmings.json").exists())
                 self.assertFalse((repo / ".agents/skills/lemmings").exists())
 
                 self.run_installer(kind, executable, self.tool, repo, "GameOne")
@@ -203,7 +201,7 @@ class InstallerTests(unittest.TestCase):
                 foreign_profile.write_text("name = 'foreign'\n", encoding="utf-8")
                 skill_file = repo / ".agents/skills/lemmings/SKILL.md"
                 skill_file.write_text("drift\n", encoding="utf-8")
-                profile_path = repo / ".codex/lemmings.json"
+                profile_path = repo / ".agents/lemmings.json"
                 profile_path.write_text('{"drift": true}\n', encoding="utf-8")
                 before_skill = skill_file.read_bytes()
                 before_profile = profile_path.read_bytes()
@@ -272,7 +270,7 @@ class InstallerTests(unittest.TestCase):
         self.assertNotEqual(0, probe.returncode, probe.stdout)
 
         self.run_installer("bash", bash, self.tool, repo, env=environment)
-        profile = json.loads((repo / ".codex/lemmings.json").read_text(encoding="utf-8-sig"))
+        profile = json.loads((repo / ".agents/lemmings.json").read_text(encoding="utf-8-sig"))
         self.assertEqual("unity", profile["game"]["engine"])
 
 
