@@ -122,6 +122,7 @@ class InstallerTests(unittest.TestCase):
 
                 profile = json.loads(profile_path.read_text(encoding="utf-8-sig"))
                 self.assertEqual(3, profile["schemaVersion"])
+                self.assertEqual("3.1.0", profile["distributionVersion"])
                 self.assertEqual("auto", profile["mode"])
                 self.assertNotIn("unknown", profile)
                 self.assertEqual("unity", profile["game"]["engine"])
@@ -191,6 +192,83 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual(
                     (self.tool / "skills/lemmings/SKILL.md").read_bytes(), target_skill.read_bytes()
                 )
+
+    def test_recognized_v2_bundle_is_replaced_without_force_and_data_is_preserved(self) -> None:
+        for kind, executable in installers():
+            with self.subTest(installer=kind):
+                repo = self.make_repo(f"legacy-{kind}")
+                legacy_profile = repo / ".codex/lemmings.json"
+                legacy_profile.parent.mkdir(parents=True)
+                legacy_profile.write_text('{"schemaVersion": 2, "mode": "strict"}\n', encoding="utf-8")
+                legacy_skill = repo / ".agents/skills/lemmings"
+                legacy_skill.mkdir(parents=True)
+                (legacy_skill / "SKILL.md").write_text("legacy\n", encoding="utf-8")
+                agents = repo / ".codex/agents"
+                agents.mkdir(parents=True)
+                for name in ("worker", "reviewer", "explorer", "orchestrator", "validator", "summarizer"):
+                    (agents / f"lemmings-{name}.toml").write_text(f"name = '{name}'\n", encoding="utf-8")
+                foreign = agents / "foreign.toml"
+                foreign.write_text("keep = true\n", encoding="utf-8")
+                common = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-common-dir"], check=True, capture_output=True, text=True).stdout.strip()
+                common_path = (repo / common).resolve()
+                marker = common_path / "lemmings/active.json"
+                marker.parent.mkdir(parents=True)
+                marker.write_text('{"schemaVersion": 2}\n', encoding="utf-8")
+                registry = common_path / "lemmings/workspaces-v3.json"
+                registry.write_text('{"revision": 9}\n', encoding="utf-8")
+                history = repo / "docs/tasks/history.json"
+                history.parent.mkdir(parents=True)
+                history.write_text('{"schemaVersion": 2}\n', encoding="utf-8")
+
+                self.run_installer(kind, executable, self.tool, repo)
+
+                self.assertFalse(legacy_profile.exists())
+                self.assertFalse(marker.exists())
+                self.assertEqual('{"revision": 9}\n', registry.read_text(encoding="utf-8"))
+                self.assertEqual('{"schemaVersion": 2}\n', history.read_text(encoding="utf-8"))
+                self.assertEqual("keep = true\n", foreign.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    ["lemmings-explorer.toml", "lemmings-reviewer.toml", "lemmings-worker.toml"],
+                    sorted(path.name for path in agents.glob("lemmings-*.toml")),
+                )
+                installed = json.loads((repo / ".agents/lemmings.json").read_text(encoding="utf-8-sig"))
+                self.assertEqual(3, installed["schemaVersion"])
+                self.assertEqual("auto", installed["mode"])
+                marker.write_text('{"schemaVersion": 3, "taskPath": "docs/tasks/current.json"}\n', encoding="utf-8")
+                self.run_installer(kind, executable, self.tool, repo)
+                self.assertEqual(3, json.loads(marker.read_text(encoding="utf-8"))["schemaVersion"])
+                installed["mode"] = "strict"
+                (repo / ".agents/lemmings.json").write_text(json.dumps(installed), encoding="utf-8")
+                legacy_profile.parent.mkdir(parents=True, exist_ok=True)
+                legacy_profile.write_text('{"schemaVersion": 2}\n', encoding="utf-8")
+                refused = self.run_installer(kind, executable, self.tool, repo, check=False)
+                self.assertNotEqual(0, refused.returncode)
+
+    def test_failed_v2_replacement_restores_legacy_config_marker_and_roles(self) -> None:
+        for kind, executable in installers():
+            with self.subTest(installer=kind):
+                repo = self.make_repo(f"legacy-rollback-{kind}")
+                legacy_profile = repo / ".codex/lemmings.json"
+                legacy_profile.parent.mkdir(parents=True)
+                legacy_profile.write_text('{"schemaVersion": 2, "sentinel": true}\n', encoding="utf-8")
+                agents = repo / ".codex/agents"
+                agents.mkdir(parents=True)
+                for name in ("worker", "reviewer", "explorer", "orchestrator", "validator", "summarizer"):
+                    (agents / f"lemmings-{name}.toml").write_text(f"legacy = '{name}'\n", encoding="utf-8")
+                common = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-common-dir"], check=True, capture_output=True, text=True).stdout.strip()
+                marker = (repo / common / "lemmings/active.json").resolve()
+                marker.parent.mkdir(parents=True)
+                marker.write_text('{"schemaVersion": 2, "enabled": true}\n', encoding="utf-8")
+                before_agents = {path.name: path.read_bytes() for path in agents.glob("lemmings-*.toml")}
+                environment = os.environ.copy()
+                environment["LEMMINGS_INSTALL_FAIL_AFTER"] = "config"
+
+                failed = self.run_installer(kind, executable, self.tool, repo, check=False, env=environment)
+                self.assertNotEqual(0, failed.returncode)
+                self.assertEqual('{"schemaVersion": 2, "sentinel": true}\n', legacy_profile.read_text(encoding="utf-8"))
+                self.assertEqual('{"schemaVersion": 2, "enabled": true}\n', marker.read_text(encoding="utf-8"))
+                self.assertEqual(before_agents, {path.name: path.read_bytes() for path in agents.glob("lemmings-*.toml")})
+                self.assertFalse((repo / ".agents/lemmings.json").exists())
 
     def test_force_replacement_rolls_back_owned_targets(self) -> None:
         for kind, executable in installers():

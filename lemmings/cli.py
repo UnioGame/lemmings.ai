@@ -11,17 +11,23 @@ from typing import Any, Sequence
 from .contracts import (
     DISTRIBUTION_VERSION,
     SCHEMA_VERSION,
-    SUPPORTED_SCHEMA_VERSIONS,
     ValidationResult,
     as_list,
+    check_task_repository,
     check_repository,
+    detect_mode,
     dispatchable_tasks,
     read_object,
     resolve_path,
     runtime_marker,
     task_worktree,
     validate_batch,
+    validate_phase,
+    validate_profile,
+    validate_review,
+    validate_task,
     validate_wave,
+    write_object,
 )
 from .models import (
     advance_recovery_route,
@@ -30,7 +36,7 @@ from .models import (
     build_proposal,
     build_recovery_proposal,
 )
-from .quality import build_quality_report, finalize_task_quality
+from .quality import build_quality_report
 from .telemetry import (
     ANNOTATION_KINDS,
     FINISH_OUTCOMES,
@@ -39,9 +45,7 @@ from .telemetry import (
     annotate_regression,
     build_report,
     cleanup_events,
-    enter_stage,
     find_task_binding,
-    finish_run,
     import_quality,
     record_event,
     render_markdown,
@@ -60,13 +64,12 @@ from .workspace import (
 
 
 PROFILE_PATH = ".agents/lemmings.json"
-LEGACY_PROFILE_PATH = ".codex/lemmings.json"
 
 
 def load_profile(repo: Path, value: str | None = None) -> dict[str, Any] | None:
     if value:
         return load_optional(repo, value)
-    return load_optional(repo, None, PROFILE_PATH) or load_optional(repo, None, LEGACY_PROFILE_PATH)
+    return load_optional(repo, None, PROFILE_PATH)
 
 
 def emit(value: Any) -> None:
@@ -100,8 +103,9 @@ def load_artifacts(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | Non
 
 def runtime_findings(repo: Path, marker: dict[str, Any] | None) -> ValidationResult:
     result = ValidationResult()
-    if marker and marker.get("schemaVersion") not in SUPPORTED_SCHEMA_VERSIONS:
-        result.error("runtime.schema", f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 2 or 3")
+    if marker and marker.get("schemaVersion") != SCHEMA_VERSION:
+        message = "schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle" if marker.get("schemaVersion") == 2 else f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 3"
+        result.error("runtime.schema", message)
     if marker and marker.get("taskPath"):
         path = resolve_path(repo, str(marker["taskPath"]))
         if not path or not path.is_file():
@@ -139,8 +143,8 @@ def distribution_findings(repo: Path, profile: dict[str, Any] | None) -> Validat
     if set(versions.values()) != {DISTRIBUTION_VERSION}:
         result.error("distribution.version", f"package versions differ from {DISTRIBUTION_VERSION}: {versions}")
     plugin_version = read_object(package / ".codex-plugin" / "plugin.json").get("version")
-    if plugin_version != "3.0.0+codex.20260821":
-        result.error("distribution.plugin_version", f"plugin version differs from 3.0.0+codex.20260821: {plugin_version}")
+    if plugin_version != "3.1.0+codex.20260823":
+        result.error("distribution.plugin_version", f"plugin version differs from 3.1.0+codex.20260823: {plugin_version}")
     source_skill = package / "skills" / "lemmings"
     installed_skill = repo / ".agents" / "skills" / "lemmings"
     if _tree_fingerprint(source_skill) != _tree_fingerprint(installed_skill):
@@ -148,9 +152,12 @@ def distribution_findings(repo: Path, profile: dict[str, Any] | None) -> Validat
     source_agents = package / "agents"
     installed_agents = repo / ".codex" / "agents"
     expected = {path.name: path.read_bytes() for path in source_agents.glob("lemmings-*.toml")}
-    actual = {path.name: path.read_bytes() for path in installed_agents.glob("lemmings-*.toml")} if installed_agents.is_dir() else {}
+    actual = {name: (installed_agents / name).read_bytes() for name in expected if (installed_agents / name).is_file()}
     if expected != actual:
         result.error("distribution.agents", "installed Lemmings agent profiles differ from package")
+    obsolete = [name for name in ("lemmings-orchestrator.toml", "lemmings-validator.toml", "lemmings-summarizer.toml") if (installed_agents / name).is_file()]
+    if obsolete:
+        result.error("distribution.legacy_agents", "obsolete Lemmings agent profiles remain: " + ", ".join(obsolete))
     return result
 
 
@@ -178,10 +185,14 @@ def command_check(args: argparse.Namespace) -> int:
                     tasks.setdefault(str(loaded["taskId"]), loaded)
     if not tasks:
         result = check_repository(repo, profile, None, phase, review, args.all)
-        if args.all and phase:
-            result.extend(validate_wave(repo, [], phase, profile, complete=True))
+        if profile is None:
+            result.error("profile.missing", f"{PROFILE_PATH} is required")
     else:
         result = ValidationResult(data={"mode": "strict" if phase else None, "idle": False, "tasks": sorted(tasks)})
+        if profile is None:
+            result.error("profile.missing", f"{PROFILE_PATH} is required")
+        else:
+            result.extend(validate_profile(profile))
         primary_id = str((task or {}).get("taskId") or "")
         for task_id, current in tasks.items():
             current_review = review if task_id == primary_id and review else None
@@ -189,9 +200,10 @@ def command_check(args: argparse.Namespace) -> int:
                 current_review = load_optional(repo, str(current["reviewRef"]))
                 if current_review is not None:
                     current_review["_evidencePath"] = str(current["reviewRef"])
-            result.extend(check_repository(repo, profile, current, phase, current_review, False))
-        if args.all and phase:
-            result.extend(validate_wave(repo, tasks.values(), phase, profile, complete=True))
+            result.extend(check_task_repository(repo, profile, current, phase, current_review, args.all))
+        needs_wave = bool(phase) and (args.all or any(detect_mode(profile, current, phase) == "strict" for current in tasks.values()))
+        if needs_wave:
+            result.extend(validate_wave(repo, tasks.values(), phase, profile, complete=args.all, validate_tasks=False))
     if args.dispatchable:
         if not phase:
             result.error("dispatch.phase", "--dispatchable requires --phase")
@@ -205,7 +217,7 @@ def command_check(args: argparse.Namespace) -> int:
     result.extend(runtime_findings(repo, marker))
     profile_argument = getattr(args, "profile", None)
     installed_profile = (repo / PROFILE_PATH).resolve()
-    if not profile_argument or resolve_path(repo, str(profile_argument)) == installed_profile:
+    if args.distribution and (not profile_argument or resolve_path(repo, str(profile_argument)) == installed_profile):
         result.extend(distribution_findings(repo, profile))
     emit(result.as_dict())
     return 0 if result.ok else 1
@@ -224,6 +236,67 @@ def command_status(args: argparse.Namespace) -> int:
     })
     emit(result.as_dict())
     return 0 if result.ok else 1
+
+
+def _artifact_reference(repo: Path, value: str, kind: str) -> tuple[str, dict[str, Any]]:
+    path = resolve_path(repo, value)
+    if not path or not path.is_file():
+        raise ValueError(f"runtime {kind} does not exist: {value}")
+    try:
+        relative = path.relative_to(repo).as_posix()
+    except ValueError as error:
+        raise ValueError(f"runtime {kind} must be inside the repository") from error
+    return relative, read_object(path)
+
+
+def command_runtime(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    marker = runtime_marker(repo)
+    if args.runtime_command == "status":
+        state = read_object(marker) if marker.is_file() else None
+        findings = runtime_findings(repo, state)
+        findings.data.update({"active": bool(state), "marker": str(marker), "runtime": state})
+        emit(findings.as_dict())
+        return 0 if findings.ok else 1
+    if args.runtime_command == "deactivate":
+        marker.unlink(missing_ok=True)
+        emit({"ok": True, "active": False, "marker": str(marker)})
+        return 0
+    profile = load_profile(repo)
+    if profile is None:
+        raise ValueError(f"runtime activate requires {PROFILE_PATH}")
+    profile_result = validate_profile(profile)
+    if not profile_result.ok:
+        raise ValueError(profile_result.findings[0].message)
+    task_reference, task = _artifact_reference(repo, args.task, "task")
+    task_result = validate_task(task, profile)
+    if not task_result.ok:
+        raise ValueError(task_result.findings[0].message)
+    if task.get("state") not in {"Ready", "Active", "Repair", "Candidate", "Accepted", "Blocked"}:
+        raise ValueError("runtime activate requires a Task in a working lifecycle state")
+    mode = detect_mode(profile, task)
+    if mode == "simple":
+        marker.unlink(missing_ok=True)
+        emit({"ok": True, "active": False, "reason": "Simple mode does not use a runtime marker"})
+        return 0
+    state: dict[str, Any] = {"schemaVersion": SCHEMA_VERSION, "profilePath": PROFILE_PATH, "taskPath": task_reference}
+    if args.phase:
+        phase_reference, phase = _artifact_reference(repo, args.phase, "phase")
+        checked = validate_phase(phase)
+        if not checked.ok:
+            raise ValueError(checked.findings[0].message)
+        state["phasePath"] = phase_reference
+    elif mode == "strict":
+        raise ValueError("Strict runtime activate requires --phase")
+    if args.review:
+        review_reference, review = _artifact_reference(repo, args.review, "review")
+        checked = validate_review(review, task, phase if args.phase else None, profile)
+        if not checked.ok:
+            raise ValueError(checked.findings[0].message)
+        state["reviewPath"] = review_reference
+    write_object(marker, state)
+    emit({"ok": True, "active": True, "marker": str(marker), "runtime": state})
+    return 0
 
 
 def command_workspace(args: argparse.Namespace) -> int:
@@ -253,6 +326,9 @@ def command_models(args: argparse.Namespace) -> int:
     if not config_path or not config_path.is_file():
         raise ValueError(f"model configuration does not exist: {args.profile or PROFILE_PATH}")
     config = read_object(config_path)
+    checked = validate_profile(config)
+    if not checked.ok:
+        raise ValueError(checked.findings[0].message)
     if args.models_command == "inspect":
         emit({"ok": True, "modelRoutes": config.get("modelRoutes", {})})
         return 0
@@ -367,23 +443,18 @@ def command_metrics(args: argparse.Namespace) -> int:
     working = resolve_path(repo, task_worktree(task or {})) or repo
     profile = load_profile(repo, getattr(args, "profile", None)) or {}
     if action == "stage":
-        if (task or {}).get("schemaVersion") == 3:
-            event = record_event(repo, "run_started", source="cli", task_id=task_id, phase_id=(phase or {}).get("phaseId"), data={"mode": (task or {}).get("resolvedMode")}) if args.stage == "discover" else None
-            emit({"ok": True, "recorded": bool(event), "event": event, "reason": None if event else "v3 records only run_started at discover"})
-        else:
-            emit(enter_stage(repo, working, args.stage, task=task or ({"taskId": task_id, "role": "orchestrator"} if task_id else None), phase=phase, task_path=task_reference))
+        if task and task.get("schemaVersion") != 3:
+            raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics stage requires a schema-v3 Task")
+        event = record_event(repo, "run_started", source="cli", task_id=task_id, phase_id=(phase or {}).get("phaseId"), data={"mode": (task or {}).get("resolvedMode")}) if args.stage == "discover" else None
+        emit({"ok": True, "recorded": bool(event), "event": event, "reason": None if event else "only run_started at discover is recorded"})
     elif action == "finish":
-        quality = None
-        if task_reference and task and task.get("schemaVersion") != 3:
-            task, quality = finalize_task_quality(repo, task_reference, args.outcome)
-        if (task or {}).get("schemaVersion") == 3:
-            event = record_event(repo, "run_finished", source="cli", task_id=task_id, data={"outcome": args.outcome}, allow_finished_binding=True)
-            local = {"ok": True, "recorded": bool(event), "event": event}
-        else:
-            local = finish_run(repo, working, args.outcome, task=task or ({"taskId": task_id, "role": "orchestrator"} if task_id else None))
+        if task and task.get("schemaVersion") != 3:
+            raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics finish requires a schema-v3 Task")
+        event = record_event(repo, "run_finished", source="cli", task_id=task_id, data={"outcome": args.outcome}, allow_finished_binding=True)
         emit({
-            **local,
-            "taskQuality": quality,
+            "ok": True,
+            "recorded": bool(event),
+            "event": event,
             "qualityReport": build_quality_report(repo, profile),
         })
     elif action == "import":
@@ -434,8 +505,12 @@ def add_common(parser: argparse.ArgumentParser, artifacts: bool = False) -> None
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lemmings", description="Optional tooling for the Lemmings smart skill")
     sub = parser.add_subparsers(dest="command", required=True)
-    check = sub.add_parser("check", help="validate applicable contracts"); add_common(check); check.add_argument("--task", action="append"); check.add_argument("--phase"); check.add_argument("--review"); check.add_argument("--all", action="store_true"); check.add_argument("--dispatchable", action="store_true"); check.add_argument("--batch", action="append"); check.set_defaults(run=command_check)
+    check = sub.add_parser("check", help="validate lifecycle contracts once per artifact"); add_common(check); check.add_argument("--task", action="append"); check.add_argument("--phase"); check.add_argument("--review"); check.add_argument("--all", action="store_true"); check.add_argument("--distribution", action="store_true", help="also compare the installed bundle with the package"); check.add_argument("--dispatchable", action="store_true"); check.add_argument("--batch", action="append"); check.set_defaults(run=command_check)
     status = sub.add_parser("status", help="inspect runtime and contract status"); add_common(status, True); status.set_defaults(run=command_status)
+    runtime = sub.add_parser("runtime", help="activate, inspect, or deactivate schema-v3 enforcement"); runtime_sub = runtime.add_subparsers(dest="runtime_command", required=True)
+    runtime_activate = runtime_sub.add_parser("activate"); runtime_activate.add_argument("--repo", default="."); runtime_activate.add_argument("--task", required=True); runtime_activate.add_argument("--phase"); runtime_activate.add_argument("--review"); runtime_activate.set_defaults(run=command_runtime)
+    for name in ("status", "deactivate"):
+        item = runtime_sub.add_parser(name); item.add_argument("--repo", default="."); item.set_defaults(run=command_runtime)
     workspace = sub.add_parser("workspace", help="estimate or inspect workspaces"); workspace_sub = workspace.add_subparsers(dest="workspace_command", required=True)
     estimate = workspace_sub.add_parser("estimate"); add_common(estimate); estimate.add_argument("--backend", default="auto", choices=["auto", "current", "code-worktree", "package-worktree", "unity-clone"]); estimate.add_argument("--package", help="repo-relative target package path for package-worktree sizing"); estimate.set_defaults(run=command_workspace)
     inspect = workspace_sub.add_parser("inspect"); add_common(inspect); inspect.set_defaults(run=command_workspace)
@@ -455,7 +530,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "apply": item.add_argument("--option", required=True); item.add_argument("--confirm", required=True)
         item.set_defaults(run=command_models)
     advance = recover_sub.add_parser("advance"); add_common(advance); advance.add_argument("--task", required=True); advance.add_argument("--failure", required=True); advance.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); advance.add_argument("--expected-revision", type=int, required=True); advance.add_argument("--transient-retries", type=int, default=0); advance.add_argument("--context-reductions", type=int, default=0); advance.set_defaults(run=command_models)
-    metrics = sub.add_parser("metrics", help="manage optional offline telemetry and legacy v2 quality imports"); metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
+    metrics = sub.add_parser("metrics", help="manage optional offline telemetry and quality imports"); metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
     for name in ("off", "basic", "full", "status"):
         item = metrics_sub.add_parser(name); add_common(item); item.set_defaults(run=command_metrics)
     stage = metrics_sub.add_parser("stage"); add_common(stage); stage.add_argument("stage", choices=LIFECYCLE_STAGES); stage.add_argument("--task"); stage.add_argument("--phase"); stage.set_defaults(run=command_metrics)

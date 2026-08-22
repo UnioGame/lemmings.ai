@@ -7,6 +7,8 @@ description: Coordinate repository delivery with proportional Auto, Simple, Stan
 
 Act as the sole manager. Tooling validates or atomically executes an already recorded decision; it never chooses mode, model, task, batch, verdict, or acceptance.
 
+Use schema v3 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
+
 Run `Discover → Plan → Refine → Implement → Verify`. Default `requestedMode` to `auto` and resolve it after Discover:
 
 1. Strict for two writers, shared/frozen contracts, overlapping domains, submodules, codegen, multi-repository integration, shared serialized assets, exclusive resources, high risk, an integration branch, or baseline review.
@@ -23,7 +25,7 @@ The manager alone updates Task/Phase using `revision` compare-and-set. Accept `A
 
 Keep dispatch under 16 KiB and 12 context references. Send references plus hashes and role-unique rules, never Task/Phase copies, transcripts, reasoning, raw logs, telemetry, registry contents, secrets, or absolute paths. Summarize logs deterministically. Read [context-contract.md](references/context-contract.md) before dispatch.
 
-For Standard/Strict, use the v3 templates. `Draft → Ready → Active → Candidate → Accepted → Integrated`; use `Repair`, `Replan Required`, `Blocked`, or `Cancelled` when applicable. Review only when mode/risk requires it, and review the immutable candidate range. `Integrated` requires integration evidence, not telemetry or cleanup success.
+For Standard/Strict, use the v3 templates and explicitly activate runtime for the Task; Simple has no marker. `Draft → Ready → Active → Candidate → Accepted → Integrated`; use `Repair`, `Replan Required`, `Blocked`, or `Cancelled` when applicable. Manager or worker may run an exact declared validation command. Before Candidate/Accepted, compare `AgentResult.changedPaths` with the real `base..head` diff and check that diff against ownership once. A handoff is only an optional dependency note. Review only when mode/risk requires it, and review the immutable candidate range. `Integrated` requires integration evidence, not telemetry or cleanup success.
 
 Read only the reference needed for the current decision:
 
@@ -33,6 +35,6 @@ Read only the reference needed for the current decision:
 - [model-routing.md](references/model-routing.md): host capabilities and confirmation-gated routes.
 - [telemetry.md](references/telemetry.md): optional offline usage and benchmark collection.
 
-Run the narrowest falsifying validation, then `python -m lemmings check`; add `--all` for a complete Strict Phase. Keep reusable policy here/references, canonical data only in Task/Phase/Review, and compact evidence in the Task.
+Run the narrowest falsifying validation, then `python -m lemmings check`; add `--all` for a complete Strict Phase and `--distribution` only when checking installed bundle bytes. Keep reusable policy here/references, canonical data only in Task/Phase/Review, and compact evidence in the Task.
 
-Controls: `$lemmings on|off|auto|simple|standard|strict|status`; `lemmings models inspect|propose|apply|recover`; `lemmings workspace estimate|inspect|register|claim|release|remove`; optional `lemmings metrics ...`. A v3 runtime marker enables hooks. Schema v2 is read-only migration input.
+Controls: `lemmings runtime activate|status|deactivate`; `lemmings models inspect|propose|apply|recover`; `lemmings workspace estimate|inspect|register|claim|release|remove`; optional `lemmings metrics ...`. Only a manager-directed v3 runtime marker enables hooks. There are no validator, summarizer, or orchestrator invocation roles.

@@ -1,4 +1,4 @@
-# Lemmings 3.0
+# Lemmings 3.1
 
 Lemmings is a repository skill for proportional agent delivery. `Auto` resolves Simple, Standard, or Strict after discovery. The current agent remains the sole manager; bounded worker, reviewer, and explorer invocations receive compact assignments.
 
@@ -13,9 +13,11 @@ flowchart TD
     A -->|Standard| T[Task + bounded worker]
     A -->|Strict| P[Phase + dependency-ready writer wave]
 
-    S --> V[Focused validation]
-    T --> W[Claim pooled or provision workspace]
-    P --> W
+    S --> FV[Focused validation]
+    FV --> AC
+    T --> RT[Activate schema-v3 runtime]
+    P --> RT
+    RT --> W[Claim pooled or provision workspace]
     W --> I[Worker invocation]
     I --> O{Invocation outcome}
 
@@ -25,8 +27,9 @@ flowchart TD
     TR --> I
     C -->|No| PA[Task paused]
 
-    O -->|Candidate| V
-    V --> R{Review required?}
+    O -->|Candidate| V[Manager or worker runs declared validation]
+    V --> OW[Check actual base..head ownership once]
+    OW --> R{Review required?}
     R -->|No| AC[Accepted]
     R -->|Yes| IR[Immutable reviewer]
     IR -->|Accepted| AC
@@ -47,7 +50,7 @@ The manager is the only orchestrator. Contracts, hooks, and the CLI only validat
 | Mode | Best fit | Added structure |
 | --- | --- | --- |
 | **Simple** | One low-risk ownership domain | Direct manager implementation and focused validation |
-| **Standard** | One bounded writer, medium risk, or independent review | Task, candidate, handoff, validation, optional immutable review |
+| **Standard** | One bounded writer, medium risk, or independent review | Task, candidate, validation, optional dependency note and immutable review |
 | **Strict** | Parallel writers, shared contracts/assets, submodules, codegen, multiple repositories, or high risk | Phase, task DAG, isolation, leases, mandatory review and integration evidence |
 
 `Auto` is the default. It may escalate after new discovery but does not downgrade after the first mutation. Explicit mode pins remain explicit.
@@ -137,16 +140,35 @@ From the package root:
 ./scripts/install.ps1 -Repo <consumer-repo> -Project <unity-project>
 ```
 
-The installer writes `.agents/lemmings.json`, the skill, and three optional bounded role profiles. It does not enable telemetry, create worktrees, mutate Git history, install Python, or clean files.
+The installer writes `.agents/lemmings.json`, the skill, and exactly three bounded role profiles: worker, reviewer, and explorer. It leaves runtime inactive. It does not enable telemetry, create worktrees, mutate Git history, install Python, or clean files.
 
 Useful checks:
 
 ```text
 python -m lemmings check --repo <repo>
+python -m lemmings check --distribution --repo <repo>
+python -m lemmings runtime activate --repo <repo> --task docs/tasks/TASK.json [--phase docs/tasks/PHASE.json]
+python -m lemmings runtime status --repo <repo>
+python -m lemmings runtime deactivate --repo <repo>
 python -m lemmings workspace inspect --repo <repo>
 python -m lemmings models inspect --repo <repo>
 python -m lemmings metrics usage --host opencode --file usage.json
 ```
+
+Normal `check` validates lifecycle/configuration without rereading the installed skill and agent trees. Use `--distribution` for the explicit byte-level bundle comparison; installers perform the equivalent comparison before committing their transaction.
+
+## Upgrading to 3.1
+
+3.1 is intentionally breaking: schema v2 and side-by-side v2/v3 operation are unsupported. Upgrade by running the 3.1 installer. A recognized legacy bundle is replaced without `Force`; a modified current v3/3.1 bundle still requires `Force`.
+
+The installer replaces `.agents/skills/lemmings`, `.agents/lemmings.json`, and the worker/reviewer/explorer profiles. It removes these legacy-owned targets after a successful transactional validation:
+
+- `.codex/lemmings.json`;
+- `.git/lemmings/active.json` when it is a v2 marker;
+- `lemmings-orchestrator.toml`, `lemmings-validator.toml`, and `lemmings-summarizer.toml`;
+- a legacy `environment.json` when an embedded package no longer needs it.
+
+It never removes Task/review history, telemetry events, workspace registry v3, worktrees, branches, validation clones, or foreign agent profiles. On failure it restores the complete previous owned bundle and runtime marker. After a successful upgrade runtime remains inactive until `lemmings runtime activate`; Simple mode never creates a marker.
 
 ## Optional telemetry
 

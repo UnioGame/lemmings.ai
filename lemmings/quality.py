@@ -10,10 +10,8 @@ from .contracts import (
     FINDING_ORIGINS,
     FINDING_PRIORITIES,
     REVIEW_STATES,
-    SCHEMA_VERSION,
     read_object,
     resolve_path,
-    write_object,
 )
 
 
@@ -150,19 +148,6 @@ def summarize_quality(repo: Path, task: Mapping[str, Any], outcome: str | None =
     }
 
 
-def finalize_task_quality(repo: Path, task_reference: str, outcome: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    target = _inside_repo(repo, task_reference)
-    if target is None or not target.is_file():
-        raise ValueError("metrics finish requires a Task JSON path inside the repository")
-    task = read_object(target)
-    if task.get("schemaVersion") not in {2, 3}:
-        raise ValueError(f"unsupported schemaVersion: {task.get('schemaVersion')!r}; expected 2 or 3")
-    summary = summarize_quality(repo, task, outcome)
-    task["qualitySummary"] = summary
-    write_object(target, task)
-    return task, summary
-
-
 def _task_paths(repo: Path, profile: Mapping[str, Any]) -> list[Path]:
     patterns = profile.get("taskGlobs") or ["docs/tasks/**/*.json"]
     if isinstance(patterns, str):
@@ -190,7 +175,7 @@ def build_quality_report(repo: Path, profile: Mapping[str, Any], task_id: str | 
             task = read_object(path)
         except (OSError, ValueError):
             continue
-        if task.get("schemaVersion") not in {2, 3} or not task.get("taskId") or not isinstance(task.get("models"), Mapping):
+        if task.get("schemaVersion") != 3 or not task.get("taskId") or not isinstance(task.get("models"), Mapping):
             continue
         if task_id and str(task.get("taskId")) != task_id:
             continue

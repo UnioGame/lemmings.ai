@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from .contracts import SCHEMA_VERSION, git, git_common_dir, path_matches, read_object, resolve_path, write_object
+from .contracts import SCHEMA_VERSION, git, git_common_dir, path_matches, read_object, resolve_path, schema_error, write_object
 
 GIB = 1024 ** 3
 WORKSPACE_BACKENDS = {"auto", "current", "code-worktree", "package-worktree", "unity-clone"}
@@ -103,7 +103,9 @@ def resolve_tool_root(repo: Path, profile: Mapping[str, Any] | None = None) -> d
     environment = git_common_dir(repo) / "lemmings" / "environment.json"
     if environment.is_file():
         value = read_object(environment)
-        root = resolve_path(repo, value.get("toolRoot")) if value.get("schemaVersion") in {2, 3} else None
+        if value.get("schemaVersion") != SCHEMA_VERSION:
+            raise ValueError(schema_error("workspace environment", value))
+        root = resolve_path(repo, value.get("toolRoot"))
         if root and root.is_dir():
             return {"available": True, "root": str(root), "source": "git-common-environment"}
     package = _package_root(repo, profile)
@@ -212,7 +214,9 @@ def load_registry(repo: Path) -> dict[str, Any]:
     if not path.is_file():
         return _empty_registry()
     value = read_object(path)
-    if value.get("schemaVersion") != SCHEMA_VERSION or not isinstance(value.get("revision"), int) or not isinstance(value.get("entries"), list):
+    if value.get("schemaVersion") != SCHEMA_VERSION:
+        raise ValueError(schema_error("workspace registry", value))
+    if not isinstance(value.get("revision"), int) or not isinstance(value.get("entries"), list):
         raise ValueError(f"invalid workspace registry: {path}")
     return value
 

@@ -3,4 +3,4 @@
 from .contracts import SCHEMA_VERSION, ValidationResult
 
 __all__ = ["SCHEMA_VERSION", "ValidationResult"]
-__version__ = "3.0.0"
+__version__ = "3.1.0"

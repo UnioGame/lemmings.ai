@@ -103,8 +103,8 @@ def load_settings(repo: Path) -> dict[str, Any]:
     value = read_object(path)
     merged = default_settings()
     merged.update(value)
-    if merged.get("schemaVersion") not in {2, 3}:
-        raise ValueError(f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 2 or 3")
+    if merged.get("schemaVersion") != 3:
+        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle" if merged.get("schemaVersion") == 2 else f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 3")
     if merged.get("mode") not in TELEMETRY_MODES:
         raise ValueError("telemetry mode must be off, basic, or full")
     return merged
@@ -391,7 +391,7 @@ def enter_stage(
         cwd,
         task_id=(task or {}).get("taskId"),
         phase_id=(phase or {}).get("phaseId"),
-        role=(task or {}).get("role") or "orchestrator",
+        role=(task or {}).get("role") or "manager",
         model=models.get("actual") or models.get("assigned"),
         mode=(task or {}).get("mode"),
         cohort=(task or {}).get("telemetryCohort"),
@@ -433,7 +433,7 @@ def finish_run(
         return {"ok": True, "recorded": False, "mode": "off"}
     binding = read_binding(repo, cwd)
     if not binding:
-        binding = bind_run(repo, cwd, task_id=(task or {}).get("taskId"), role=(task or {}).get("role") or "orchestrator")
+        binding = bind_run(repo, cwd, task_id=(task or {}).get("taskId"), role=(task or {}).get("role") or "manager")
     if binding.get("finished"):
         return {"ok": True, "recorded": False, "idempotent": True, "runId": binding["runId"]}
     now = iso_timestamp()
@@ -489,8 +489,8 @@ def parse_period(value: str) -> timedelta:
 
 
 def normalize_quality_observation(value: Mapping[str, Any], expected_task_id: str | None = None, task: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    if value.get("schemaVersion") not in {2, 3}:
-        raise ValueError(f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 2 or 3")
+    if value.get("schemaVersion") != 3:
+        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle" if value.get("schemaVersion") == 2 else f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 3")
     for field in ("taskId", "baseSha", "headSha", "recordedAt", "signals"):
         if not value.get(field):
             raise ValueError(f"quality observation requires {field}")

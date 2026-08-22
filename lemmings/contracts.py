@@ -1,4 +1,4 @@
-"""Canonical, backwards-readable orchestration contracts for Lemmings."""
+"""Canonical schema-v3 orchestration contracts for Lemmings."""
 
 from __future__ import annotations
 
@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 SCHEMA_VERSION = 3
-LEGACY_SCHEMA_VERSION = 2
-SUPPORTED_SCHEMA_VERSIONS = {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}
-DISTRIBUTION_VERSION = "3.0.0"
+DISTRIBUTION_VERSION = "3.1.0"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -40,22 +38,9 @@ STRICT_RISKS = {
     "integrationBranch", "resourceLeases",
 }
 STANDARD_RISKS = {"mediumRisk", "publicContract", "isolatedWriter", "wideValidation", "candidateReview", "repair", "independentReview"}
-DEFAULT_MODELS = {
-    "orchestrator": "gpt-5.6-sol:high",
-    "reviewer": "gpt-5.6-sol:high",
-    "worker": "gpt-5.6-luna:max",
-    "validator": "gpt-5.6-terra:medium",
-    "explorer": "gpt-5.6-luna:high",
-    "summarizer": "gpt-5.6-luna:medium",
-}
-DEFAULT_WORKER_POLICY = {
-    "elevatedModel": "gpt-5.6-terra:max",
-}
 FINDING_ORIGINS = {"implementation", "plan-contract", "validation", "integration"}
 FINDING_PRIORITIES = {"P0", "P1", "P2", "P3"}
-ORCHESTRATOR_EFFORTS = {"high", "xhigh", "max", "ultra"}
 TASK_ROLES = {"manager", "worker", "reviewer", "explorer"}
-LEGACY_TASK_ROLES = TASK_ROLES | {"orchestrator", "validator", "summarizer", "shared-contract-owner"}
 DEFAULT_CONTEXT_POLICY = {
     "maxPacketBytes": 16384,
     "maxWorkingSetItems": 12,
@@ -153,11 +138,14 @@ def schema_version(value: Mapping[str, Any]) -> int | None:
 
 
 def schema_supported(value: Mapping[str, Any]) -> bool:
-    return schema_version(value) in SUPPORTED_SCHEMA_VERSIONS
+    return schema_version(value) == SCHEMA_VERSION
 
 
 def schema_error(kind: str, value: Mapping[str, Any]) -> str:
-    return f"unsupported schemaVersion: {value.get('schemaVersion')!r}; expected 2 or 3"
+    version = value.get("schemaVersion")
+    if version == 2:
+        return "schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle"
+    return f"unsupported schemaVersion: {version!r}; expected 3"
 
 
 def normalize_path(value: str) -> str:
@@ -242,10 +230,10 @@ def detect_mode(
     requested = str(current.get("requestedMode") or current.get("mode") or profile.get("mode") or "auto").lower()
     if requested in {"simple", "standard", "strict"}:
         return requested
-    risks = set(as_list(current.get("risks"))) | set(as_list(profile.get("risks")))
-    if phase or risks.intersection(STRICT_RISKS):
+    signals = set(as_list(current.get("modeReasons"))) | set(as_list(profile.get("modeReasons")))
+    if phase or signals.intersection(STRICT_RISKS):
         return "strict"
-    if risks.intersection(STANDARD_RISKS) or task:
+    if signals.intersection(STANDARD_RISKS) or task:
         return "standard"
     return "simple"
 
@@ -264,9 +252,9 @@ def resolve_auto_mode(
     risk_class = str(values.get("riskClass") or "low").lower()
     if risk_class not in MODE_RISK_CLASSES:
         raise ValueError(f"unknown risk class: {risk_class}")
-    risks = {str(item) for item in as_list(values.get("risks"))}
-    strict_reasons = sorted(risks.intersection(STRICT_RISKS))
-    standard_reasons = sorted(risks.intersection(STANDARD_RISKS))
+    mode_reasons = {str(item) for item in as_list(values.get("modeReasons"))}
+    strict_reasons = sorted(mode_reasons.intersection(STRICT_RISKS))
+    standard_reasons = sorted(mode_reasons.intersection(STANDARD_RISKS))
     ownership = values.get("ownership") if isinstance(values.get("ownership"), Mapping) else {}
     resources = values.get("resources") if isinstance(values.get("resources"), Mapping) else {}
     workspace = values.get("workspace") if isinstance(values.get("workspace"), Mapping) else {}
@@ -422,90 +410,7 @@ def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     if not schema_supported(profile):
         result.error("profile.schema", schema_error("profile", profile))
         return result
-    if schema_version(profile) == SCHEMA_VERSION:
-        return _validate_v3_profile(profile)
-    if profile.get("distributionVersion") != "2.0.0":
-        result.error("profile.distribution", "distributionVersion must be 2.0.0")
-    mode = str(profile.get("mode", "auto")).lower()
-    if mode not in MODES:
-        result.error("profile.mode", f"mode must be one of {sorted(MODES)}")
-    models = profile.get("models")
-    if not isinstance(models, dict):
-        result.error("profile.models", "models is required and must be an object")
-    else:
-        unknown_roles = sorted(set(models) - set(DEFAULT_MODELS))
-        if unknown_roles:
-            result.error("profile.role", "unsupported model roles: " + ", ".join(unknown_roles))
-        for role, required in DEFAULT_MODELS.items():
-            if models.get(role, required) != required:
-                result.error("model.fixed", f"{role} must use {required}")
-    worker_policy = profile.get("workerPolicy")
-    if not isinstance(worker_policy, Mapping):
-        result.error("profile.worker_policy", "workerPolicy is required and must be an object")
-    else:
-        for route, required in DEFAULT_WORKER_POLICY.items():
-            if worker_policy.get(route, required) != required:
-                result.error(
-                    "model.worker_route_fixed",
-                    f"workerPolicy.{route} must use {required}",
-                )
-        unknown_routes = sorted(set(worker_policy) - set(DEFAULT_WORKER_POLICY))
-        if unknown_routes:
-            result.error("profile.worker_policy", "unsupported workerPolicy routes: " + ", ".join(unknown_routes))
-    context_policy = profile.get("contextPolicy")
-    if not isinstance(context_policy, Mapping):
-        result.error("profile.context_policy", "contextPolicy is required")
-    else:
-        for name, expected in DEFAULT_CONTEXT_POLICY.items():
-            if context_policy.get(name) != expected:
-                result.error("profile.context_policy", f"contextPolicy.{name} must be {expected}")
-    fallback = profile.get("fallback", {})
-    if fallback and not isinstance(fallback, dict):
-        result.error("profile.fallback", "fallback must be an object")
-    for field_name in ("requestedModels", "taskModels"):
-        value = profile.get(field_name, {})
-        if value and not isinstance(value, dict):
-            result.error("profile.model_pins", f"{field_name} must be an object")
-    requested_models = profile.get("requestedModels") or {}
-    if isinstance(requested_models, dict):
-        for role, model in requested_models.items():
-            violation = model_pin_violation(str(role), str(model))
-            if violation:
-                result.error("model.pin_policy", violation)
-    task_models = profile.get("taskModels") or {}
-    if isinstance(task_models, dict):
-        for task_id, pins in task_models.items():
-            if not isinstance(pins, dict):
-                result.error("profile.task_models", f"taskModels.{task_id} must be an object")
-                continue
-            for role, model in pins.items():
-                violation = model_pin_violation(str(role), str(model))
-                if violation:
-                    result.error("model.pin_policy", f"taskModels.{task_id}: {violation}")
-    tooling = profile.get("tooling") or {}
-    if tooling:
-        if not isinstance(tooling, Mapping) or not tooling.get("root"):
-            result.error("profile.tooling", "tooling must contain repo-relative root")
-        elif Path(str(tooling["root"])).is_absolute():
-            result.error("profile.tooling", "profile tooling.root must be repo-relative; use the Git-common environment file for local absolute paths")
-    game = profile.get("game") or {}
-    if game:
-        workspace = game.get("workspace") if isinstance(game, Mapping) else None
-        if not isinstance(workspace, Mapping):
-            result.error("profile.game", "game.workspace must be an object")
-        elif workspace.get("largeThresholdGiB", 10) != 10:
-            result.error("profile.workspace_threshold", "large workspace approval threshold is fixed at 10 GiB")
-    return result
-
-
-def model_pin_violation(role: str, model: str) -> str | None:
-    if role == "reviewer" and model != DEFAULT_MODELS["reviewer"]:
-        return f"reviewer must remain {DEFAULT_MODELS['reviewer']}"
-    if role == "orchestrator":
-        name, separator, effort = model.rpartition(":")
-        if not separator or name != "gpt-5.6-sol" or effort not in ORCHESTRATOR_EFFORTS:
-            return "orchestrator pin must use gpt-5.6-sol at high or higher effort"
-    return None
+    return _validate_v3_profile(profile)
 
 
 def _route_ref_valid(value: Any) -> bool:
@@ -616,69 +521,33 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
     if not assigned:
         result.error("model.assigned", "models.assigned is required before dispatch")
     role = str(task.get("role", "worker"))
-    version = schema_version(task)
-    allowed_roles = TASK_ROLES if version == SCHEMA_VERSION else LEGACY_TASK_ROLES
-    if role not in allowed_roles:
+    if role not in TASK_ROLES:
         result.error("task.role", f"unsupported task role: {role}")
     profile = profile or {}
-    if version == SCHEMA_VERSION:
-        if role in {"manager", "orchestrator"}:
-            return result
-        host_id = models.get("hostId")
-        if not isinstance(host_id, str) or not host_id.strip():
-            result.error("model.host", "v3 models.hostId is required")
-            return result
-        roles = (profile.get("modelRoutes") or {}).get(host_id, {})
-        choices = roles.get(role) if isinstance(roles, Mapping) else None
-        allowed = [route_name(item) for item in choices or [] if isinstance(item, Mapping)]
-        allowed = [item for item in allowed if item]
-        recovery_route = current_recovery_route(task, role)
-        recovery_override = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == assigned)
-        if assigned not in allowed and not recovery_override:
-            result.error("model.assignment", f"models.assigned is not an approved {host_id}/{role} route")
-        if requested and requested != assigned and not recovery_override:
-            result.error("model.pin", "models.requested must take priority over assignment")
-        if recovery_route and not recovery_override:
-            result.error("model.recovery_assignment", "models assignment must match the current approved recovery route")
-        if recovery_override and not models.get("fallbackReason"):
-            result.error("model.fallback_reason", "approved recovery assignment requires models.fallbackReason")
-        if actual and actual != assigned:
-            if actual not in allowed[1:]:
-                result.error("model.actual", "models.actual differs from assigned and is not an explicit fallback")
-            if not models.get("fallbackReason"):
-                result.error("model.fallback_reason", "fallback requires models.fallbackReason")
+    if role == "manager":
         return result
-    task_id = str(task.get("taskId", ""))
-    task_pins = (profile.get("taskModels") or {}).get(task_id, {})
-    task_pin = task_pins.get(role) if isinstance(task_pins, dict) else None
-    global_pin = (profile.get("requestedModels") or {}).get(role)
-    effective_pin = task_pin or global_pin
-    if effective_pin:
-        if requested != effective_pin:
-            result.error("model.pin_requested", f"models.requested must equal effective pin {effective_pin}")
-        if assigned != effective_pin:
-            result.error("model.pin_assigned", f"models.assigned must equal effective pin {effective_pin}")
-    elif requested and assigned != requested:
+    host_id = models.get("hostId")
+    if not isinstance(host_id, str) or not host_id.strip():
+        result.error("model.host", "v3 models.hostId is required")
+        return result
+    roles = (profile.get("modelRoutes") or {}).get(host_id, {})
+    choices = roles.get(role) if isinstance(roles, Mapping) else None
+    allowed = [route_name(item) for item in choices or [] if isinstance(item, Mapping)]
+    allowed = [item for item in allowed if item]
+    recovery_route = current_recovery_route(task, role)
+    recovery_override = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == assigned)
+    if assigned not in allowed and not recovery_override:
+        result.error("model.assignment", f"models.assigned is not an approved {host_id}/{role} route")
+    if requested and requested != assigned and not recovery_override:
         result.error("model.pin", "models.requested must take priority over assignment")
-    pin_violation = model_pin_violation(role, str(requested)) if requested else None
-    if pin_violation:
-        result.error("model.pin_policy", pin_violation)
-    default_assignment = (profile.get("models") or {}).get(role) or DEFAULT_MODELS.get(role)
-    allowed_assignments = {default_assignment} if default_assignment else set()
-    if role == "worker":
-        worker_policy = profile.get("workerPolicy") or DEFAULT_WORKER_POLICY
-        if isinstance(worker_policy, Mapping):
-            for route, required in DEFAULT_WORKER_POLICY.items():
-                allowed_assignments.add(worker_policy.get(route) or required)
-    if not effective_pin and not requested and allowed_assignments and assigned not in allowed_assignments:
-        expected = " or ".join(sorted(str(value) for value in allowed_assignments))
-        result.error("model.default_assignment", f"models.assigned must equal an approved role assignment: {expected}")
+    if recovery_route and not recovery_override:
+        result.error("model.recovery_assignment", "models assignment must match the current approved recovery route")
+    if recovery_override and not models.get("fallbackReason"):
+        result.error("model.fallback_reason", "approved recovery assignment requires models.fallbackReason")
     if actual and actual != assigned:
-        fallback_reason = models.get("fallbackReason")
-        allowed = as_list(profile.get("fallback", {}).get("allowed"))
-        if actual not in allowed:
-            result.error("model.actual", "models.actual differs from assigned and is not an allowed fallback")
-        if not fallback_reason:
+        if actual not in allowed[1:]:
+            result.error("model.actual", "models.actual differs from assigned and is not an explicit fallback")
+        if not models.get("fallbackReason"):
             result.error("model.fallback_reason", "fallback requires models.fallbackReason")
     return result
 
@@ -774,7 +643,7 @@ def validate_workspace_v3(task: Mapping[str, Any], workspace: Mapping[str, Any],
 def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
     if schema_version(invocation) != SCHEMA_VERSION:
-        result.error("invocation.schema", "AgentInvocation requires schemaVersion 3")
+        result.error("invocation.schema", schema_error("AgentInvocation", invocation))
         return result
     for field_name in ("runId", "taskId", "invocationId", "role", "baseSha", "profileDigest", "contextDigest", "objective", "outputSchemaVersion"):
         if not invocation.get(field_name):
@@ -820,7 +689,7 @@ def validate_agent_result(
 ) -> ValidationResult:
     result = ValidationResult()
     if schema_version(result_value) != SCHEMA_VERSION:
-        result.error("result.schema", "AgentResult requires schemaVersion 3")
+        result.error("result.schema", schema_error("AgentResult", result_value))
         return result
     if result_value.get("invocationId") != invocation.get("invocationId"):
         result.error("result.invocation", "AgentResult invocationId is stale or mismatched")
@@ -849,15 +718,13 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     if not schema_supported(task):
         result.error("task.schema", schema_error("task", task))
         return result
-    version = schema_version(task)
-    if version == SCHEMA_VERSION:
-        revision = task.get("revision")
-        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-            result.error("task.revision", "v3 Task requires non-negative integer revision")
-        result.extend(validate_mode_decision(task))
-        domains = task.get("ownershipDomainCount")
-        if not isinstance(domains, int) or isinstance(domains, bool) or domains < 1:
-            result.error("ownership.domains", "v3 Task requires positive ownershipDomainCount")
+    revision = task.get("revision")
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+        result.error("task.revision", "v3 Task requires non-negative integer revision")
+    result.extend(validate_mode_decision(task))
+    domains = task.get("ownershipDomainCount")
+    if not isinstance(domains, int) or isinstance(domains, bool) or domains < 1:
+        result.error("ownership.domains", "v3 Task requires positive ownershipDomainCount")
     for name in ("taskId", "goal", "acceptance", "dependencies", "risks", "state", "ownership", "models", "workspace", "workingSet", "validation", "execution", "reviewHistory", "close"):
         if name not in task or task.get(name) is None:
             result.error("task.missing", f"missing task field: {name}")
@@ -944,7 +811,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     ownership = task.get("ownership")
     if not isinstance(ownership, Mapping):
         ownership = {}
-    if mode == "strict" and role not in {"reviewer", "explorer", "validator", "summarizer"} and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"} and not as_list(ownership.get("owned")):
+    if mode == "strict" and role not in {"reviewer", "explorer"} and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"} and not as_list(ownership.get("owned")):
         result.error("ownership.required", f"{state} Strict writer requires non-empty ownership.owned")
     workspace = task.get("workspace") or {}
     if not isinstance(workspace, Mapping):
@@ -967,16 +834,13 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("workspace.approval", "workspace.approval must be not-required, pending, approved, or declined")
     if not workspace.get("reason"):
         result.error("workspace.reason", "workspace.reason is required")
-    if version != SCHEMA_VERSION and isolated_backend and not workspace.get("path") and not unprovisioned_workspace:
-        result.error("workspace.path", f"{backend} requires workspace.path")
     if isolated_backend and estimated is None:
         result.error("workspace.estimate", f"{backend} requires workspace.estimatedGiB")
     if isolated_backend and approval == "declined" and state != "Blocked":
         result.error("workspace.declined", "declined workspace must fall back to safe current work or set the Task to Blocked")
-    if "parallelWriters" in as_list(task.get("risks")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
+    if "parallelWriters" in as_list(task.get("modeReasons")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
         result.error("workspace.parallel", "parallel writers cannot share the current checkout")
-    if version == SCHEMA_VERSION:
-        result.extend(validate_workspace_v3(task, workspace, state))
+    result.extend(validate_workspace_v3(task, workspace, state))
     validation = task.get("validation")
     if not isinstance(validation, Mapping):
         result.error("task.validation", "validation must be an object")
@@ -1012,22 +876,13 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         models = task.get("models") if isinstance(task.get("models"), Mapping) else {}
         if not models.get("actual"):
             result.error("model.actual_required", f"{state} requires models.actual")
-        if not execution.get("handoff"):
-            result.error("execution.handoff", f"{state} requires embedded execution.handoff")
-    review_required = bool(task.get("reviewRequired")) if version == SCHEMA_VERSION else True
+    review_required = bool(task.get("reviewRequired"))
     if detect_mode(profile, task) == "strict":
         review_required = True
     if state in {"Accepted", "Integrated"} and review_required and not task.get("reviewRef"):
         result.error("review.reference", f"{state} requires reviewRef")
     if state == "Integrated":
         tracked_quality = isinstance(execution, Mapping) and bool(execution.get("attempts"))
-        if version == LEGACY_SCHEMA_VERSION:
-            legacy_tracked = isinstance(execution, Mapping) and "attempts" in execution or "reviewHistory" in task or "qualitySummary" in task
-            if legacy_tracked:
-                if not isinstance(summary, Mapping) or summary.get("complete") is not True:
-                    result.error("quality.incomplete", "Integrated tracked task requires complete qualitySummary")
-            else:
-                result.error("quality.required", "Integrated task requires execution attempts, reviewHistory, and qualitySummary")
         if tracked_quality:
             commits = task.get("commits") if isinstance(task.get("commits"), Mapping) else {}
             expected_heads = [commits.get("candidate"), *as_list(commits.get("fix"))]
@@ -1047,17 +902,16 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
     if not schema_supported(phase):
         result.error("phase.schema", schema_error("phase", phase))
         return result
-    if schema_version(phase) == SCHEMA_VERSION:
-        revision = phase.get("revision")
-        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-            result.error("phase.revision", "v3 Phase requires non-negative integer revision")
-        workspaces = (phase.get("close") or {}).get("workspaceDispositions") if isinstance(phase.get("close"), Mapping) else None
-        if not isinstance(workspaces, list):
-            result.error("phase.workspaces", "v3 Phase close requires workspaceDispositions array")
-        else:
-            for index, disposition in enumerate(workspaces):
-                if not isinstance(disposition, Mapping) or disposition.get("releaseAction") not in WORKSPACE_RELEASE_ACTIONS or not disposition.get("releaseReason"):
-                    result.error("phase.workspace", f"workspaceDispositions[{index}] requires releaseAction and releaseReason")
+    revision = phase.get("revision")
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+        result.error("phase.revision", "v3 Phase requires non-negative integer revision")
+    workspaces = (phase.get("close") or {}).get("workspaceDispositions") if isinstance(phase.get("close"), Mapping) else None
+    if not isinstance(workspaces, list):
+        result.error("phase.workspaces", "v3 Phase close requires workspaceDispositions array")
+    else:
+        for index, disposition in enumerate(workspaces):
+            if not isinstance(disposition, Mapping) or disposition.get("releaseAction") not in WORKSPACE_RELEASE_ACTIONS or not disposition.get("releaseReason"):
+                result.error("phase.workspace", f"workspaceDispositions[{index}] requires releaseAction and releaseReason")
     for name in ("phaseId", "baselineSha", "integrationBranch"):
         if not phase.get(name):
             result.error("phase.missing", f"missing phase field: {name}")
@@ -1071,7 +925,7 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
     close = phase.get("close")
     if not isinstance(close, Mapping) or not isinstance(close.get("mergeCommits"), list) or not isinstance(close.get("phaseValidation"), list):
         result.error("phase.close", "close requires mergeCommits and phaseValidation arrays")
-    elif schema_version(phase) == SCHEMA_VERSION and (close.get("mergeCommits") or close.get("phaseValidation")):
+    elif close.get("mergeCommits") or close.get("phaseValidation"):
         active_leases = [lease for lease in as_list(phase.get("leases")) if isinstance(lease, Mapping) and lease.get("active", True)]
         if active_leases:
             result.error("phase.lease_close", "Phase close requires every lease to be released")
@@ -1124,19 +978,16 @@ def validate_review(
     if not schema_supported(review):
         result.error("review.schema", schema_error("review", review))
         return result
-    if schema_version(review) == SCHEMA_VERSION:
-        revision = review.get("revision")
-        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-            result.error("review.revision", "v3 Review requires non-negative integer revision")
+    revision = review.get("revision")
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+        result.error("review.revision", "v3 Review requires non-negative integer revision")
     if not review.get("reviewId"):
         result.error("review.id", "reviewId is required")
     if review.get("status") not in REVIEW_STATES:
         result.error("review.status", f"review status must be one of {sorted(REVIEW_STATES)}")
-    if schema_version(review) == LEGACY_SCHEMA_VERSION and review.get("reviewerModel") != DEFAULT_MODELS["reviewer"]:
-        result.error("review.model", f"reviewer must use {DEFAULT_MODELS['reviewer']}")
-    if schema_version(review) == SCHEMA_VERSION and (not review.get("reviewerModel") or not review.get("hostId")):
+    if not review.get("reviewerModel") or not review.get("hostId"):
         result.error("review.model", "v3 Review requires hostId and actual reviewerModel")
-    elif schema_version(review) == SCHEMA_VERSION and profile:
+    elif profile:
         host_id = review.get("hostId")
         choices = (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or [])
         allowed = [route_name(item) for item in choices if isinstance(item, Mapping)]
@@ -1215,9 +1066,7 @@ def validate_repository_commits(repo: Path, task: Mapping[str, Any], phase: Mapp
             result.error("commit.sequence", "each fix commit must descend from the preceding candidate/fix commit")
     head = candidate_head(task)
     baseline = task.get("baseSha") or (phase or {}).get("baselineSha")
-    if phase and schema_version(task) == LEGACY_SCHEMA_VERSION and task.get("baseSha") and task.get("baseSha") != phase.get("baselineSha"):
-        result.error("commit.phase_base", "Strict task baseSha must equal phase baselineSha")
-    if phase and schema_version(task) == SCHEMA_VERSION and task.get("baseSha") and phase.get("baselineSha"):
+    if phase and task.get("baseSha") and phase.get("baselineSha"):
         if git(repo, "merge-base", "--is-ancestor", str(phase.get("baselineSha")), str(task.get("baseSha"))).returncode:
             result.error("commit.phase_base", "v3 task baseSha must contain the Phase baseline")
     if baseline and head:
@@ -1315,7 +1164,7 @@ def validate_repository_ownership(repo: Path, task: Mapping[str, Any]) -> Valida
         if any(path_matches(path, str(rule)) for rule in forbidden):
             result.error("ownership.forbidden", f"candidate changes forbidden path: {path}")
         elif any(path_matches(path, str(rule)) for rule in shared):
-            if role not in {"orchestrator", "shared-contract-owner"}:
+            if role != "manager":
                 result.error("ownership.shared", f"candidate changes unowned shared path: {path}")
         elif not any(path_matches(path, str(rule)) for rule in owned):
             result.error("ownership.outside", f"candidate changes path outside ownership: {path}")
@@ -1404,6 +1253,7 @@ def validate_wave(
     phase: Mapping[str, Any],
     profile: Mapping[str, Any] | None = None,
     complete: bool = True,
+    validate_tasks: bool = True,
 ) -> ValidationResult:
     result = validate_phase(phase)
     result.extend(validate_repository_evidence(repo, {}, phase, None))
@@ -1430,7 +1280,8 @@ def validate_wave(
             result.error("lease.conflict", f"resource {resource} is leased to multiple owners")
         lease_owners[resource] = owner
     for task in tasks:
-        result.extend(validate_task(task, profile))
+        if validate_tasks:
+            result.extend(validate_task(task, profile))
         task_id = str(task.get("taskId") or "")
         if detect_mode(profile, task, phase) != "strict":
             result.error("phase.task_mode", f"phase task {task_id} must use Strict mode")
@@ -1439,23 +1290,23 @@ def validate_wave(
         elif [str(value) for value in as_list(task.get("dependencies"))] != dag[task_id]:
             result.error("phase.dependency_drift", f"task {task_id} dependencies differ from phase.taskDag")
         workspace = task.get("workspace") if isinstance(task.get("workspace"), Mapping) else {}
-        worktree = str((workspace.get("workspaceId") if schema_version(task) == SCHEMA_VERSION else task_worktree(task)) or "")
+        worktree = str(workspace.get("workspaceId") or "")
         dispatchable = task.get("state") in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}
         role = str(task.get("role") or "worker")
         backend = str((task.get("workspace") or {}).get("backend") or "current")
-        if task.get("state") == "Active" and role not in {"reviewer", "explorer", "validator", "summarizer"} and backend == "current":
+        if task.get("state") == "Active" and role not in {"reviewer", "explorer"} and backend == "current":
             active_current_writers.append(task_id)
         normalized = normalize_path(worktree)
-        compare_now = schema_version(task) == LEGACY_SCHEMA_VERSION or task.get("state") == "Active"
+        compare_now = task.get("state") == "Active"
         if worktree and compare_now:
             if normalized in worktrees:
                 result.error("worktree.duplicate", f"duplicate worktree: {worktree}")
             worktrees.add(normalized)
-        if dispatchable and "externalResources" in as_list(task.get("risks")) and str(task.get("taskId")) not in lease_owners.values():
+        if dispatchable and "externalResources" in as_list(task.get("modeReasons")) and str(task.get("taskId")) not in lease_owners.values():
             result.error("lease.required", f"external-resource task {task.get('taskId')} requires an active lease")
     if len(active_current_writers) > 1:
         result.error("workspace.parallel", f"active writers cannot share the current checkout: {', '.join(active_current_writers)}")
-    conflict_tasks = tasks if any(schema_version(task) == LEGACY_SCHEMA_VERSION for task in tasks) else [task for task in tasks if task.get("state") == "Active"]
+    conflict_tasks = [task for task in tasks if task.get("state") == "Active"]
     for index, task in enumerate(conflict_tasks):
         left = as_list((task.get("ownership") or {}).get("owned"))
         for other in conflict_tasks[index + 1:]:
@@ -1479,7 +1330,7 @@ def inspect_worktree(repo: Path, path: Path) -> dict[str, Any]:
     }
 
 
-def check_repository(
+def check_task_repository(
     repo: Path,
     profile: Mapping[str, Any] | None = None,
     task: Mapping[str, Any] | None = None,
@@ -1488,29 +1339,19 @@ def check_repository(
     check_all: bool = False,
 ) -> ValidationResult:
     result = ValidationResult()
-    if profile:
-        result.extend(validate_profile(profile))
     mode = detect_mode(profile, task, phase)
     result.data["mode"] = mode
     if not task:
         result.data["idle"] = True
-        if phase:
-            result.extend(validate_phase(phase))
-            result.extend(validate_repository_evidence(repo, {}, phase, None))
-        if review:
-            result.extend(validate_review(review, phase=phase, profile=profile))
         return result
     result.data["idle"] = False
     result.extend(validate_task(task, profile))
     if task.get("state") in {"Candidate", "Accepted", "Integrated"}:
         result.extend(validate_repository_commits(repo, task, phase))
-        if mode == "strict" or check_all:
-            result.extend(validate_repository_ownership(repo, task))
+        result.extend(validate_repository_ownership(repo, task))
     if mode == "strict" or check_all:
         if not phase:
             result.error("phase.required", "Strict lifecycle requires a phase artifact")
-        else:
-            result.extend(validate_wave(repo, [task], phase, profile, complete=False))
         worktree_value = task_worktree(task)
         if worktree_value:
             info = inspect_worktree(repo, resolve_path(repo, str(worktree_value)) or repo)
@@ -1522,9 +1363,33 @@ def check_repository(
     if review:
         result.extend(validate_review(review, task, phase, profile))
     elif task.get("state") in {"Accepted", "Integrated"} and (
-        schema_version(task) == LEGACY_SCHEMA_VERSION or detect_mode(profile, task, phase) == "strict" or task.get("reviewRequired") is True
+        detect_mode(profile, task, phase) == "strict" or task.get("reviewRequired") is True
     ):
         result.error("review.required", "Accepted and Integrated tasks require immutable review evidence")
     if review:
         result.extend(validate_repository_evidence(repo, task, None, review))
+    return result
+
+
+def check_repository(
+    repo: Path,
+    profile: Mapping[str, Any] | None = None,
+    task: Mapping[str, Any] | None = None,
+    phase: Mapping[str, Any] | None = None,
+    review: Mapping[str, Any] | None = None,
+    check_all: bool = False,
+) -> ValidationResult:
+    """Validate each supplied artifact and repository surface exactly once."""
+    result = ValidationResult()
+    if profile:
+        result.extend(validate_profile(profile))
+    result.extend(check_task_repository(repo, profile, task, phase, review, check_all))
+    if phase:
+        if task and (detect_mode(profile, task, phase) == "strict" or check_all):
+            result.extend(validate_wave(repo, [task], phase, profile, complete=False, validate_tasks=False))
+        elif not task:
+            result.extend(validate_phase(phase))
+            result.extend(validate_repository_evidence(repo, {}, phase, None))
+    if review and not task:
+        result.extend(validate_review(review, phase=phase, profile=profile))
     return result

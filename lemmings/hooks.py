@@ -14,12 +14,12 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from lemmings.contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
     from lemmings.models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from lemmings.telemetry import contains_sensitive_text, looks_absolute_path
     from lemmings.workspace import load_registry
 else:
-    from .contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from .contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
     from .models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from .telemetry import contains_sensitive_text, looks_absolute_path
     from .workspace import load_registry
@@ -62,14 +62,14 @@ def requested_role(payload: Mapping[str, Any]) -> str | None:
     if isinstance(tool_input, dict):
         candidates.extend(tool_input.get(key) for key in ("role", "agent_type", "subagent_type", "task_name", "profile"))
         message = str(tool_input.get("message") or "").lower()
-        match = re.search(r"(?:role\s*[:=]\s*|as\s+|lemmings[-_])(reviewer|explorer|validator|summarizer|manager|orchestrator|worker)\b", message)
+        match = re.search(r"(?:role\s*[:=]\s*|as\s+|lemmings[-_])(reviewer|explorer|manager|worker)\b", message)
         if match:
             candidates.append(match.group(1))
     for explicit in candidates:
         if not explicit:
             continue
         value = str(explicit).lower().replace(" ", "-")
-        for role in ("reviewer", "explorer", "validator", "summarizer", "manager", "orchestrator", "worker"):
+        for role in ("reviewer", "explorer", "manager", "worker"):
             token = role.replace("-", "[-_]")
             if re.search(rf"(?:^|[-_]){token}(?:$|[-_])", value):
                 return role
@@ -121,6 +121,23 @@ def changed_paths(payload: Mapping[str, Any]) -> list[str]:
 def shell_command(payload: Mapping[str, Any]) -> str:
     tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
     return str(tool_input.get("command", "")) if isinstance(tool_input, dict) else str(tool_input)
+
+
+def candidate_diff_paths(task: Mapping[str, Any], cwd: str | os.PathLike[str]) -> list[str]:
+    base = str(task.get("baseSha") or "").strip()
+    head = str(candidate_head(task) or "").strip()
+    if not base or not head:
+        raise ValueError("candidate diff requires task.base and candidateHead/fixHead")
+    process = subprocess.run(
+        ["git", "-C", str(cwd), "diff", "--name-only", f"{base}..{head}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.strip() or process.stdout.strip() or "git diff failed"
+        raise ValueError(f"candidate diff could not be inspected: {detail}")
+    return sorted({line.strip().replace("\\", "/") for line in process.stdout.splitlines() if line.strip()})
 
 
 def _git_read_only(tokens: list[str]) -> bool:
@@ -345,7 +362,7 @@ def ownership_violation(task: Mapping[str, Any], paths: list[str], cwd: str | Pa
             path = candidate.as_posix()
         if any(path_matches(path, str(rule)) for rule in forbidden):
             return f"path is forbidden: {path}"
-        if any(path_matches(path, str(rule)) for rule in shared) and role not in {"orchestrator", "shared-contract-owner"}:
+        if any(path_matches(path, str(rule)) for rule in shared) and role != "manager":
             return f"shared path requires its owner: {path}"
         if owned and not any(path_matches(path, str(rule)) for rule in owned + shared):
             return f"path is outside task ownership: {path}"
@@ -369,94 +386,42 @@ def derive_context_packet(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Project canonical artifacts into a bounded role-specific invocation."""
-    if task.get("schemaVersion") == 3:
-        ownership = task.get("ownership") if isinstance(task.get("ownership"), Mapping) else {}
-        validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
-        references = []
-        for entry in as_list(task.get("workingSet")):
-            if not isinstance(entry, Mapping):
-                continue
-            body = {"ref": entry.get("ref"), "purpose": entry.get("purpose")}
-            content_hash = entry.get("contentHash") or hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-            references.append({**body, "contentHash": content_hash})
-        profile = payload.get("profile") if isinstance(payload.get("profile"), Mapping) else {}
-        attempt = int(payload.get("attempt", 0) or 0)
-        seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
-        invocation = {
-            "schemaVersion": 3,
-            "runId": str(payload.get("runId") or task.get("runId") or task.get("taskId")),
-            "taskId": task.get("taskId"),
-            "taskRevision": task.get("revision"),
-            "invocationId": str(payload.get("invocationId") or hashlib.sha256(seed.encode()).hexdigest()[:24]),
-            "attempt": attempt,
-            "role": role,
-            "baseSha": task.get("baseSha") or payload.get("baseSha") or "uncommitted",
-            "profileDigest": hashlib.sha256(json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-            "contextDigest": "",
-            "objective": payload.get("focus") or payload.get("question") or task.get("goal"),
-            "acceptanceCriteria": as_list(task.get("acceptance")),
-            "ownedPaths": as_list(ownership.get("owned")) if role == "worker" else [],
-            "forbiddenPaths": as_list(ownership.get("forbidden")),
-            "contextRefs": references,
-            "validationCommands": as_list(validation.get("commands")),
-            "candidateHead": candidate_head(task) if role == "reviewer" else None,
-            "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
-            "outputSchemaVersion": 3,
-        }
-        digest_body = {key: value for key, value in invocation.items() if key != "contextDigest"}
-        invocation["contextDigest"] = hashlib.sha256(json.dumps(digest_body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        return sanitize_context(invocation)
-    phase = phase or {}
-    execution = task.get("execution") if isinstance(task.get("execution"), Mapping) else {}
-    validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
     ownership = task.get("ownership") if isinstance(task.get("ownership"), Mapping) else {}
-    packet: dict[str, Any] = {"schemaVersion": 2, "role": role, "task": {"id": task.get("taskId")}}
-    if role == "summarizer":
-        packet["evidence"] = payload.get("evidence") or []
-        return sanitize_context(packet)
-    working_set = task.get("workingSet") or []
-    if role == "explorer":
-        packet["focus"] = payload.get("focus") or payload.get("question")
-        packet["workingSet"] = working_set[:3]
-    elif role == "worker":
-        packet["task"].update({
-            "state": task.get("state"),
-            "goal": task.get("goal"),
-            "acceptance": task.get("acceptance"),
-            "dependencies": task.get("dependencies"),
-        })
-        packet["scope"] = {
-            "ownership": ownership,
-            "risks": task.get("risks"),
-            "frozenContracts": phase.get("contracts") if phase.get("contractsFrozen") else [],
-        }
-        packet["workingSet"] = {
-            "references": working_set,
-            "interfaces": execution.get("interfaces") or [],
-            "tests": execution.get("tests") or [],
-            "dependencyHandoffs": execution.get("dependencyHandoffs") or [],
-        }
-    elif role == "validator":
-        packet["task"]["acceptance"] = task.get("acceptance")
-        packet["scope"] = {"risks": task.get("risks")}
-    if role in {"worker", "validator"}:
-        packet["validation"] = {
-            "riskToTest": validation.get("riskToTest") or [],
-            "commands": validation.get("commands") or [],
-            "allowedOutputs": validation.get("allowedOutputs") or [],
-        }
-    if role == "reviewer":
-        packet["task"]["acceptance"] = task.get("acceptance")
-        packet["execution"] = {
-            "range": {"baseSha": task.get("baseSha"), "headSha": candidate_head(task)},
-            "handoff": execution.get("handoff"),
-            "validationEvidence": execution.get("validationEvidence") or [],
-            "actualModel": (task.get("models") or {}).get("actual"),
-        }
-    elif role == "worker":
-        packet["execution"] = {"assignedModel": (task.get("models") or {}).get("assigned")}
-    packet["budget"] = {"expansionsRemaining": max(0, 1 - int(payload.get("expansionsUsed", 0) or 0))}
-    return sanitize_context(packet)
+    validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
+    references = []
+    for entry in as_list(task.get("workingSet")):
+        if not isinstance(entry, Mapping):
+            continue
+        body = {"ref": entry.get("ref"), "purpose": entry.get("purpose")}
+        content_hash = entry.get("contentHash") or hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        references.append({**body, "contentHash": content_hash})
+    profile = payload.get("profile") if isinstance(payload.get("profile"), Mapping) else {}
+    attempt = int(payload.get("attempt", 0) or 0)
+    seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
+    invocation = {
+        "schemaVersion": 3,
+        "runId": str(payload.get("runId") or task.get("runId") or task.get("taskId")),
+        "taskId": task.get("taskId"),
+        "taskRevision": task.get("revision"),
+        "invocationId": str(payload.get("invocationId") or hashlib.sha256(seed.encode()).hexdigest()[:24]),
+        "attempt": attempt,
+        "role": role,
+        "baseSha": task.get("baseSha") or payload.get("baseSha") or "uncommitted",
+        "profileDigest": hashlib.sha256(json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        "contextDigest": "",
+        "objective": payload.get("focus") or payload.get("question") or task.get("goal"),
+        "acceptanceCriteria": as_list(task.get("acceptance")),
+        "ownedPaths": as_list(ownership.get("owned")) if role == "worker" else [],
+        "forbiddenPaths": as_list(ownership.get("forbidden")),
+        "contextRefs": references,
+        "validationCommands": as_list(validation.get("commands")),
+        "candidateHead": candidate_head(task) if role == "reviewer" else None,
+        "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
+        "outputSchemaVersion": 3,
+    }
+    digest_body = {key: value for key, value in invocation.items() if key != "contextDigest"}
+    invocation["contextDigest"] = hashlib.sha256(json.dumps(digest_body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return sanitize_context(invocation)
 
 
 def context_warnings(packet: Mapping[str, Any], task: Mapping[str, Any], profile: Mapping[str, Any], payload: Mapping[str, Any]) -> list[str]:
@@ -491,7 +456,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 if mode == "strict":
                     return decision("block", "Strict spawn requires an explicit worker, reviewer, or explorer role")
                 role = str(task.get("role", "worker"))
-            if task.get("schemaVersion") == 3 and role not in {"worker", "reviewer", "explorer"}:
+            if role not in {"worker", "reviewer", "explorer"}:
                 return decision("block", "v3 dispatch role must be worker, reviewer, or explorer")
             recovery_status = (task.get("routingRecovery") or {}).get("status")
             if recovery_status in {"pending-confirmation", "paused"}:
@@ -514,27 +479,24 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("block", task_result.findings[0].message)
             requested = requested_model(payload)
             assigned = (task.get("models") or {}).get("assigned")
-            writer = role not in {"reviewer", "explorer", "validator", "summarizer"}
+            writer = role == "worker"
             if role == "reviewer":
                 if task.get("state") != "Candidate":
                     return decision("block", "reviewer requires a Candidate task")
-                if task.get("schemaVersion") == 3:
-                    recovery_route = current_recovery_route(task, "reviewer")
-                    host_id = requested_host(payload) or (recovery_route or {}).get("hostId") or (task.get("models") or {}).get("hostId")
-                    allowed = [route_name(item) for item in (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or []) if isinstance(item, Mapping)]
-                    recovery_allowed = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == requested)
-                    if requested not in allowed and not recovery_allowed:
-                        return decision("block", "reviewer model must be an approved per-host or task-local recovery route")
-                elif requested != "gpt-5.6-sol:high":
-                    return decision("block", "reviewer must use gpt-5.6-sol:high")
+                recovery_route = current_recovery_route(task, "reviewer")
+                host_id = requested_host(payload) or (recovery_route or {}).get("hostId") or (task.get("models") or {}).get("hostId")
+                allowed = [route_name(item) for item in (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or []) if isinstance(item, Mapping)]
+                recovery_allowed = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == requested)
+                if requested not in allowed and not recovery_allowed:
+                    return decision("block", "reviewer model must be an approved per-host or task-local recovery route")
                 head = candidate_head(task)
                 review_head = (tool_input.get("head") if isinstance(tool_input, dict) else None) or payload.get("reviewHead")
-                if not (task.get("models") or {}).get("actual") or not (task.get("execution") or {}).get("handoff"):
-                    return decision("block", "reviewer requires Candidate actual-model and embedded handoff evidence")
+                if not (task.get("models") or {}).get("actual"):
+                    return decision("block", "reviewer requires Candidate actual-model evidence")
                 if not head or (review_head and str(review_head) != head):
                     return decision("block", "reviewer must inspect the current candidate/fix head")
                 return decision("allow", "reviewer dispatch invariants satisfied")
-            if role in {"explorer", "validator", "summarizer"}:
+            if role == "explorer":
                 workspace_blocked = task.get("state") == "Blocked" and (task.get("workspace") or {}).get("approval") == "declined"
                 if task.get("state") not in {"Ready", "Active", "Candidate"} and not workspace_blocked:
                     return decision("block", f"{role} requires Ready, Active, or Candidate task")
@@ -552,14 +514,14 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             if mode == "strict" and not as_list((task.get("ownership") or {}).get("owned")):
                 return decision("block", "Strict writer requires non-empty ownership.owned")
             backend = ((task.get("workspace") or {}).get("backend"))
-            isolated = backend in {"code-worktree", "package-worktree", "unity-clone"} or "parallelWriters" in as_list(task.get("risks")) or payload.get("parallelWriters") or payload.get("dirtyPrimary")
+            isolated = backend in {"code-worktree", "package-worktree", "unity-clone"} or "parallelWriters" in as_list(task.get("modeReasons")) or payload.get("parallelWriters") or payload.get("dirtyPrimary")
             if writer and isolated:
                 workspace = task.get("workspace") or {}
                 estimated = workspace.get("estimatedGiB")
                 if isinstance(estimated, (int, float)) and not isinstance(estimated, bool) and estimated > 10 and workspace.get("approval") != "approved":
                     return decision("block", "workspace estimates above 10 GiB require explicit user approval before writer dispatch")
                 declared = task_worktree(task)
-                if task.get("schemaVersion") == 3 and not declared:
+                if not declared:
                     workspace_id = workspace.get("workspaceId")
                     repo_root = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd()))
                     registry = load_registry(repo_root)
@@ -577,24 +539,25 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
         if tool in {"apply_patch", "Bash", "exec_command", "shell_command"}:
             identity_role = requested_role(payload)
             effective_role = identity_role or str(task.get("role", "worker"))
-            if tool == "apply_patch" and effective_role in {"reviewer", "explorer", "summarizer", "validator"}:
+            if tool == "apply_patch" and effective_role in {"reviewer", "explorer"}:
                 return decision("block", f"{effective_role} identity cannot apply patches")
-            if tool != "apply_patch" and effective_role == "validator":
-                command = shell_command(payload).strip()
-                declared = [str(item).strip() for item in as_list((task.get("validation") or {}).get("commands"))]
-                return decision("allow", "declared validator command") if command in declared else decision("block", "validator shell command is not declared in task.validation.commands")
             if tool != "apply_patch" and is_read_only_shell(shell_command(payload)):
                 return decision("allow", "known read-only shell command")
-            if effective_role in {"reviewer", "explorer", "summarizer"}:
+            if effective_role in {"reviewer", "explorer"}:
                 return decision("block", f"{effective_role} identity cannot run mutating shell commands")
-            if mode == "strict" and effective_role not in {"reviewer", "explorer", "validator", "summarizer"} and not as_list((task.get("ownership") or {}).get("owned")):
+            command = shell_command(payload).strip()
+            declared = [str(item).strip() for item in as_list((task.get("validation") or {}).get("commands"))]
+            if tool != "apply_patch" and command in declared:
+                return decision("allow", "declared validation command")
+            if mode == "strict" and effective_role not in {"reviewer", "explorer"} and not as_list((task.get("ownership") or {}).get("owned")):
                 return decision("block", "Strict writer cannot write without ownership.owned")
             paths = changed_paths(payload)
             violation = ownership_violation(task, paths, payload.get("_repoRoot") or payload.get("cwd"))
             if violation:
                 return decision("block", violation)
-            if tool != "apply_patch" and not paths:
-                return decision("block" if mode == "strict" else "warn", "shell write-set cannot be proven")
+            if not paths:
+                kind = "apply_patch path-set" if tool == "apply_patch" else "shell write-set"
+                return decision("block" if mode == "strict" else "warn", f"{kind} cannot be proven")
             return decision("allow", "write invariants satisfied")
     if event == "SubagentStart":
         if not task:
@@ -607,13 +570,13 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
         if not task_result.ok:
             return decision("block", task_result.findings[0].message)
         role = requested_role(payload) or str(task.get("role") or "worker")
-        if task.get("schemaVersion") == 3 and role not in {"worker", "reviewer", "explorer"}:
+        if role not in {"worker", "reviewer", "explorer"}:
             return decision("block", "v3 invocation role must be worker, reviewer, or explorer")
         if role == "explorer" and not (payload.get("focus") or payload.get("question")):
             return decision("block", "explorer ContextPacket requires one focus or question")
         context = derive_context_packet(task, payload.get("phase") or {}, role, payload)
         warnings = context_warnings(context, task, profile, payload)
-        hard = task.get("schemaVersion") == 3 and bool(warnings)
+        hard = bool(warnings)
         return decision(
             "block" if hard else ("warn" if warnings else "allow"),
             "; ".join(warnings) if warnings else "bounded context accepted",
@@ -626,67 +589,34 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             if mode == "strict":
                 return decision("warn", "Strict subagent stop has no safely inferred role; evidence was not accepted")
             role = str(task.get("role", "worker"))
-        if task.get("schemaVersion") == 3:
-            route_failure = payload.get("routeFailure") or payload.get("route_failure")
-            if isinstance(route_failure, Mapping):
-                try:
-                    normalized = normalize_route_failure(route_failure)
-                    action = route_failure_action(
-                        normalized,
-                        transient_retries=int(payload.get("transientRetries", 0) or 0),
-                        context_reductions=int(payload.get("contextReductions", 0) or 0),
-                    )
-                except (TypeError, ValueError) as error:
-                    return decision("block", str(error))
-                return decision("allow", f"RouteFailure accepted; next action: {action}", routeFailure=normalized, recoveryAction=action)
-            result_value = payload.get("agentResult") or payload.get("agent_result")
-            invocation = payload.get("agentInvocation") or payload.get("agent_invocation") or derive_context_packet(task, payload.get("phase") or {}, role, payload)
-            if not isinstance(result_value, Mapping):
-                return decision("block", "v3 subagent stop requires structured AgentResult")
-            checked = validate_agent_result(result_value, invocation, task)
-            return decision("allow", "AgentResult accepted") if checked.ok else decision("block", checked.findings[0].message)
-        if role == "reviewer":
-            head = candidate_head(task)
-            evidence = payload.get("reviewEvidence") or payload.get("verdict")
-            if not evidence or (payload.get("reviewHead") and str(payload.get("reviewHead")) != str(head)):
-                return decision("block", "reviewer stop requires verdict/range evidence for current candidate head")
-            return decision("allow", "review evidence complete")
-        if role == "validator":
-            return decision("allow", "validation evidence complete") if payload.get("validationEvidence") else decision("block", "validator stop requires validation evidence")
-        if role in {"explorer", "summarizer"}:
-            return decision("allow", "bounded read-only output complete") if payload.get("boundedOutput") or payload.get("output") else decision("block", f"{role} stop requires bounded output")
-        execution = task.get("execution") or {}
-        if task.get("implementationTask", True) and not candidate_head(task):
-            return decision("block", "implementation task requires candidate/fix commit")
-        if not (task.get("models") or {}).get("actual"):
-            return decision("block", "execution requires models.actual")
-        if not execution.get("handoff"):
-            return decision("block", "task.execution.handoff is required")
-        if not execution.get("validationEvidence") and not (task.get("validation") or {}).get("debt"):
-            return decision("block", "validation evidence or owned debt is required")
-        violations = as_list(payload.get("ownedPathViolations"))
-        if violations:
-            return decision("block", "changes outside ownership: " + ", ".join(map(str, violations)))
-        return decision("allow", "candidate evidence complete")
-    if event == "PostToolUse":
-        paths = changed_paths(payload)
-        if not paths:
-            cwd = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve()
-            discovered: set[str] = set()
-            for args in (("diff", "--name-only"), ("diff", "--cached", "--name-only"), ("ls-files", "--others", "--exclude-standard")):
-                process = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False)
-                if process.returncode:
-                    return decision("warn", "actual diff could not be inspected")
-                discovered.update(line.strip() for line in process.stdout.splitlines() if line.strip())
-            paths = sorted(discovered)
-        identity_role = requested_role(payload) or str(task.get("role", "worker"))
-        if identity_role == "validator" and paths:
-            allowed_outputs = as_list((task.get("validation") or {}).get("allowedOutputs"))
-            unexpected = [path for path in paths if not any(path_matches(path, str(rule)) for rule in allowed_outputs)]
-            if unexpected:
-                return decision("warn", "validator changed undeclared outputs: " + ", ".join(unexpected))
-        violation = ownership_violation(task, paths, payload.get("_repoRoot") or payload.get("cwd"))
-        return decision("warn", violation + "; candidate is unsuitable until corrected") if violation else decision("allow", "observed diff respects ownership")
+        route_failure = payload.get("routeFailure") or payload.get("route_failure")
+        if isinstance(route_failure, Mapping):
+            try:
+                normalized = normalize_route_failure(route_failure)
+                action = route_failure_action(
+                    normalized,
+                    transient_retries=int(payload.get("transientRetries", 0) or 0),
+                    context_reductions=int(payload.get("contextReductions", 0) or 0),
+                )
+            except (TypeError, ValueError) as error:
+                return decision("block", str(error))
+            return decision("allow", f"RouteFailure accepted; next action: {action}", routeFailure=normalized, recoveryAction=action)
+        result_value = payload.get("agentResult") or payload.get("agent_result")
+        invocation = payload.get("agentInvocation") or payload.get("agent_invocation") or derive_context_packet(task, payload.get("phase") or {}, role, payload)
+        if not isinstance(result_value, Mapping):
+            return decision("block", "v3 subagent stop requires structured AgentResult")
+        checked = validate_agent_result(result_value, invocation, task)
+        if not checked.ok:
+            return decision("block", checked.findings[0].message)
+        if role == "worker" and result_value.get("status") == "succeeded":
+            try:
+                actual_paths = candidate_diff_paths(task, payload.get("cwd") or payload.get("_repoRoot") or os.getcwd())
+            except ValueError as error:
+                return decision("block", str(error))
+            reported_paths = sorted({str(path).replace("\\", "/") for path in as_list(result_value.get("changedPaths"))})
+            if reported_paths != actual_paths:
+                return decision("block", "AgentResult.changedPaths does not match the actual candidate diff")
+        return decision("allow", "AgentResult accepted")
     return decision("allow", "event is not enforced")
 
 
@@ -700,8 +630,8 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
     if not marker.is_file():
         return {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
     state = read_object(marker)
-    if state.get("schemaVersion") not in {2, 3}:
-        return {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
+    if state.get("schemaVersion") != 3:
+        raise ValueError(schema_error("runtime marker", state))
     combined = {**state, **payload, "_lemmingsActive": True, "_repoRoot": str(repo)}
     for name in ("profile", "task", "phase", "review"):
         value = state.get(name + "Path")

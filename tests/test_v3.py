@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 3,
-        "distributionVersion": "3.0.0",
+        "distributionVersion": "3.1.0",
         "mode": "auto",
         "modelRoutes": {
             "codex": {
@@ -83,7 +83,7 @@ class AutoAndContractV3Tests(unittest.TestCase):
         self.assertTrue(validate_task(task(), profile()).ok)
 
     def test_auto_priority_and_explicit_pin(self):
-        self.assertEqual("strict", resolve_auto_mode({"risks": ["submodules"], "riskClass": "low"})["resolvedMode"])
+        self.assertEqual("strict", resolve_auto_mode({"modeReasons": ["submodules"], "riskClass": "low"})["resolvedMode"])
         self.assertEqual("strict", resolve_auto_mode({"writerCount": 2, "riskClass": "low"})["resolvedMode"])
         self.assertEqual("standard", resolve_auto_mode({"workerRequired": True, "riskClass": "low"})["resolvedMode"])
         self.assertEqual("simple", resolve_auto_mode({"workerRequired": False, "riskClass": "low"})["resolvedMode"])

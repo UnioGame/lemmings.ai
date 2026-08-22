@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from lemmings import hooks
 from lemmings.contracts import runtime_marker, validate_task
-from lemmings.quality import build_quality_report, finalize_task_quality, summarize_quality
+from lemmings.quality import build_quality_report, summarize_quality
 from lemmings.telemetry import (
     annotate_regression,
     bind_run,
@@ -50,28 +50,14 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
-    value = {
-        "schemaVersion": 2,
-        "taskId": "TASK-17",
-        "goal": "measure delivery",
-        "acceptance": ["report is complete"],
-        "dependencies": [],
-        "mode": "standard",
-        "state": state,
-        "role": "worker",
-        "risks": [],
-        "ownership": {"owned": ["lemmings/**"], "shared": [], "forbidden": []},
-        "workingSet": [{"ref": "lemmings/telemetry.py#record_event", "purpose": "telemetry contract"}],
-        "models": {"requested": None, "assigned": "gpt-5.6-luna:max", "actual": "gpt-5.6-luna:max"},
-        "baseSha": "base",
-        "commits": {"candidate": "head", "fix": []},
-        "execution": {"interfaces": [], "tests": [], "dependencyHandoffs": [], "handoff": "done", "validationEvidence": [{"passed": True}], "attempts": []},
-        "workspace": {"policy": "auto", "backend": "current", "path": None, "estimatedGiB": 0, "approval": "not-required", "reason": "serial"},
-        "validation": {"riskToTest": [], "commands": [], "allowedOutputs": [], "debt": []},
-        "reviewRef": "reviews/TASK-17.json",
-        "reviewHistory": [],
-        "close": {"integrationValidationPassed": state == "Integrated"},
-    }
+    value = json.loads((ROOT / "Documentation~" / "tasks" / "templates" / "task.json").read_text(encoding="utf-8"))
+    value.update({"taskId": "TASK-17", "goal": "measure delivery", "acceptance": ["report is complete"], "state": state, "baseSha": "base"})
+    value["ownership"] = {"owned": ["lemmings/**"], "shared": [], "forbidden": []}
+    value["workingSet"] = [{"ref": "lemmings/telemetry.py#record_event", "purpose": "telemetry contract"}]
+    value["models"]["actual"] = value["models"]["assigned"]
+    value["commits"]["candidate"] = "head"
+    value["execution"]["validationEvidence"] = [{"passed": True}]
+    value["reviewRef"] = "reviews/TASK-17.json"
     if cohort:
         value["telemetryCohort"] = cohort
     return value
@@ -79,7 +65,7 @@ def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
 
 def quality() -> dict:
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "taskId": "TASK-17",
         "baseSha": "base",
         "headSha": "head",
@@ -118,7 +104,7 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(1, summary["findings"]["plan-contract"]["P2"])
             self.assertTrue(summary["lunaToTerraEscalated"])
 
-    def test_metrics_finish_writes_quality_with_telemetry_off(self):
+    def test_metrics_finish_does_not_mutate_task_with_telemetry_off(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo)
             packets = repo / "docs/tasks"; reviews = packets / "reviews"
@@ -134,10 +120,10 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(0, process.returncode, process.stdout + process.stderr)
             output = json.loads(process.stdout)
             self.assertFalse(output["recorded"])
-            self.assertTrue(output["taskQuality"]["complete"])
-            self.assertTrue(json.loads(packet.read_text(encoding="utf-8"))["qualitySummary"]["firstPassAccepted"])
+            self.assertNotIn("taskQuality", output)
+            self.assertNotIn("qualitySummary", json.loads(packet.read_text(encoding="utf-8")))
 
-    def test_incomplete_v2_task_is_reported_but_not_comparable(self):
+    def test_incomplete_task_is_reported_but_not_comparable(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo)
             packets = repo / "docs/tasks"; packets.mkdir(parents=True)
@@ -299,7 +285,7 @@ class TelemetryTests(unittest.TestCase):
             first.write_text(json.dumps({**task(), "taskId": "TASK-1"}), encoding="utf-8")
             second.write_text(json.dumps({**task(), "taskId": "TASK-2"}), encoding="utf-8")
             marker = runtime_marker(repo); marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(json.dumps({"schemaVersion": 2, "taskPath": str(first)}), encoding="utf-8")
+            marker.write_text(json.dumps({"schemaVersion": 3, "taskPath": "TASK-1.json"}), encoding="utf-8")
             bind_run(repo, repo, task_id="TASK-2", task_path=str(second))
             hydrated = hooks.hydrate({"cwd": str(repo), "hook_event_name": "SubagentStart"})
             self.assertEqual("TASK-1", hydrated["task"]["taskId"])

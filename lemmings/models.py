@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from .contracts import ROUTE_FAILURE_CATEGORIES, SCHEMA_VERSION, read_object, route_name, validate_model_routes, write_object
+from .contracts import ROUTE_FAILURE_CATEGORIES, SCHEMA_VERSION, read_object, route_name, schema_error, validate_model_routes, write_object
 
 ROLES = ("worker", "reviewer", "explorer")
 CAPACITY_STATUSES = {"available", "depleted", "unknown"}
@@ -237,7 +237,9 @@ def build_recovery_proposal(
     failure_value: Mapping[str, Any],
     plan_value: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if task.get("schemaVersion") != SCHEMA_VERSION or not isinstance(task.get("revision"), int):
+    if task.get("schemaVersion") != SCHEMA_VERSION:
+        raise ValueError(schema_error("Task", task))
+    if not isinstance(task.get("revision"), int):
         raise ValueError("recovery requires a schema v3 Task with revision")
     catalogs = _normalize_catalogs(catalog_values)
     failure = normalize_route_failure(failure_value)
