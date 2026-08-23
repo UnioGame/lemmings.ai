@@ -92,6 +92,11 @@ def summarize_quality(repo: Path, task: Mapping[str, Any], outcome: str | None =
         if isinstance(item, Mapping) and isinstance(item.get("validationFailures"), int)
     )
     review_statuses = [review.get("status") for review in reviews]
+    review_groups: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    for review in reviews:
+        subject = review.get("subject") if isinstance(review.get("subject"), Mapping) else {}
+        key = (str(subject.get("headSha") or ""), int(review.get("cycle") or 0))
+        review_groups[key].append(review)
     incomplete: list[str] = []
     if not attempts:
         incomplete.append("execution.attempts")
@@ -110,19 +115,22 @@ def summarize_quality(repo: Path, task: Mapping[str, Any], outcome: str | None =
             continue
         if attempt.get("reviewStatus") not in REVIEW_STATES:
             incomplete.append(f"attempt {index} review status")
-    if task.get("reviewRef") and task.get("reviewRef") not in (task.get("reviewHistory") or []):
-        incomplete.append("final review missing from reviewHistory")
+    history = task.get("reviewHistory") or []
+    current_review_refs = [task.get("reviewRef"), *(task.get("crossReviewRefs") or [])]
+    if any(reference and reference not in history for reference in current_review_refs):
+        incomplete.append("current review missing from reviewHistory")
 
     changes = sum(left != right for left, right in zip(models, models[1:]))
     repair_cycles = sum(
         item.get("kind") == "fix" for item in attempts if isinstance(item, Mapping)
     )
-    first_pass = bool(review_statuses) and review_statuses[0] == "Accepted"
+    first_group = next(iter(review_groups.values()), [])
+    first_pass = bool(first_group) and all(review.get("status") == "Accepted" for review in first_group)
     return {
         "complete": not incomplete,
         "incompleteReasons": list(dict.fromkeys(incomplete)),
-        "reviewCycles": len(reviews),
-        "repeatedReviews": max(0, len(reviews) - 1),
+        "reviewCycles": len(review_groups),
+        "repeatedReviews": max(0, len(review_groups) - 1),
         "repairCycles": repair_cycles,
         "firstPassAccepted": first_pass,
         "workerModelChanges": changes,

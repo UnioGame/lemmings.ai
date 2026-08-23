@@ -4,6 +4,8 @@ Write schema v3 artifacts. Schema v2 is unsupported and must be rejected; there 
 
 Task records `requestedMode`, `resolvedMode`, risk class, reasons, capability degradations, writer count, review requirement, ownership, exclusive resources, compact working set, host/model assignment, workspace id/policy, validation, evidence, commits, review history, and close disposition. It never stores an absolute workspace path.
 
+Task `specialization` is optional manager guidance only; the selected route in `models.assigned` remains authoritative. `reviewPolicy` accepts `single` or `cross`; cross-review reports use `reviewRef` plus `crossReviewRefs` and degrade non-blockingly to single review when a distinct provider/model is unavailable.
+
 Auto resolves Strict before Standard before Simple. Strict signals are parallel writers, shared/frozen or overlapping contracts/domains, submodules/codegen/multiple repositories, shared serialized assets, exclusive resources, high risk, an integration branch, or baseline review. Standard signals are one specialist worker, one-owner public contract, medium risk, candidate/repair/review, or broad validation. Explicit pins remain fixed. Auto may escalate after discovery and may not downgrade after mutation.
 
 State flow is `Draft → Ready → Active → Candidate → Accepted → Integrated`. Repair returns Candidate work to Active once. A second failed review becomes `Replan Required`. `Accepted` is not integration. `Integrated` requires candidate/fix SHA, merge/integration SHA, integration validation, evidence, and workspace disposition. It does not require `qualitySummary`, telemetry history, or a still-existing worktree.

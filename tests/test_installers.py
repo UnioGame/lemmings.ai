@@ -122,7 +122,7 @@ class InstallerTests(unittest.TestCase):
 
                 profile = json.loads(profile_path.read_text(encoding="utf-8-sig"))
                 self.assertEqual(3, profile["schemaVersion"])
-                self.assertEqual("3.1.0", profile["distributionVersion"])
+                self.assertEqual("3.2.0", profile["distributionVersion"])
                 self.assertEqual("auto", profile["mode"])
                 self.assertNotIn("unknown", profile)
                 self.assertEqual("unity", profile["game"]["engine"])

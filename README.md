@@ -1,4 +1,4 @@
-# Lemmings 3.1
+# Lemmings 3.2
 
 Lemmings is a repository skill for proportional agent delivery. `Auto` resolves Simple, Standard, or Strict after discovery. The current agent remains the sole manager; bounded worker, reviewer, and explorer invocations receive compact assignments.
 
@@ -64,8 +64,8 @@ The canonical project configuration is `.agents/lemmings.json`. Routes are order
   "modelRoutes": {
     "codex": {
       "worker": [
-        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max" },
-        { "providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max" }
+        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max", "specializations": ["default", "frontend"] },
+        { "providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max", "specializations": ["default"] }
       ],
       "reviewer": [
         { "providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high" }
@@ -88,6 +88,10 @@ The canonical project configuration is `.agents/lemmings.json`. Routes are order
   }
 }
 ```
+
+Routes may carry optional specialization tags. A Task may carry one `specialization` hint; the manager prioritizes matching routes while leaving all routes for the role as fallbacks. The selected `models.assigned` route remains the execution authority and tools never choose a model.
+
+For security, payments, or high-risk refactors, the manager may set `reviewPolicy` to `cross`. Store the primary immutable report in `reviewRef` and additional reports in `crossReviewRefs`. Two distinct provider/model identities are required; model variants do not count. If a second identity is unavailable, change the policy to `single` and record `cross-review-unavailable` in `capabilityDegradations`; this does not block delivery.
 
 Model identifiers are opaque host catalog values. A larger catalog does not raise the orchestration mode. Permanent route changes are stale-safe and require confirmation:
 
@@ -157,9 +161,9 @@ python -m lemmings metrics usage --host opencode --file usage.json
 
 Normal `check` validates lifecycle/configuration without rereading the installed skill and agent trees. Use `--distribution` for the explicit byte-level bundle comparison; installers perform the equivalent comparison before committing their transaction.
 
-## Upgrading to 3.1
+## Upgrading to 3.2
 
-3.1 is intentionally breaking: schema v2 and side-by-side v2/v3 operation are unsupported. Upgrade by running the 3.1 installer. A recognized legacy bundle is replaced without `Force`; a modified current v3/3.1 bundle still requires `Force`.
+3.2 keeps schema v3 and adds optional specialization and cross-review fields. Schema v2 and side-by-side v2/v3 operation remain unsupported. Upgrade by running the 3.2 installer. A recognized legacy bundle is replaced without `Force`; a modified current v3/3.2 bundle still requires `Force`.
 
 The installer replaces `.agents/skills/lemmings`, `.agents/lemmings.json`, and the worker/reviewer/explorer profiles. It removes these legacy-owned targets after a successful transactional validation:
 

@@ -104,6 +104,24 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(1, summary["findings"]["plan-contract"]["P2"])
             self.assertTrue(summary["lunaToTerraEscalated"])
 
+    def test_cross_reviews_same_head_and_cycle_count_once(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp); init_repo(repo)
+            reviews = repo / "docs/tasks/reviews"; reviews.mkdir(parents=True)
+            primary = "docs/tasks/reviews/TASK-17-primary.json"
+            secondary = "docs/tasks/reviews/TASK-17-secondary.json"
+            for reference, review_id in ((primary, "R1"), (secondary, "R2")):
+                (repo / reference).write_text(json.dumps({"reviewId": review_id, "status": "Accepted", "cycle": 1, "subject": {"headSha": "head"}, "findings": []}), encoding="utf-8")
+            current = task("Integrated")
+            current["reviewRef"] = primary
+            current["crossReviewRefs"] = [secondary]
+            current["reviewHistory"] = [primary, secondary]
+            current["execution"]["attempts"] = [{"attempt": 1, "kind": "candidate", "actualModel": "gpt-5.6-luna:max", "headSha": "head", "validationFailures": 0, "reviewRef": primary, "reviewStatus": "Accepted"}]
+            summary = summarize_quality(repo, current, "completed")
+            self.assertEqual(1, summary["reviewCycles"])
+            self.assertEqual(0, summary["repeatedReviews"])
+            self.assertTrue(summary["firstPassAccepted"])
+
     def test_metrics_finish_does_not_mutate_task_with_telemetry_off(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo)

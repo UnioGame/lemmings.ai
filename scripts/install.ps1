@@ -133,7 +133,7 @@ $repoName = Split-Path -Leaf $repoRoot
 $projectRelative = Get-RelativeSlashPath -From $repoRoot -To $projectPath
 $profileDefaults = [pscustomobject]@{
     schemaVersion = 3
-    distributionVersion = '3.1.0'
+    distributionVersion = '3.2.0'
     mode = 'auto'
     roadmap = 'docs/tasks/ROADMAP.md'
     taskGlobs = @('docs/tasks/**/*.json')
@@ -142,11 +142,11 @@ $profileDefaults = [pscustomobject]@{
     modelRoutes = [pscustomobject]@{
         codex = [pscustomobject]@{
             worker = @(
-                [pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-luna'; variantId = 'max' },
-                [pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-terra'; variantId = 'max' }
+                [pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-luna'; variantId = 'max'; specializations = @('default') },
+                [pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-terra'; variantId = 'max'; specializations = @('default') }
             )
-            reviewer = @([pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-sol'; variantId = 'high' })
-            explorer = @([pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-luna'; variantId = 'high' })
+            reviewer = @([pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-sol'; variantId = 'high'; specializations = @('default') })
+            explorer = @([pscustomobject]@{ providerId = 'openai'; modelId = 'gpt-5.6-luna'; variantId = 'high'; specializations = @('default') })
         }
     }
     contextPolicy = [pscustomobject]@{ maxPacketBytes = 16384; maxWorkingSetItems = 12; maxExpansions = 1 }
@@ -204,7 +204,7 @@ $configDrift = (Test-Path -LiteralPath $profilePath) -and ([IO.File]::ReadAllTex
 $legacyTargetsPresent = (Test-Path -LiteralPath $legacyProfilePath) -or (Test-SchemaVersion -Path $activeMarkerPath -Version 2) -or @($installedAgentFiles | Where-Object { $_.Name -in $obsoleteAgentNames }).Count -gt 0
 $bundlePresent = (Test-Path -LiteralPath $skillTarget) -or $installedAgentFiles.Count -gt 0 -or (Test-Path -LiteralPath $profilePath) -or $legacyTargetsPresent
 $bundleDrift = $skillDrift -or $agentDrift -or $configDrift -or ($bundlePresent -and ((-not (Test-Path -LiteralPath $skillTarget)) -or $installedAgentFiles.Count -eq 0 -or (-not (Test-Path -LiteralPath $profilePath))))
-if ($bundleDrift -and -not $Force -and -not $legacyRecognized) { throw 'Lemmings bundle differs from the canonical 3.1 distribution. Re-run with -Force to replace it.' }
+if ($bundleDrift -and -not $Force -and -not $legacyRecognized) { throw 'Lemmings bundle differs from the canonical 3.2 distribution. Re-run with -Force to replace it.' }
 $environmentNeedsChange = if ($packageInsideRepo) {
     (Test-SchemaVersion -Path $environmentPath -Version 2) -or (Test-SchemaVersion -Path $environmentPath -Version 3)
 } else {

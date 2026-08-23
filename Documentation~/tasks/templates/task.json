@@ -16,6 +16,8 @@
   "workerRequired": true,
   "parallelReason": null,
   "reviewRequired": false,
+  "reviewPolicy": null,
+  "specialization": null,
   "state": "Ready",
   "previousState": "Draft",
   "role": "worker",
@@ -41,6 +43,7 @@
   "commits": { "candidate": null, "fix": [] },
   "validation": { "riskToTest": [], "commands": [], "allowedOutputs": [], "debt": [] },
   "reviewRef": null,
+  "crossReviewRefs": [],
   "reviewHistory": [],
   "close": { "mergeCommit": null, "integrationValidationPassed": false, "workspaceDisposition": null }
 }

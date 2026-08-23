@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 SCHEMA_VERSION = 3
-DISTRIBUTION_VERSION = "3.1.0"
+DISTRIBUTION_VERSION = "3.2.0"
+PLUGIN_VERSION = "3.2.0+codex.20260824"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -31,6 +32,8 @@ TRANSITIONS = {
     "Integrated": set(), "Replan Required": set(), "Cancelled": set(), "Superseded": set(),
 }
 REVIEW_STATES = {"Pending", "ChangesRequested", "Accepted"}
+REVIEW_POLICIES = {"single", "cross"}
+CROSS_REVIEW_DEGRADATION = "cross-review-unavailable"
 STRICT_RISKS = {
     "parallelWriters", "sharedContracts", "unitySerializedAssets", "submodules",
     "codegen", "externalResources", "multiRepository", "exclusiveResources",
@@ -144,7 +147,7 @@ def schema_supported(value: Mapping[str, Any]) -> bool:
 def schema_error(kind: str, value: Mapping[str, Any]) -> str:
     version = value.get("schemaVersion")
     if version == 2:
-        return "schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle"
+        return "schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle"
     return f"unsupported schemaVersion: {version!r}; expected 3"
 
 
@@ -305,6 +308,15 @@ def route_name(route: Mapping[str, Any]) -> str | None:
     return f"{provider}/{model}" + (f":{variant}" if isinstance(variant, str) and variant.strip() else "")
 
 
+def route_model_identity(value: Any) -> str | None:
+    """Return provider/model without a variant; variants are not distinct models."""
+    if isinstance(value, Mapping):
+        value = route_name(value)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.split(":", 1)[0]
+
+
 def validate_model_routes(routes: Any) -> ValidationResult:
     result = ValidationResult()
     if not isinstance(routes, Mapping) or not routes:
@@ -331,6 +343,20 @@ def validate_model_routes(routes: Any) -> ValidationResult:
                     result.error("profile.model_route", f"duplicate route in modelRoutes.{host_id}.{role}: {name}")
                 else:
                     names.append(name)
+                if isinstance(choice, Mapping) and "specializations" in choice:
+                    specializations = choice.get("specializations")
+                    if not isinstance(specializations, list) or any(
+                        not isinstance(item, str) or not item.strip() for item in specializations
+                    ):
+                        result.error(
+                            "profile.model_route_specializations",
+                            f"modelRoutes.{host_id}.{role}[{index}].specializations must be a string array",
+                        )
+                    elif len(specializations) != len(set(specializations)):
+                        result.error(
+                            "profile.model_route_specializations_duplicate",
+                            f"modelRoutes.{host_id}.{role}[{index}].specializations must not contain duplicates",
+                        )
     return result
 
 
@@ -721,6 +747,19 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     revision = task.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
         result.error("task.revision", "v3 Task requires non-negative integer revision")
+    specialization = task.get("specialization")
+    if specialization is not None and (not isinstance(specialization, str) or not specialization.strip()):
+        result.error("task.specialization", "specialization must be null or a non-empty string")
+    review_policy = task.get("reviewPolicy")
+    if review_policy is not None and review_policy not in REVIEW_POLICIES:
+        result.error("review.policy", f"reviewPolicy must be null, {sorted(REVIEW_POLICIES)}")
+    cross_review_refs = task.get("crossReviewRefs", [])
+    if not isinstance(cross_review_refs, list) or any(not isinstance(value, str) or not value.strip() for value in cross_review_refs):
+        result.error("review.cross_refs", "crossReviewRefs must be an array of non-empty review references")
+    elif len(cross_review_refs) != len(set(cross_review_refs)):
+        result.error("review.cross_refs_duplicate", "crossReviewRefs must not contain duplicate references")
+    if task.get("reviewRef") and task.get("reviewRef") in cross_review_refs:
+        result.error("review.cross_refs_primary", "crossReviewRefs must not repeat reviewRef")
     result.extend(validate_mode_decision(task))
     domains = task.get("ownershipDomainCount")
     if not isinstance(domains, int) or isinstance(domains, bool) or domains < 1:
@@ -876,11 +915,19 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         models = task.get("models") if isinstance(task.get("models"), Mapping) else {}
         if not models.get("actual"):
             result.error("model.actual_required", f"{state} requires models.actual")
-    review_required = bool(task.get("reviewRequired"))
+    review_required = bool(task.get("reviewRequired")) or review_policy in REVIEW_POLICIES
     if detect_mode(profile, task) == "strict":
         review_required = True
     if state in {"Accepted", "Integrated"} and review_required and not task.get("reviewRef"):
         result.error("review.reference", f"{state} requires reviewRef")
+    if state in {"Accepted", "Integrated"} and review_policy == "cross" and not cross_review_refs:
+        result.error("review.cross_reference", f"{state} cross review requires crossReviewRefs")
+    if state in {"Accepted", "Integrated"} and review_policy == "cross":
+        history = set(as_list(task.get("reviewHistory")))
+        current_refs = {value for value in [task.get("reviewRef"), *cross_review_refs] if value}
+        missing_history = sorted(current_refs - history)
+        if missing_history:
+            result.error("review.cross_history", "current cross-review references must appear in reviewHistory")
     if state == "Integrated":
         tracked_quality = isinstance(execution, Mapping) and bool(execution.get("attempts"))
         if tracked_quality:
@@ -1095,6 +1142,7 @@ def validate_repository_evidence(
     task: Mapping[str, Any],
     phase: Mapping[str, Any] | None,
     review: Mapping[str, Any] | None,
+    profile: Mapping[str, Any] | None = None,
 ) -> ValidationResult:
     result = ValidationResult()
     if phase:
@@ -1122,6 +1170,35 @@ def validate_repository_evidence(
             result.error("review.evidence_missing", "immutable review artifact must exist inside the repository")
         elif embedded_relative != actual_relative:
             result.error("review.evidence_path", "task review evidence path differs from the validated review artifact")
+        cross_refs = as_list(task.get("crossReviewRefs"))
+        cross_models = [route_model_identity(review.get("reviewerModel"))]
+        review_paths = {embedded_relative} if embedded_relative else set()
+        review_ids = {review.get("reviewId")} if review.get("reviewId") else set()
+        for index, value in enumerate(cross_refs):
+            relative, target = canonical_evidence_path(repo, value)
+            if not relative or not target or not target.is_file():
+                result.error("review.cross_evidence", f"crossReviewRefs[{index}] must be an existing file inside the repository")
+                continue
+            if relative in review_paths:
+                result.error("review.cross_path_duplicate", f"crossReviewRefs[{index}] duplicates an existing current review path")
+            review_paths.add(relative)
+            try:
+                evidence = read_object(target)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                result.error("review.cross_parse", f"invalid crossReviewRefs[{index}] evidence: {error}")
+                continue
+            evidence["_evidencePath"] = str(value)
+            result.extend(validate_review(evidence, task, phase, profile))
+            cross_models.append(route_model_identity(evidence.get("reviewerModel")))
+            review_id = evidence.get("reviewId")
+            if review_id in review_ids:
+                result.error("review.cross_id_duplicate", f"crossReviewRefs[{index}] duplicates an existing reviewId")
+            elif review_id:
+                review_ids.add(review_id)
+        if task.get("reviewPolicy") == "cross":
+            distinct_models = {value for value in cross_models if value}
+            if len(distinct_models) < 2:
+                result.error("review.cross_models", "cross review requires two distinct provider/model identities")
     allowed_heads = {
         value for value in [
             (task.get("commits") or {}).get("candidate"),
@@ -1367,7 +1444,7 @@ def check_task_repository(
     ):
         result.error("review.required", "Accepted and Integrated tasks require immutable review evidence")
     if review:
-        result.extend(validate_repository_evidence(repo, task, None, review))
+        result.extend(validate_repository_evidence(repo, task, None, review, profile))
     return result
 
 

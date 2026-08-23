@@ -4,7 +4,7 @@ The host adapter reports isolation, parallel agents, cancellation, structured ou
 
 ## Project routes
 
-Canonical project configuration is `.agents/lemmings.json`. `modelRoutes` is a per-host ordered map for worker, reviewer, and explorer. Each route uses opaque `providerId`, `modelId`, optional `variantId`. The manager is the current agent and is not reconfigured by this file.
+Canonical project configuration is `.agents/lemmings.json`. `modelRoutes` is a per-host ordered map for worker, reviewer, and explorer. Each route uses opaque `providerId`, `modelId`, optional `variantId`, and optional `specializations` string tags. A Task `specialization` is a manager hint: matching tags receive priority while every route for the role remains an allowed fallback. The manager is the current agent and is not reconfigured by this file.
 
 `lemmings models propose --catalog <catalog.json> --routes <routes.json>` validates one host catalog read-only and returns before/after plus config, catalog, and proposal digests. Show the diff to the user. Write nothing until explicit confirmation. `models apply` with the same inputs and `--confirm <proposalDigest>` rejects stale catalog or config state and atomically changes only project routes. It never changes workspace, prompts, topology, concurrency, telemetry, or Task state.
 
@@ -27,5 +27,7 @@ After the user selects one option, `models recover apply --option <id> --confirm
 One confirmation covers the selected chains until the Task ends. `models recover advance` may only move to the next already approved route. It records at most 12 compact route/result attempts. Exhaustion pauses dispatch and requires a new proposal. A wait option also pauses dispatch. Never poll capacity in the background or return to the original route midway through the Task.
 
 A replacement worker receives a fresh invocation in the same workspace with a deterministic checkpoint: HEAD, Git status, changed paths, and existing evidence. Do not transfer conversation history. A replacement reviewer receives the same immutable candidate range; never waive required review or replace it with manager self-review.
+
+For `reviewPolicy: "cross"`, the manager records the primary review in `reviewRef` and additional reports in `crossReviewRefs`. Distinct `providerId/modelId` identities are required; variants of one model do not count. If a second identity is unavailable, change the policy to `single` and record `cross-review-unavailable` in `capabilityDegradations`; this degradation alone never blocks delivery.
 
 After completion, offer permanent `models propose/apply` only as a separate user-confirmed operation. A large catalog alone never raises Auto mode, and no unconfirmed route overrides a pin.

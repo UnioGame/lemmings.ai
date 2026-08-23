@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 3,
-        "distributionVersion": "3.1.0",
+        "distributionVersion": "3.2.0",
         "mode": "auto",
         "modelRoutes": {
             "codex": {
@@ -151,7 +151,7 @@ class ModelsAndUsageV3Tests(unittest.TestCase):
     def test_reconfigure_is_stale_safe_and_changes_only_routes(self):
         config = profile()
         catalog = {"hostId": "opencode", "models": [{"providerId": "anthropic", "modelId": "claude", "variants": ["fast", "deep"]}]}
-        routes = {"worker": [{"providerId": "anthropic", "modelId": "claude", "variantId": "fast"}], "reviewer": [{"providerId": "anthropic", "modelId": "claude", "variantId": "deep"}], "explorer": [{"providerId": "anthropic", "modelId": "claude", "variantId": "fast"}]}
+        routes = {"worker": [{"providerId": "anthropic", "modelId": "claude", "variantId": "fast", "specializations": ["default", "tests"]}], "reviewer": [{"providerId": "anthropic", "modelId": "claude", "variantId": "deep"}], "explorer": [{"providerId": "anthropic", "modelId": "claude", "variantId": "fast"}]}
         proposal = build_proposal(config, catalog, routes)
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "lemmings.json"
@@ -159,6 +159,7 @@ class ModelsAndUsageV3Tests(unittest.TestCase):
             result = apply_proposal(path, catalog, routes, proposal["proposalDigest"])
             updated = json.loads(path.read_text(encoding="utf-8"))
             self.assertTrue(result["ok"])
+            self.assertEqual(["default", "tests"], updated["modelRoutes"]["opencode"]["worker"][0]["specializations"])
             self.assertEqual(config["workspacePool"], updated["workspacePool"])
             updated["mode"] = "strict"
             path.write_text(json.dumps(updated), encoding="utf-8")

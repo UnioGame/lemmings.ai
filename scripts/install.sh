@@ -136,7 +136,7 @@ trap 'rm -f -- "$defaults_file"' EXIT
 cat >"$defaults_file" <<JSON
 {
   "schemaVersion": 3,
-  "distributionVersion": "3.1.0",
+  "distributionVersion": "3.2.0",
   "mode": "auto",
   "roadmap": "docs/tasks/ROADMAP.md",
   "taskGlobs": ["docs/tasks/**/*.json"],
@@ -145,11 +145,11 @@ cat >"$defaults_file" <<JSON
   "modelRoutes": {
     "codex": {
       "worker": [
-        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max" },
-        { "providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max" }
+        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max", "specializations": ["default"] },
+        { "providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max", "specializations": ["default"] }
       ],
-      "reviewer": [{ "providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high" }],
-      "explorer": [{ "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "high" }]
+      "reviewer": [{ "providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high", "specializations": ["default"] }],
+      "explorer": [{ "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "high", "specializations": ["default"] }]
     }
   },
   "contextPolicy": { "maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1 },
@@ -223,7 +223,7 @@ bundle_drift=0
 (( skill_drift || agent_drift || config_drift )) && bundle_drift=1
 if (( bundle_present )) && [[ ! -d "$skill_target" || ! -f "$profile_target" || ${#installed_agents[@]} -eq 0 ]]; then bundle_drift=1; fi
 if (( bundle_drift && ! force && ! legacy_recognized )); then
-  echo "Lemmings bundle differs from the canonical 3.1 distribution. Re-run with --force to replace it." >&2
+  echo "Lemmings bundle differs from the canonical 3.2 distribution. Re-run with --force to replace it." >&2
   exit 1
 fi
 environment_needs_change=0

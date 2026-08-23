@@ -104,7 +104,7 @@ def load_settings(repo: Path) -> dict[str, Any]:
     merged = default_settings()
     merged.update(value)
     if merged.get("schemaVersion") != 3:
-        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle" if merged.get("schemaVersion") == 2 else f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 3")
+        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle" if merged.get("schemaVersion") == 2 else f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 3")
     if merged.get("mode") not in TELEMETRY_MODES:
         raise ValueError("telemetry mode must be off, basic, or full")
     return merged
@@ -490,7 +490,7 @@ def parse_period(value: str) -> timedelta:
 
 def normalize_quality_observation(value: Mapping[str, Any], expected_task_id: str | None = None, task: Mapping[str, Any] | None = None) -> dict[str, Any]:
     if value.get("schemaVersion") != 3:
-        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle" if value.get("schemaVersion") == 2 else f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 3")
+        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle" if value.get("schemaVersion") == 2 else f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 3")
     for field in ("taskId", "baseSha", "headSha", "recordedAt", "signals"):
         if not value.get(field):
             raise ValueError(f"quality observation requires {field}")

@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from lemmings import cli
-from lemmings.contracts import ValidationResult, runtime_marker, validate_phase, validate_profile, validate_review, validate_task
+from lemmings.contracts import ValidationResult, runtime_marker, validate_phase, validate_profile, validate_repository_evidence, validate_review, validate_task
 from lemmings.hooks import derive_context_packet, handle, hydrate, is_read_only_shell
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 3,
-        "distributionVersion": "3.1.0",
+        "distributionVersion": "3.2.0",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -49,18 +49,61 @@ def init_repo(path: Path) -> None:
 
 class SchemaOnlyTests(unittest.TestCase):
     def test_v2_artifacts_have_one_breaking_error(self):
-        expected = "schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle"
+        expected = "schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle"
         for validator, value in ((validate_profile, {"schemaVersion": 2}), (validate_task, {"schemaVersion": 2}), (validate_phase, {"schemaVersion": 2}), (validate_review, {"schemaVersion": 2})):
             with self.subTest(validator=validator.__name__):
                 checked = validator(value)
                 self.assertEqual(1, len(checked.findings))
                 self.assertEqual(expected, checked.findings[0].message)
 
-    def test_distribution_versions_are_31(self):
+    def test_distribution_versions_are_32(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual("3.1.0", package["version"])
-        self.assertEqual("3.1.0+codex.20260823", plugin["version"])
+        self.assertEqual("3.2.0", package["version"])
+        self.assertEqual("3.2.0+codex.20260824", plugin["version"])
+
+    def test_specialization_is_optional_hint_and_cross_review_degrades(self):
+        configured = profile()
+        configured["modelRoutes"]["codex"]["worker"][0]["specializations"] = ["default", "frontend"]
+        configured["modelRoutes"]["codex"]["worker"].append({"providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max", "specializations": ["default"]})
+        value = task()
+        value["specialization"] = "web-ui"
+        value["models"]["assigned"] = "openai/gpt-5.6-terra:max"
+        self.assertTrue(validate_profile(configured).ok)
+        self.assertTrue(validate_task(value, configured).ok)
+
+        accepted = task(state="Accepted")
+        accepted.update({"previousState": "Candidate", "baseSha": "base", "reviewPolicy": "single", "reviewRef": "reviews/primary.json"})
+        accepted["commits"]["candidate"] = "head"
+        accepted["models"]["actual"] = accepted["models"]["assigned"]
+        accepted["execution"]["validationEvidence"] = ["ok"]
+        accepted["capabilityDegradations"] = ["cross-review-unavailable"]
+        self.assertTrue(validate_task(accepted, configured).ok, validate_task(accepted, configured).as_dict())
+
+    def test_cross_review_requires_distinct_provider_model_identities(self):
+        configured = profile()
+        configured["modelRoutes"]["codex"]["reviewer"] = [
+            {"providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high"},
+            {"providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "high"},
+        ]
+        accepted = task(state="Accepted")
+        accepted.update({"previousState": "Candidate", "baseSha": "base", "reviewPolicy": "cross", "reviewRef": "reviews/primary.json", "crossReviewRefs": ["reviews/secondary.json"], "reviewHistory": ["reviews/primary.json", "reviews/secondary.json"]})
+        accepted["commits"]["candidate"] = "head"
+        accepted["models"]["actual"] = accepted["models"]["assigned"]
+        accepted["execution"]["validationEvidence"] = ["ok"]
+
+        def evidence(review_id: str, model: str) -> dict:
+            return {"schemaVersion": 3, "revision": 0, "reviewId": review_id, "subject": {"kind": "candidate", "taskId": accepted["taskId"], "baseSha": "base", "headSha": "head"}, "status": "Accepted", "hostId": "codex", "reviewerModel": model, "cycle": 1, "findings": [], "validation": []}
+
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp); init_repo(repo)
+            (repo / "reviews").mkdir()
+            (repo / "reviews/primary.json").write_text(json.dumps(evidence("R1", "openai/gpt-5.6-sol:high")), encoding="utf-8")
+            (repo / "reviews/secondary.json").write_text(json.dumps(evidence("R2", "openai/gpt-5.6-terra:high")), encoding="utf-8")
+            primary = evidence("R1", "openai/gpt-5.6-sol:high"); primary["_evidencePath"] = "reviews/primary.json"
+            self.assertTrue(validate_repository_evidence(repo, accepted, None, primary, configured).ok)
+            (repo / "reviews/secondary.json").write_text(json.dumps(evidence("R2", "openai/gpt-5.6-sol:low")), encoding="utf-8")
+            self.assertIn("review.cross_models", {item.code for item in validate_repository_evidence(repo, accepted, None, primary, configured).findings})
 
 
 class RuntimeTests(unittest.TestCase):
@@ -134,6 +177,24 @@ class HookPolicyTests(unittest.TestCase):
             with self.subTest(role=role):
                 result = handle({"event": "PreToolUse", "toolName": "apply_patch", "task": task(), "task_name": f"lemmings-{role}", "toolInput": {"patch": "*** Update File: x\n"}})
                 self.assertEqual("block", result["decision"])
+
+    def test_cross_review_uses_distinct_models_across_hosts_and_degrades_openly(self):
+        value = task(state="Candidate")
+        value.update({"previousState": "Active", "baseSha": "base", "reviewPolicy": "cross"})
+        value["commits"]["candidate"] = "head"
+        value["models"]["actual"] = value["models"]["assigned"]
+        value["execution"]["validationEvidence"] = ["ok"]
+        configured = profile()
+        configured["modelRoutes"]["opencode"] = {
+            "worker": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "max"}],
+            "reviewer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-sol", "variantId": "high"}],
+            "explorer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "high"}],
+        }
+        cross = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": configured, "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
+        self.assertEqual("allow", cross["decision"])
+        self.assertNotIn("capabilityDegradation", cross)
+        single = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": profile(), "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
+        self.assertEqual("cross-review-unavailable", single.get("capabilityDegradation"))
 
     def test_candidate_no_longer_requires_handoff(self):
         value = task(state="Candidate")

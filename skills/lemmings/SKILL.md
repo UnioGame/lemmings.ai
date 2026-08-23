@@ -7,7 +7,7 @@ description: Coordinate repository delivery with proportional Auto, Simple, Stan
 
 Act as the sole manager. Tooling validates or atomically executes an already recorded decision; it never chooses mode, model, task, batch, verdict, or acceptance.
 
-Use schema v3 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by Lemmings 3.1; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
+Use schema v3 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
 
 Run `Discover → Plan → Refine → Implement → Verify`. Default `requestedMode` to `auto` and resolve it after Discover:
 
@@ -20,6 +20,8 @@ Do not silently change an explicit mode pin. Auto may escalate after new discove
 On a model capacity failure, stop new dispatch and read [model-routing.md](references/model-routing.md). Retry one short rate/transport failure or reduce context once when applicable; otherwise present two to four task-local role plans. Apply nothing before user confirmation. One confirmation permits only the selected ordered route chains for the current Task; keep the workspace, start a fresh invocation without model history, and request new confirmation when the chain is exhausted. Capacity probes and recovery never depend on telemetry.
 
 Use only `manager`, `worker`, `reviewer`, and `explorer`. Delegation depth is one. Reserve the manager slot; run at most two isolated writers and two read-only agents. Select each writer wave only from dependency-ready tasks, require explicit independence, and wait for the whole wave before integration. Allow one focused context expansion, one repair, and one transient transport retry.
+
+Model routes may declare optional `specializations` tags and Tasks may declare one optional `specialization`. The tag is a manager hint: matching routes get priority, but untagged routes remain valid fallbacks. The assigned route in `models.assigned` is the only execution authority; tools never select or rank models. For high-risk work, the manager may set `reviewPolicy` to `cross`; use two distinct provider/model identities when available, otherwise change the policy to `single` and record `cross-review-unavailable` in `capabilityDegradations`.
 
 The manager alone updates Task/Phase using `revision` compare-and-set. Accept `AgentResult v3` only when invocation id, attempt, Task revision, base SHA, context digest, and profile digest still match. Never transfer model conversation history across tasks or pooled workspaces.
 

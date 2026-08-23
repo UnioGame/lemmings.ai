@@ -14,12 +14,12 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from lemmings.contracts import CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
     from lemmings.models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from lemmings.telemetry import contains_sensitive_text, looks_absolute_path
     from lemmings.workspace import load_registry
 else:
-    from .contracts import DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from .contracts import CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
     from .models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from .telemetry import contains_sensitive_text, looks_absolute_path
     from .workspace import load_registry
@@ -495,7 +495,25 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "reviewer requires Candidate actual-model evidence")
                 if not head or (review_head and str(review_head) != head):
                     return decision("block", "reviewer must inspect the current candidate/fix head")
-                return decision("allow", "reviewer dispatch invariants satisfied")
+                extras = {}
+                if task.get("reviewPolicy") == "cross":
+                    identities = set()
+                    for host_routes in (profile.get("modelRoutes") or {}).values():
+                        if not isinstance(host_routes, Mapping):
+                            continue
+                        identities.update(
+                            route_model_identity(item)
+                            for item in host_routes.get("reviewer", [])
+                            if route_model_identity(item)
+                        )
+                    recovery = current_recovery_route(task, "reviewer")
+                    if recovery:
+                        identity = route_model_identity(recovery)
+                        if identity:
+                            identities.add(identity)
+                    if len(identities) < 2:
+                        extras["capabilityDegradation"] = CROSS_REVIEW_DEGRADATION
+                return decision("allow", "reviewer dispatch invariants satisfied", **extras)
             if role == "explorer":
                 workspace_blocked = task.get("state") == "Blocked" and (task.get("workspace") or {}).get("approval") == "declined"
                 if task.get("state") not in {"Ready", "Active", "Candidate"} and not workspace_blocked:
