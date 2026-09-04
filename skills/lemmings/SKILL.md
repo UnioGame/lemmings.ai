@@ -7,7 +7,7 @@ description: Coordinate repository delivery with proportional Auto, Simple, Stan
 
 Act as the sole manager. Tooling validates or atomically executes an already recorded decision; it never chooses mode, model, task, batch, verdict, or acceptance.
 
-Use schema v3 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
+Use schema v3 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
 
 Run `Discover → Plan → Refine → Implement → Verify`. Default `requestedMode` to `auto` and resolve it after Discover:
 
@@ -38,5 +38,7 @@ Read only the reference needed for the current decision:
 - [telemetry.md](references/telemetry.md): optional offline usage and benchmark collection.
 
 Run the narrowest falsifying validation, then `python -m lemmings check`; add `--all` for a complete Strict Phase and `--distribution` only when checking installed bundle bytes. Keep reusable policy here/references, canonical data only in Task/Phase/Review, and compact evidence in the Task.
+
+Unity Editor/BatchMode counts are not capped by Lemmings; ignore legacy `maxUnityEditors` settings. Agents may run editors independently for distinct project directories. Respect Unity's lock on the same project directory; an editor on another project does not block launch.
 
 Controls: `lemmings runtime activate|status|deactivate`; `lemmings models inspect|propose|apply|recover`; `lemmings workspace estimate|inspect|register|claim|release|remove`; optional `lemmings metrics ...`. Only a manager-directed v3 runtime marker enables hooks. There are no validator, summarizer, or orchestrator invocation roles.

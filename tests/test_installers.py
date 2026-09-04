@@ -106,6 +106,8 @@ class InstallerTests(unittest.TestCase):
                 profile_path.write_text(
                     json.dumps(
                         {
+                            "schemaVersion": 3,
+                            "distributionVersion": "3.2.0",
                             "mode": "strict",
                             "unknown": {"keep": True},
                             "game": {"workspace": {"maxUnityEditors": 7}},
@@ -122,12 +124,12 @@ class InstallerTests(unittest.TestCase):
 
                 profile = json.loads(profile_path.read_text(encoding="utf-8-sig"))
                 self.assertEqual(3, profile["schemaVersion"])
-                self.assertEqual("3.2.0", profile["distributionVersion"])
+                self.assertEqual("3.3.0", profile["distributionVersion"])
                 self.assertEqual("auto", profile["mode"])
                 self.assertNotIn("unknown", profile)
                 self.assertEqual("unity", profile["game"]["engine"])
                 self.assertEqual("GameClient", profile["game"]["projectPath"])
-                self.assertEqual(1, profile["game"]["workspace"]["maxUnityEditors"])
+                self.assertNotIn("maxUnityEditors", profile["game"]["workspace"])
                 self.assertEqual("hybrid", profile["game"]["workspace"]["parallelStrategy"])
                 self.assertEqual("gpt-5.6-luna", profile["modelRoutes"]["codex"]["worker"][0]["modelId"])
                 self.assertEqual("gpt-5.6-sol", profile["modelRoutes"]["codex"]["reviewer"][0]["modelId"])
@@ -169,6 +171,7 @@ class InstallerTests(unittest.TestCase):
                 self.run_installer(kind, executable, embedded, cwd=repo)
                 profile = json.loads((repo / ".agents/lemmings.json").read_text(encoding="utf-8-sig"))
                 self.assertEqual("GameClient/Game.Packages/lemmings", profile["tooling"]["root"])
+                self.assertNotIn("maxUnityEditors", profile["game"]["workspace"])
                 self.assertFalse((repo / ".git/lemmings/environment.json").exists())
 
     def test_dry_run_force_and_ambiguous_project_handling(self) -> None:

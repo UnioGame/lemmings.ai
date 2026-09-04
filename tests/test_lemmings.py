@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 3,
-        "distributionVersion": "3.2.0",
+        "distributionVersion": "3.3.0",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -49,18 +49,18 @@ def init_repo(path: Path) -> None:
 
 class SchemaOnlyTests(unittest.TestCase):
     def test_v2_artifacts_have_one_breaking_error(self):
-        expected = "schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle"
+        expected = "schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle"
         for validator, value in ((validate_profile, {"schemaVersion": 2}), (validate_task, {"schemaVersion": 2}), (validate_phase, {"schemaVersion": 2}), (validate_review, {"schemaVersion": 2})):
             with self.subTest(validator=validator.__name__):
                 checked = validator(value)
                 self.assertEqual(1, len(checked.findings))
                 self.assertEqual(expected, checked.findings[0].message)
 
-    def test_distribution_versions_are_32(self):
+    def test_distribution_versions_are_33(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual("3.2.0", package["version"])
-        self.assertEqual("3.2.0+codex.20260824", plugin["version"])
+        self.assertEqual("3.3.0", package["version"])
+        self.assertEqual("3.3.0", plugin["version"])
 
     def test_specialization_is_optional_hint_and_cross_review_degrades(self):
         configured = profile()

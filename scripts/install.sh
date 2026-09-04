@@ -136,7 +136,7 @@ trap 'rm -f -- "$defaults_file"' EXIT
 cat >"$defaults_file" <<JSON
 {
   "schemaVersion": 3,
-  "distributionVersion": "3.2.0",
+  "distributionVersion": "3.3.0",
   "mode": "auto",
   "roadmap": "docs/tasks/ROADMAP.md",
   "taskGlobs": ["docs/tasks/**/*.json"],
@@ -163,8 +163,7 @@ cat >"$defaults_file" <<JSON
       "parallelStrategy": "hybrid",
       "largeThresholdGiB": 10,
       "validationBackend": "clone",
-      "validationPath": "../$repo_name.lemmings.validation",
-      "maxUnityEditors": 1
+      "validationPath": "../$repo_name.lemmings.validation"
     }
   }
 }
@@ -223,7 +222,7 @@ bundle_drift=0
 (( skill_drift || agent_drift || config_drift )) && bundle_drift=1
 if (( bundle_present )) && [[ ! -d "$skill_target" || ! -f "$profile_target" || ${#installed_agents[@]} -eq 0 ]]; then bundle_drift=1; fi
 if (( bundle_drift && ! force && ! legacy_recognized )); then
-  echo "Lemmings bundle differs from the canonical 3.2 distribution. Re-run with --force to replace it." >&2
+  echo "Lemmings bundle differs from the canonical 3.3 distribution. Re-run with --force to replace it." >&2
   exit 1
 fi
 environment_needs_change=0

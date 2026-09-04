@@ -1,4 +1,4 @@
-# Lemmings 3.2
+# Lemmings 3.3
 
 Lemmings is a repository skill for proportional agent delivery. `Auto` resolves Simple, Standard, or Strict after discovery. The current agent remains the sole manager; bounded worker, reviewer, and explorer invocations receive compact assignments.
 
@@ -161,9 +161,11 @@ python -m lemmings metrics usage --host opencode --file usage.json
 
 Normal `check` validates lifecycle/configuration without rereading the installed skill and agent trees. Use `--distribution` for the explicit byte-level bundle comparison; installers perform the equivalent comparison before committing their transaction.
 
-## Upgrading to 3.2
+## Upgrading to 3.3
 
-3.2 keeps schema v3 and adds optional specialization and cross-review fields. Schema v2 and side-by-side v2/v3 operation remain unsupported. Upgrade by running the 3.2 installer. A recognized legacy bundle is replaced without `Force`; a modified current v3/3.2 bundle still requires `Force`.
+3.3 keeps schema v3 and removes the Unity Editor/BatchMode count limit. Agents may run editors independently for distinct project directories; Unity's lock still applies to the same project directory. Legacy `maxUnityEditors` settings are ignored by the skill and omitted from newly installed profiles.
+
+Schema v2 and side-by-side v2/v3 operation remain unsupported. Upgrade by running the 3.3 installer. A recognized legacy v2 bundle is replaced without `Force`; replacing a 3.2 or modified current v3 bundle requires `Force`. The installer replaces the owned profile with defaults, so preserve any custom settings before upgrading.
 
 The installer replaces `.agents/skills/lemmings`, `.agents/lemmings.json`, and the worker/reviewer/explorer profiles. It removes these legacy-owned targets after a successful transactional validation:
 

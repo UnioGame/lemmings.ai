@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 SCHEMA_VERSION = 3
-DISTRIBUTION_VERSION = "3.2.0"
-PLUGIN_VERSION = "3.2.0+codex.20260824"
+DISTRIBUTION_VERSION = "3.3.0"
+PLUGIN_VERSION = "3.3.0"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -147,7 +147,7 @@ def schema_supported(value: Mapping[str, Any]) -> bool:
 def schema_error(kind: str, value: Mapping[str, Any]) -> str:
     version = value.get("schemaVersion")
     if version == 2:
-        return "schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle"
+        return "schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle"
     return f"unsupported schemaVersion: {version!r}; expected 3"
 
 

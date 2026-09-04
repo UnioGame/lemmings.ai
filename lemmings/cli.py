@@ -105,7 +105,7 @@ def load_artifacts(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | Non
 def runtime_findings(repo: Path, marker: dict[str, Any] | None) -> ValidationResult:
     result = ValidationResult()
     if marker and marker.get("schemaVersion") != SCHEMA_VERSION:
-        message = "schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle" if marker.get("schemaVersion") == 2 else f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 3"
+        message = "schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle" if marker.get("schemaVersion") == 2 else f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 3"
         result.error("runtime.schema", message)
     if marker and marker.get("taskPath"):
         path = resolve_path(repo, str(marker["taskPath"]))
@@ -445,12 +445,12 @@ def command_metrics(args: argparse.Namespace) -> int:
     profile = load_profile(repo, getattr(args, "profile", None)) or {}
     if action == "stage":
         if task and task.get("schemaVersion") != 3:
-            raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics stage requires a schema-v3 Task")
+            raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics stage requires a schema-v3 Task")
         event = record_event(repo, "run_started", source="cli", task_id=task_id, phase_id=(phase or {}).get("phaseId"), data={"mode": (task or {}).get("resolvedMode")}) if args.stage == "discover" else None
         emit({"ok": True, "recorded": bool(event), "event": event, "reason": None if event else "only run_started at discover is recorded"})
     elif action == "finish":
         if task and task.get("schemaVersion") != 3:
-            raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.2; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics finish requires a schema-v3 Task")
+            raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics finish requires a schema-v3 Task")
         event = record_event(repo, "run_finished", source="cli", task_id=task_id, data={"outcome": args.outcome}, allow_finished_binding=True)
         emit({
             "ok": True,

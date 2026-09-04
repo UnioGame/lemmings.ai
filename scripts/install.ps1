@@ -133,7 +133,7 @@ $repoName = Split-Path -Leaf $repoRoot
 $projectRelative = Get-RelativeSlashPath -From $repoRoot -To $projectPath
 $profileDefaults = [pscustomobject]@{
     schemaVersion = 3
-    distributionVersion = '3.2.0'
+    distributionVersion = '3.3.0'
     mode = 'auto'
     roadmap = 'docs/tasks/ROADMAP.md'
     taskGlobs = @('docs/tasks/**/*.json')
@@ -161,7 +161,6 @@ $profileDefaults = [pscustomobject]@{
             largeThresholdGiB = 10
             validationBackend = 'clone'
             validationPath = "../$repoName.lemmings.validation"
-            maxUnityEditors = 1
         }
     }
 }
@@ -204,7 +203,7 @@ $configDrift = (Test-Path -LiteralPath $profilePath) -and ([IO.File]::ReadAllTex
 $legacyTargetsPresent = (Test-Path -LiteralPath $legacyProfilePath) -or (Test-SchemaVersion -Path $activeMarkerPath -Version 2) -or @($installedAgentFiles | Where-Object { $_.Name -in $obsoleteAgentNames }).Count -gt 0
 $bundlePresent = (Test-Path -LiteralPath $skillTarget) -or $installedAgentFiles.Count -gt 0 -or (Test-Path -LiteralPath $profilePath) -or $legacyTargetsPresent
 $bundleDrift = $skillDrift -or $agentDrift -or $configDrift -or ($bundlePresent -and ((-not (Test-Path -LiteralPath $skillTarget)) -or $installedAgentFiles.Count -eq 0 -or (-not (Test-Path -LiteralPath $profilePath))))
-if ($bundleDrift -and -not $Force -and -not $legacyRecognized) { throw 'Lemmings bundle differs from the canonical 3.2 distribution. Re-run with -Force to replace it.' }
+if ($bundleDrift -and -not $Force -and -not $legacyRecognized) { throw 'Lemmings bundle differs from the canonical 3.3 distribution. Re-run with -Force to replace it.' }
 $environmentNeedsChange = if ($packageInsideRepo) {
     (Test-SchemaVersion -Path $environmentPath -Version 2) -or (Test-SchemaVersion -Path $environmentPath -Version 3)
 } else {

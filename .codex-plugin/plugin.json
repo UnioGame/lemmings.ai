@@ -1,6 +1,6 @@
 {
   "name": "lemmings",
-  "version": "3.2.0+codex.20260824",
+  "version": "3.3.0",
   "description": "Proportional repository orchestration for multiple agent hosts",
   "author": {
     "name": "Lemmings Maintainers"
