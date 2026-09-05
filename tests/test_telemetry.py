@@ -9,6 +9,9 @@ import unittest
 from contextlib import redirect_stdout
 from datetime import timedelta
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/lemmings/scripts"))
 from unittest.mock import patch
 
 from lemmings import hooks
@@ -44,13 +47,13 @@ def init_repo(path: Path) -> None:
 
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [os.sys.executable, "-m", "lemmings", *args], cwd=ROOT,
+        [os.sys.executable, str(ROOT / "skills/lemmings/scripts/run.py"), *args], cwd=ROOT,
         capture_output=True, text=True, check=False,
     )
 
 
 def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
-    value = json.loads((ROOT / "Documentation~" / "tasks" / "templates" / "task.json").read_text(encoding="utf-8"))
+    value = json.loads((ROOT / "skills" / "lemmings" / "templates" / "task.json").read_text(encoding="utf-8"))
     value.update({"taskId": "TASK-17", "goal": "measure delivery", "acceptance": ["report is complete"], "state": state, "baseSha": "base"})
     value["ownership"] = {"owned": ["lemmings/**"], "shared": [], "forbidden": []}
     value["workingSet"] = [{"ref": "lemmings/telemetry.py#record_event", "purpose": "telemetry contract"}]
@@ -65,7 +68,7 @@ def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
 
 def quality() -> dict:
     return {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "taskId": "TASK-17",
         "baseSha": "base",
         "headSha": "head",
@@ -102,7 +105,7 @@ class TelemetryTests(unittest.TestCase):
             self.assertEqual(1, summary["validationFailures"])
             self.assertEqual(1, summary["findings"]["implementation"]["P1"])
             self.assertEqual(1, summary["findings"]["plan-contract"]["P2"])
-            self.assertTrue(summary["lunaToTerraEscalated"])
+            self.assertTrue(summary["workerRouteEscalated"])
 
     def test_cross_reviews_same_head_and_cycle_count_once(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -303,7 +306,7 @@ class TelemetryTests(unittest.TestCase):
             first.write_text(json.dumps({**task(), "taskId": "TASK-1"}), encoding="utf-8")
             second.write_text(json.dumps({**task(), "taskId": "TASK-2"}), encoding="utf-8")
             marker = runtime_marker(repo); marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(json.dumps({"schemaVersion": 3, "taskPath": "TASK-1.json"}), encoding="utf-8")
+            marker.write_text(json.dumps({"schemaVersion": 4, "taskPaths": ["TASK-1.json"]}), encoding="utf-8")
             bind_run(repo, repo, task_id="TASK-2", task_path=str(second))
             hydrated = hooks.hydrate({"cwd": str(repo), "hook_event_name": "SubagentStart"})
             self.assertEqual("TASK-1", hydrated["task"]["taskId"])
@@ -371,7 +374,7 @@ class TelemetryTests(unittest.TestCase):
             record_hook_event(repo, {
                 "hook_event_name": "PreToolUse", "cwd": str(repo), "session_id": "bootstrap",
                 "tool_use_id": "stage-tool", "tool_name": "shell_command",
-                "tool_input": {"command": "python -m lemmings metrics stage discover --task TASK-0"},
+                "tool_input": {"command": "python .agents/skills/lemmings/scripts/run.py metrics stage discover --task TASK-0"},
             })
             for index in range(5):
                 current = task("Integrated")

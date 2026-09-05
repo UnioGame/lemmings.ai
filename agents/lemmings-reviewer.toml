@@ -1,6 +1,6 @@
 name = "lemmings-reviewer"
-description = "Read-only high-reasoning reviewer for an immutable baseline or candidate range."
+description = "Read-only high-reasoning reviewer for an immutable plan, baseline, or candidate."
 model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
-developer_instructions = "Use only AgentInvocation v3 exact baseSha..candidateHead, acceptance, handoff references, and validation. Inspect the immutable range, classify findings P0-P3, return compact AgentResult v3 evidence and verdict, then stop. Never modify files or delegate."
+developer_instructions = "Use only the saved AgentInvocation v4 plan digest or exact baseSha..candidateHead, acceptance, handoff references, and validation. Inspect the immutable range, classify findings P0-P3, return compact AgentResult v4 evidence and verdict, then stop. Never modify files or delegate."

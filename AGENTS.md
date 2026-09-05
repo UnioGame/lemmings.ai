@@ -11,7 +11,7 @@
 - `skills/lemmings/SKILL.md` owns the workflow, task controls, and sole-orchestrator contract.
 - `skills/lemmings/references/` owns game-project, artifact-contract, and telemetry policy.
 - `Documentation~/tasks/ROADMAP.md` owns orchestration-tooling priorities.
-- `Documentation~/tasks/templates/` owns reusable phase, task, and immutable review contracts; close evidence remains embedded in the phase or task contract.
+- `skills/lemmings/templates/` owns reusable phase, task, and immutable review contracts; close evidence remains embedded in the phase or task contract.
 
 Avoid duplicating detailed policy across these files. Keep the skill compact and link to the owning reference for advanced cases.
 

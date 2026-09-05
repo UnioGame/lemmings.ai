@@ -2,9 +2,9 @@
   "hooks": {
     "PreToolUse": [{
       "matcher": "Agent|spawn_agent|apply_patch|Bash|exec_command|shell_command",
-      "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/lemmings/hooks.py\" || printf '{}'", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\lemmings\\hooks.py\" || echo {}" }]
+      "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/skills/lemmings/scripts/run.py\" hook", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\skills\\lemmings\\scripts\\run.py\" hook" }]
     }],
-    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/lemmings/hooks.py\" || printf '{}'", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\lemmings\\hooks.py\" || echo {}" }] }],
-    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/lemmings/hooks.py\" || printf '{}'", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\lemmings\\hooks.py\" || echo {}" }] }]
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/skills/lemmings/scripts/run.py\" hook", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\skills\\lemmings\\scripts\\run.py\" hook" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "python3 \"${CODEX_PLUGIN_ROOT}/skills/lemmings/scripts/run.py\" hook", "commandWindows": "py -3 \"${CODEX_PLUGIN_ROOT}\\skills\\lemmings\\scripts\\run.py\" hook" }] }]
   }
 }

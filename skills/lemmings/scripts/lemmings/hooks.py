@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 import shlex
@@ -14,15 +13,17 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lemmings.contracts import CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from lemmings.contracts import SCHEMA_VERSION, CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, as_list, candidate_head, current_recovery_route, path_matches, plan_digest, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_models, validate_profile, validate_task
     from lemmings.models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from lemmings.telemetry import contains_sensitive_text, looks_absolute_path
     from lemmings.workspace import load_registry
+    from lemmings.invocations import build_invocation, find_invocation, profile_digest, result_findings
 else:
-    from .contracts import CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, DEFAULT_INVOCATION_LIMITS, as_list, candidate_head, current_recovery_route, path_matches, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_agent_result, validate_models, validate_profile, validate_task
+    from .contracts import SCHEMA_VERSION, CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, as_list, candidate_head, current_recovery_route, path_matches, plan_digest, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_models, validate_profile, validate_task
     from .models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from .telemetry import contains_sensitive_text, looks_absolute_path
     from .workspace import load_registry
+    from .invocations import build_invocation, find_invocation, profile_digest, result_findings
 
 READ_ONLY_COMMANDS = {
     "rg", "grep", "ls", "dir", "pwd", "type", "cat", "head", "tail",
@@ -385,48 +386,39 @@ def derive_context_packet(
     role: str,
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Project canonical artifacts into a bounded role-specific invocation."""
-    ownership = task.get("ownership") if isinstance(task.get("ownership"), Mapping) else {}
-    validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
-    references = []
-    for entry in as_list(task.get("workingSet")):
-        if not isinstance(entry, Mapping):
-            continue
-        body = {"ref": entry.get("ref"), "purpose": entry.get("purpose")}
-        content_hash = entry.get("contentHash") or hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        references.append({**body, "contentHash": content_hash})
+    """Build an invocation for CLI/tests; dispatch hooks use the stored value."""
+    del phase
+    repo = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve()
     profile = payload.get("profile") if isinstance(payload.get("profile"), Mapping) else {}
-    attempt = int(payload.get("attempt", 0) or 0)
-    seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
-    invocation = {
-        "schemaVersion": 3,
-        "runId": str(payload.get("runId") or task.get("runId") or task.get("taskId")),
-        "taskId": task.get("taskId"),
-        "taskRevision": task.get("revision"),
-        "invocationId": str(payload.get("invocationId") or hashlib.sha256(seed.encode()).hexdigest()[:24]),
-        "attempt": attempt,
-        "role": role,
-        "baseSha": task.get("baseSha") or payload.get("baseSha") or "uncommitted",
-        "profileDigest": hashlib.sha256(json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-        "contextDigest": "",
-        "objective": payload.get("focus") or payload.get("question") or task.get("goal"),
-        "acceptanceCriteria": as_list(task.get("acceptance")),
-        "ownedPaths": as_list(ownership.get("owned")) if role == "worker" else [],
-        "forbiddenPaths": as_list(ownership.get("forbidden")),
-        "contextRefs": references,
-        "validationCommands": as_list(validation.get("commands")),
-        "candidateHead": candidate_head(task) if role == "reviewer" else None,
-        "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
-        "outputSchemaVersion": 3,
-    }
-    digest_body = {key: value for key, value in invocation.items() if key != "contextDigest"}
-    invocation["contextDigest"] = hashlib.sha256(json.dumps(digest_body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return sanitize_context(invocation)
+    return sanitize_context(build_invocation(
+        repo,
+        task,
+        profile,
+        role,
+        attempt=int(payload.get("attempt", 0) or 0),
+        objective=payload.get("focus") or payload.get("question"),
+        invocation_id=payload.get("invocationId"),
+    ))
 
+
+def stored_invocation(task: Mapping[str, Any], payload: Mapping[str, Any], role: str) -> Mapping[str, Any] | None:
+    requested = str(payload.get("invocationId") or "")
+    if requested:
+        invocation = find_invocation(task, requested)
+        return invocation if invocation and invocation.get("role") == role and invocation.get("taskRevision") == task.get("revision") else None
+    matches = [
+        item for item in as_list((task.get("execution") or {}).get("invocations"))
+        if isinstance(item, Mapping) and item.get("role") == role and item.get("taskRevision") == task.get("revision")
+    ]
+    return matches[-1] if matches else None
 
 def context_warnings(packet: Mapping[str, Any], task: Mapping[str, Any], profile: Mapping[str, Any], payload: Mapping[str, Any]) -> list[str]:
     policy = profile.get("contextPolicy") if isinstance(profile.get("contextPolicy"), Mapping) else DEFAULT_CONTEXT_POLICY
     warnings: list[str] = []
+    if packet.get("profileDigest") != profile_digest(profile):
+        warnings.append("profile changed after invocation dispatch")
+    if packet.get("taskDigest") != plan_digest(task):
+        warnings.append("task content changed after invocation dispatch")
     size = len(json.dumps(packet, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     working_count = len(task.get("workingSet") or [])
     expansions = int(payload.get("expansionsUsed", 0) or 0) + (1 if payload.get("contextExpansion") else 0)
@@ -457,7 +449,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "Strict spawn requires an explicit worker, reviewer, or explorer role")
                 role = str(task.get("role", "worker"))
             if role not in {"worker", "reviewer", "explorer"}:
-                return decision("block", "v3 dispatch role must be worker, reviewer, or explorer")
+                return decision("block", "v4 dispatch role must be worker, reviewer, or explorer")
             recovery_status = (task.get("routingRecovery") or {}).get("status")
             if recovery_status in {"pending-confirmation", "paused"}:
                 return decision("block", f"model routing recovery is {recovery_status}; user confirmation is required")
@@ -477,12 +469,22 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             task_result = validate_task(task, profile)
             if not task_result.ok:
                 return decision("block", task_result.findings[0].message)
+            invocation = stored_invocation(task, payload, role)
+            if invocation is None:
+                return decision("block", "dispatch requires a stored current invocation created by the manager")
+            stale = context_warnings(invocation, task, profile, payload)
+            if stale:
+                return decision("block", "; ".join(stale))
             requested = requested_model(payload)
             assigned = (task.get("models") or {}).get("assigned")
             writer = role == "worker"
             if role == "reviewer":
-                if task.get("state") != "Candidate":
-                    return decision("block", "reviewer requires a Candidate task")
+                subject_kind = str(payload.get("reviewSubjectKind") or (tool_input.get("subjectKind") if isinstance(tool_input, Mapping) else None) or "candidate")
+                if subject_kind == "plan":
+                    if task.get("state") not in {"Draft", "Planned", "Ready"}:
+                        return decision("block", "plan reviewer requires a pre-implementation task")
+                elif task.get("state") != "Candidate":
+                    return decision("block", "candidate reviewer requires a Candidate task")
                 recovery_route = current_recovery_route(task, "reviewer")
                 host_id = requested_host(payload) or (recovery_route or {}).get("hostId") or (task.get("models") or {}).get("hostId")
                 allowed = [route_name(item) for item in (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or []) if isinstance(item, Mapping)]
@@ -491,9 +493,9 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "reviewer model must be an approved per-host or task-local recovery route")
                 head = candidate_head(task)
                 review_head = (tool_input.get("head") if isinstance(tool_input, dict) else None) or payload.get("reviewHead")
-                if not (task.get("models") or {}).get("actual"):
+                if subject_kind == "candidate" and not (task.get("models") or {}).get("actual"):
                     return decision("block", "reviewer requires Candidate actual-model evidence")
-                if not head or (review_head and str(review_head) != head):
+                if subject_kind == "candidate" and (not head or (review_head and str(review_head) != head)):
                     return decision("block", "reviewer must inspect the current candidate/fix head")
                 extras = {}
                 if task.get("reviewPolicy") == "cross":
@@ -589,10 +591,12 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             return decision("block", task_result.findings[0].message)
         role = requested_role(payload) or str(task.get("role") or "worker")
         if role not in {"worker", "reviewer", "explorer"}:
-            return decision("block", "v3 invocation role must be worker, reviewer, or explorer")
+            return decision("block", "v4 invocation role must be worker, reviewer, or explorer")
         if role == "explorer" and not (payload.get("focus") or payload.get("question")):
             return decision("block", "explorer ContextPacket requires one focus or question")
-        context = derive_context_packet(task, payload.get("phase") or {}, role, payload)
+        context = stored_invocation(task, payload, role)
+        if context is None:
+            return decision("block", "SubagentStart requires a stored invocation created by the manager")
         warnings = context_warnings(context, task, profile, payload)
         hard = bool(warnings)
         return decision(
@@ -620,21 +624,20 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 return decision("block", str(error))
             return decision("allow", f"RouteFailure accepted; next action: {action}", routeFailure=normalized, recoveryAction=action)
         result_value = payload.get("agentResult") or payload.get("agent_result")
-        invocation = payload.get("agentInvocation") or payload.get("agent_invocation") or derive_context_packet(task, payload.get("phase") or {}, role, payload)
         if not isinstance(result_value, Mapping):
-            return decision("block", "v3 subagent stop requires structured AgentResult")
-        checked = validate_agent_result(result_value, invocation, task)
+            return decision("block", "v4 subagent stop requires structured AgentResult")
+        try:
+            checked = result_findings(
+                Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve(),
+                task,
+                payload.get("profile") or {},
+                result_value,
+            )
+        except ValueError as error:
+            return decision("block", str(error))
         if not checked.ok:
             return decision("block", checked.findings[0].message)
-        if role == "worker" and result_value.get("status") == "succeeded":
-            try:
-                actual_paths = candidate_diff_paths(task, payload.get("cwd") or payload.get("_repoRoot") or os.getcwd())
-            except ValueError as error:
-                return decision("block", str(error))
-            reported_paths = sorted({str(path).replace("\\", "/") for path in as_list(result_value.get("changedPaths"))})
-            if reported_paths != actual_paths:
-                return decision("block", "AgentResult.changedPaths does not match the actual candidate diff")
-        return decision("allow", "AgentResult accepted")
+        return decision("allow", "AgentResult matches its stored invocation; CLI acceptance is still required")
     return decision("allow", "event is not enforced")
 
 
@@ -648,14 +651,24 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
     if not marker.is_file():
         return {**payload, "_lemmingsActive": False, "_repoRoot": str(repo)}
     state = read_object(marker)
-    if state.get("schemaVersion") != 3:
+    if state.get("schemaVersion") != SCHEMA_VERSION:
         raise ValueError(schema_error("runtime marker", state))
     combined = {**state, **payload, "_lemmingsActive": True, "_repoRoot": str(repo)}
-    for name in ("profile", "task", "phase", "review"):
+    profile_path = state.get("profilePath")
+    if profile_path:
+        combined["profile"] = read_object(repo / profile_path)
+    task_paths = as_list(state.get("taskPaths"))
+    requested_task = str(payload.get("taskId") or (payload.get("tool_input") or {}).get("taskId") or "")
+    candidates = [read_object(repo / value) for value in task_paths]
+    matches = [task for task in candidates if str(task.get("taskId")) == requested_task] if requested_task else candidates
+    if len(matches) == 1:
+        combined["task"] = matches[0]
+    elif candidates:
+        raise ValueError("active wave hook payload must identify one taskId")
+    for name in ("phase", "review"):
         value = state.get(name + "Path")
         if value:
-            path = Path(value)
-            combined[name] = read_object(path if path.is_absolute() else repo / path)
+            combined[name] = read_object(repo / value)
     tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
     if isinstance(tool_input, dict) and tool_input.get("model"):
         combined["requestedModel"] = tool_input["model"]
@@ -682,17 +695,25 @@ def host_output(result: Mapping[str, Any], event: str, payload: Mapping[str, Any
 
 def main(argv: Sequence[str] | None = None) -> int:
     del argv
+    event = ""
+    exit_code = 0
     try:
         raw = json.load(sys.stdin)
         if not isinstance(raw, dict):
             raise ValueError("hook payload must be an object")
+        event = event_name(raw)
         payload = hydrate(raw)
         result = handle(payload)
-        output = host_output(result, event_name(raw), payload)
+        output = host_output(result, event, payload)
     except (OSError, ValueError, json.JSONDecodeError) as error:
-        output = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": f"invalid Lemmings hook input: {error}"}}
+        reason = f"invalid Lemmings hook input: {error}"
+        if event == "PreToolUse":
+            output = {"hookSpecificOutput": {"hookEventName": event, "permissionDecision": "deny", "permissionDecisionReason": reason}}
+        else:
+            output = {"systemMessage": reason}
+            exit_code = 1
     print(json.dumps(output, ensure_ascii=False))
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

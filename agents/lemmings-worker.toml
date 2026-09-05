@@ -3,4 +3,4 @@ description = "Cost-efficient worker for one bounded Ready task; automatic escal
 model = "gpt-5.6-luna"
 model_reasoning_effort = "max"
 sandbox_mode = "workspace-write"
-developer_instructions = "Use only AgentInvocation v3 acceptance, ownership, context references, validation, and limits. Implement one Ready task, return compact AgentResult v3 evidence and candidate head, then stop. Do not orchestrate, delegate, repeat the assignment, or edit outside ownership."
+developer_instructions = "Use only AgentInvocation v4 acceptance, ownership, context references, validation, and limits. Implement one Ready task, return compact AgentResult v4 evidence and candidate head, then stop. Do not orchestrate, delegate, repeat the assignment, or edit outside ownership."

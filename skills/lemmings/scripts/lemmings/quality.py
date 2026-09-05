@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .contracts import (
+    SCHEMA_VERSION,
     FINDING_ORIGINS,
     FINDING_PRIORITIES,
     REVIEW_STATES,
@@ -147,10 +148,7 @@ def summarize_quality(repo: Path, task: Mapping[str, Any], outcome: str | None =
             }
             for item in attempts if isinstance(item, Mapping)
         ],
-        "lunaToTerraEscalated": any(
-            left == "gpt-5.6-luna:max" and right == "gpt-5.6-terra:max"
-            for left, right in zip(models, models[1:])
-        ),
+        "workerRouteEscalated": any(left != right for left, right in zip(models, models[1:])),
         "outcome": outcome or (task.get("qualitySummary") or {}).get("outcome"),
         "finalState": task.get("state"),
     }
@@ -183,7 +181,7 @@ def build_quality_report(repo: Path, profile: Mapping[str, Any], task_id: str | 
             task = read_object(path)
         except (OSError, ValueError):
             continue
-        if task.get("schemaVersion") != 3 or not task.get("taskId") or not isinstance(task.get("models"), Mapping):
+        if task.get("schemaVersion") != SCHEMA_VERSION or not task.get("taskId") or not isinstance(task.get("models"), Mapping):
             continue
         if task_id and str(task.get("taskId")) != task_id:
             continue
@@ -214,7 +212,7 @@ def build_quality_report(repo: Path, profile: Mapping[str, Any], task_id: str | 
             route["repairCycles"] += int(summary["repairCycles"])
             route["validationFailures"] += int(summary["validationFailures"])
             route["tasksWithValidationFailures"] += int(summary["validationFailures"] > 0)
-            route["escalations"] += int(bool(summary["lunaToTerraEscalated"]))
+            route["escalations"] += int(bool(summary["workerRouteEscalated"]))
             cohort = task.get("telemetryCohort")
             if task.get("state") == "Integrated" and cohort and summary["complete"] and not summary["unclassifiedFindings"]:
                 comparison_counts[(str(cohort), str(initial))] += 1

@@ -103,8 +103,8 @@ def load_settings(repo: Path) -> dict[str, Any]:
     value = read_object(path)
     merged = default_settings()
     merged.update(value)
-    if merged.get("schemaVersion") != 3:
-        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle" if merged.get("schemaVersion") == 2 else f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 3")
+    if merged.get("schemaVersion") != SCHEMA_VERSION:
+        raise ValueError("schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle" if merged.get("schemaVersion") == 2 else f"unsupported telemetry settings schemaVersion: {merged.get('schemaVersion')!r}; expected 4")
     if merged.get("mode") not in TELEMETRY_MODES:
         raise ValueError("telemetry mode must be off, basic, or full")
     return merged
@@ -330,7 +330,7 @@ def summarize_task(task: Mapping[str, Any] | None, review: Mapping[str, Any] | N
         "validationEvidenceCount": len(evidence),
         "validationFailureCount": validation_failures,
         "validationDebtCount": len(validation.get("debt") or []),
-        "integrationValidationPassed": bool(close.get("integrationValidationPassed")),
+        "integrationValidationPassed": bool(close.get("integrationEvidence")) and all(isinstance(item, Mapping) and item.get("passed") is True and item.get("headSha") == close.get("mergeCommit") for item in close.get("integrationEvidence") or []),
         "finalHead": safe_label(final_head),
     }
 
@@ -489,8 +489,8 @@ def parse_period(value: str) -> timedelta:
 
 
 def normalize_quality_observation(value: Mapping[str, Any], expected_task_id: str | None = None, task: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    if value.get("schemaVersion") != 3:
-        raise ValueError("schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle" if value.get("schemaVersion") == 2 else f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 3")
+    if value.get("schemaVersion") != SCHEMA_VERSION:
+        raise ValueError("schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle" if value.get("schemaVersion") == 2 else f"unsupported quality observation schemaVersion: {value.get('schemaVersion')!r}; expected 4")
     for field in ("taskId", "baseSha", "headSha", "recordedAt", "signals"):
         if not value.get(field):
             raise ValueError(f"quality observation requires {field}")
@@ -1055,7 +1055,7 @@ def record_hook_event(repo: Path, payload: Mapping[str, Any], policy_result: Map
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
         command = str(tool_input.get("command") or "") if isinstance(tool_input, Mapping) else str(tool_input)
         normalized = " ".join(command.lower().split())
-        if re.search(r"\blemmings(?:\.exe)?\s+(?:metrics\s+stage\b|wave\s+plan\b|on\b.*--task\b)", normalized):
+        if re.search(r"(?:\blemmings(?:\.exe)?|\brun\.py)\s+(?:metrics\s+stage\b|wave\s+plan\b|on\b.*--task\b)", normalized):
             data["bootstrap"] = True
     response = payload.get("tool_response") or payload.get("toolResponse")
     if hook_event == "PostToolUse" and isinstance(response, Mapping):

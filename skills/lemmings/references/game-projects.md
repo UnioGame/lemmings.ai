@@ -2,7 +2,7 @@
 
 The manager chooses `current`, `code-worktree`, `package-worktree`, task-specific `unity-clone`, persistent validation clone, or a user workspace. Tooling may execute explicit register/claim/release/remove decisions atomically. Never use force, reset-hard, automatic git clean, background cleanup, or SessionStart deletion/prune.
 
-Registry: `<git-common-dir>/lemmings/workspaces-v3.json`. It owns absolute paths, common-dir identity, backend, manager, lifetime, active/idle/quarantined/retiring state, task/phase, branch/head/base, estimate/approval, timestamps, leases/processes, and quarantine reason. Task stores only `workspaceId`, backend, policy, estimate, lifecycle, and final disposition. Claim/release requires the expected registry revision, so only one manager can win.
+Registry: `<git-common-dir>/lemmings/workspaces-v4.json`. It owns absolute paths, common-dir identity, backend, manager, lifetime, active/idle/quarantined/retiring state, task/phase, branch/head/base, estimate/approval, timestamps, leases/processes, and quarantine reason. Task stores only `workspaceId`, backend, policy, estimate, lifecycle, and final disposition. Claim/release requires the expected registry revision, so only one manager can win.
 
 The shared writer pool defaults to two idle worktrees and 10 GiB per Git common dir, LRU eviction. Reconcile only on provision, claim, release, status, or Phase close. Validation clones and user workspaces are excluded. A workspace over 10 GiB requires separate retention approval; otherwise safely remove it after integration.
 

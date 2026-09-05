@@ -1,12 +1,12 @@
 {
   "name": "lemmings",
-  "version": "3.3.0",
+  "version": "4.0.0",
   "description": "Proportional repository orchestration for multiple agent hosts",
   "author": {
     "name": "Lemmings Maintainers"
   },
-  "repository": "https://github.com/UnioGame/unigame.ai.tools",
-  "homepage": "https://github.com/UnioGame/unigame.ai.tools",
+  "repository": "https://github.com/UnioGame/unigame.ai.lemmings",
+  "homepage": "https://github.com/UnioGame/unigame.ai.lemmings",
   "skills": "./skills/",
   "interface": {
     "displayName": "Lemmings",

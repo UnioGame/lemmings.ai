@@ -1,7 +1,8 @@
-"""Canonical schema-v3 orchestration contracts for Lemmings."""
+"""Canonical schema-v4 orchestration contracts for Lemmings."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -10,9 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-SCHEMA_VERSION = 3
-DISTRIBUTION_VERSION = "3.3.0"
-PLUGIN_VERSION = "3.3.0"
+SCHEMA_VERSION = 4
+DISTRIBUTION_VERSION = "4.0.0"
+PLUGIN_VERSION = "4.0.0"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -33,6 +34,7 @@ TRANSITIONS = {
 }
 REVIEW_STATES = {"Pending", "ChangesRequested", "Accepted"}
 REVIEW_POLICIES = {"single", "cross"}
+REVIEW_SUBJECT_KINDS = {"candidate", "baseline", "plan"}
 CROSS_REVIEW_DEGRADATION = "cross-review-unavailable"
 STRICT_RISKS = {
     "parallelWriters", "sharedContracts", "unitySerializedAssets", "submodules",
@@ -147,8 +149,8 @@ def schema_supported(value: Mapping[str, Any]) -> bool:
 def schema_error(kind: str, value: Mapping[str, Any]) -> str:
     version = value.get("schemaVersion")
     if version == 2:
-        return "schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle"
-    return f"unsupported schemaVersion: {version!r}; expected 3"
+        return "schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle"
+    return f"unsupported schemaVersion: {version!r}; expected 4"
 
 
 def normalize_path(value: str) -> str:
@@ -399,7 +401,7 @@ def host_degradations(value: Mapping[str, Any]) -> list[str]:
     return degradations
 
 
-def _validate_v3_profile(profile: Mapping[str, Any]) -> ValidationResult:
+def _validate_v4_profile(profile: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
     if profile.get("distributionVersion") != DISTRIBUTION_VERSION:
         result.error("profile.distribution", f"distributionVersion must be {DISTRIBUTION_VERSION}")
@@ -418,7 +420,13 @@ def _validate_v3_profile(profile: Mapping[str, Any]) -> ValidationResult:
     if not isinstance(orchestration, Mapping):
         result.error("profile.orchestration", "orchestration is required")
     else:
-        expected = {"maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1}
+        writers = orchestration.get("maxConcurrentWriters")
+        readers = orchestration.get("maxConcurrentReaders")
+        if not isinstance(writers, int) or isinstance(writers, bool) or not 1 <= writers <= 4:
+            result.error("profile.orchestration", "orchestration.maxConcurrentWriters must be between 1 and 4")
+        if not isinstance(readers, int) or isinstance(readers, bool) or not 0 <= readers <= 2:
+            result.error("profile.orchestration", "orchestration.maxConcurrentReaders must be between 0 and 2")
+        expected = {"maxDelegationDepth": 1, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1}
         for name, value in expected.items():
             if orchestration.get(name) != value:
                 result.error("profile.orchestration", f"orchestration.{name} must be {value}")
@@ -436,7 +444,7 @@ def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     if not schema_supported(profile):
         result.error("profile.schema", schema_error("profile", profile))
         return result
-    return _validate_v3_profile(profile)
+    return _validate_v4_profile(profile)
 
 
 def _route_ref_valid(value: Any) -> bool:
@@ -554,7 +562,7 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
         return result
     host_id = models.get("hostId")
     if not isinstance(host_id, str) or not host_id.strip():
-        result.error("model.host", "v3 models.hostId is required")
+        result.error("model.host", "v4 models.hostId is required")
         return result
     roles = (profile.get("modelRoutes") or {}).get(host_id, {})
     choices = roles.get(role) if isinstance(roles, Mapping) else None
@@ -640,7 +648,7 @@ def validate_mode_decision(task: Mapping[str, Any], phase: Mapping[str, Any] | N
     return result
 
 
-def validate_workspace_v3(task: Mapping[str, Any], workspace: Mapping[str, Any], state: str) -> ValidationResult:
+def validate_workspace_v4(task: Mapping[str, Any], workspace: Mapping[str, Any], state: str) -> ValidationResult:
     result = ValidationResult()
     backend = workspace.get("backend")
     isolated = backend in {"code-worktree", "package-worktree", "unity-clone"}
@@ -651,12 +659,12 @@ def validate_workspace_v3(task: Mapping[str, Any], workspace: Mapping[str, Any],
     if isolated and state not in {"Blocked", "Cancelled"} and not workspace.get("workspaceId"):
         result.error("workspace.id", f"{backend} requires workspaceId")
     if workspace.get("path"):
-        result.error("workspace.path", "v3 Task stores workspaceId, not an absolute workspace path")
+        result.error("workspace.path", "v4 Task stores workspaceId, not an absolute workspace path")
     close = task.get("close") if isinstance(task.get("close"), Mapping) else {}
     if state == "Integrated":
         disposition = close.get("workspaceDisposition")
         if not isinstance(disposition, Mapping):
-            result.error("workspace.disposition", "Integrated v3 Task requires close.workspaceDisposition")
+            result.error("workspace.disposition", "Integrated v4 Task requires close.workspaceDisposition")
         else:
             action = disposition.get("releaseAction")
             if action not in WORKSPACE_RELEASE_ACTIONS:
@@ -671,7 +679,7 @@ def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
     if schema_version(invocation) != SCHEMA_VERSION:
         result.error("invocation.schema", schema_error("AgentInvocation", invocation))
         return result
-    for field_name in ("runId", "taskId", "invocationId", "role", "baseSha", "profileDigest", "contextDigest", "objective", "outputSchemaVersion"):
+    for field_name in ("runId", "taskId", "invocationId", "role", "baseSha", "profileDigest", "taskDigest", "contextDigest", "objective", "outputSchemaVersion"):
         if not invocation.get(field_name):
             result.error("invocation.missing", f"missing invocation field: {field_name}")
     if invocation.get("role") not in {"worker", "reviewer", "explorer"}:
@@ -712,6 +720,7 @@ def validate_agent_result(
     *,
     current_profile_digest: str | None = None,
     current_context_digest: str | None = None,
+    current_task_digest: str | None = None,
 ) -> ValidationResult:
     result = ValidationResult()
     if schema_version(result_value) != SCHEMA_VERSION:
@@ -729,6 +738,8 @@ def validate_agent_result(
         result.error("result.profile", "profile changed after dispatch")
     if current_context_digest is not None and invocation.get("contextDigest") != current_context_digest:
         result.error("result.context", "context changed after dispatch")
+    if current_task_digest is not None and invocation.get("taskDigest") != current_task_digest:
+        result.error("result.task", "task content changed after dispatch")
     if result_value.get("status") not in {"succeeded", "failed", "blocked", "cancelled"}:
         result.error("result.status", "AgentResult status is invalid")
     for field_name in ("changedPaths", "acceptanceEvidence", "validationEvidence", "findings", "blockers", "remainingRisks"):
@@ -746,7 +757,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         return result
     revision = task.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-        result.error("task.revision", "v3 Task requires non-negative integer revision")
+        result.error("task.revision", "v4 Task requires non-negative integer revision")
     specialization = task.get("specialization")
     if specialization is not None and (not isinstance(specialization, str) or not specialization.strip()):
         result.error("task.specialization", "specialization must be null or a non-empty string")
@@ -760,10 +771,14 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("review.cross_refs_duplicate", "crossReviewRefs must not contain duplicate references")
     if task.get("reviewRef") and task.get("reviewRef") in cross_review_refs:
         result.error("review.cross_refs_primary", "crossReviewRefs must not repeat reviewRef")
+    if not isinstance(task.get("planReviewRequired", False), bool):
+        result.error("review.plan_required", "planReviewRequired must be boolean")
+    if task.get("planReviewRequired") and not task.get("planReviewRef"):
+        result.error("review.plan_reference", "planReviewRequired requires planReviewRef")
     result.extend(validate_mode_decision(task))
     domains = task.get("ownershipDomainCount")
     if not isinstance(domains, int) or isinstance(domains, bool) or domains < 1:
-        result.error("ownership.domains", "v3 Task requires positive ownershipDomainCount")
+        result.error("ownership.domains", "v4 Task requires positive ownershipDomainCount")
     for name in ("taskId", "goal", "acceptance", "dependencies", "risks", "state", "ownership", "models", "workspace", "workingSet", "validation", "execution", "reviewHistory", "close"):
         if name not in task or task.get(name) is None:
             result.error("task.missing", f"missing task field: {name}")
@@ -807,9 +822,21 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("task.execution", "execution must be an object")
         execution = {}
     else:
-        for name in ("interfaces", "tests", "dependencyHandoffs", "validationEvidence", "attempts"):
+        for name in ("interfaces", "tests", "dependencyHandoffs", "validationEvidence", "attempts", "invocations", "agentResults"):
             if not isinstance(execution.get(name), list):
                 result.error("task.execution", f"execution.{name} must be an array")
+    invocations = execution.get("invocations") if isinstance(execution, Mapping) else None
+    if isinstance(invocations, list):
+        invocation_ids: set[str] = set()
+        for index, invocation in enumerate(invocations):
+            if not isinstance(invocation, Mapping):
+                result.error("invocation.shape", f"execution.invocations[{index}] must be an object")
+                continue
+            result.extend(validate_invocation(invocation))
+            invocation_id = str(invocation.get("invocationId") or "")
+            if invocation_id in invocation_ids:
+                result.error("invocation.duplicate", f"duplicate invocationId: {invocation_id}")
+            invocation_ids.add(invocation_id)
     attempts = execution.get("attempts") if isinstance(execution, Mapping) else None
     if attempts is not None:
         if not isinstance(attempts, list):
@@ -879,7 +906,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         result.error("workspace.declined", "declined workspace must fall back to safe current work or set the Task to Blocked")
     if "parallelWriters" in as_list(task.get("modeReasons")) and backend == "current" and state in {"Ready", "Active", "Candidate", "Accepted", "Integrated"}:
         result.error("workspace.parallel", "parallel writers cannot share the current checkout")
-    result.extend(validate_workspace_v3(task, workspace, state))
+    result.extend(validate_workspace_v4(task, workspace, state))
     validation = task.get("validation")
     if not isinstance(validation, Mapping):
         result.error("task.validation", "validation must be an object")
@@ -900,8 +927,8 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
                 if isinstance(risk, str) and risk not in mapped_risks:
                     result.error("validation.risk_unmapped", f"risk has no declared test: {risk}")
     close = task.get("close")
-    if not isinstance(close, Mapping) or "mergeCommit" not in close or not isinstance(close.get("integrationValidationPassed"), bool):
-        result.error("task.close", "close requires mergeCommit and boolean integrationValidationPassed")
+    if not isinstance(close, Mapping) or "mergeCommit" not in close or not isinstance(close.get("integrationEvidence"), list):
+        result.error("task.close", "close requires mergeCommit and integrationEvidence array")
     if state in {"Candidate", "Accepted", "Integrated"}:
         if not task.get("baseSha"):
             result.error("commit.base_required", f"{state} requires baseSha")
@@ -939,8 +966,13 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
             if review_required and any(not item.get("reviewRef") or not item.get("reviewStatus") for item in attempts or [] if isinstance(item, Mapping)):
                 result.error("quality.attempt_review", "Integrated execution attempts require reviewRef and reviewStatus")
         close = task.get("close") or {}
-        if not close.get("mergeCommit") or close.get("integrationValidationPassed") is not True:
-            result.error("integration.evidence", "Integrated requires mergeCommit and integrationValidationPassed")
+        merge_commit = close.get("mergeCommit")
+        integration_evidence = close.get("integrationEvidence") or []
+        if not merge_commit or not integration_evidence:
+            result.error("integration.evidence", "Integrated requires mergeCommit and integrationEvidence")
+        for index, evidence in enumerate(integration_evidence):
+            if not isinstance(evidence, Mapping) or evidence.get("headSha") != merge_commit or not evidence.get("command") or evidence.get("passed") is not True:
+                result.error("integration.evidence", f"integrationEvidence[{index}] must pass a command at close.mergeCommit")
     return result
 
 
@@ -951,10 +983,10 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
         return result
     revision = phase.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-        result.error("phase.revision", "v3 Phase requires non-negative integer revision")
+        result.error("phase.revision", "v4 Phase requires non-negative integer revision")
     workspaces = (phase.get("close") or {}).get("workspaceDispositions") if isinstance(phase.get("close"), Mapping) else None
     if not isinstance(workspaces, list):
-        result.error("phase.workspaces", "v3 Phase close requires workspaceDispositions array")
+        result.error("phase.workspaces", "v4 Phase close requires workspaceDispositions array")
     else:
         for index, disposition in enumerate(workspaces):
             if not isinstance(disposition, Mapping) or disposition.get("releaseAction") not in WORKSPACE_RELEASE_ACTIONS or not disposition.get("releaseReason"):
@@ -1015,6 +1047,16 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
     return result
 
 
+def plan_digest(value: Mapping[str, Any]) -> str:
+    """Digest only the decision-bearing plan fields."""
+    if value.get("taskId"):
+        names = ("taskId", "goal", "acceptance", "dependencies", "requestedMode", "resolvedMode", "riskClass", "modeReasons", "ownership", "resources", "workingSet", "risks", "validation")
+    else:
+        names = ("phaseId", "baselineSha", "contractsFrozen", "contracts", "taskDag", "leases")
+    body = {name: value.get(name) for name in names}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def validate_review(
     review: Mapping[str, Any],
     task: Mapping[str, Any] | None = None,
@@ -1027,13 +1069,13 @@ def validate_review(
         return result
     revision = review.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-        result.error("review.revision", "v3 Review requires non-negative integer revision")
+        result.error("review.revision", "v4 Review requires non-negative integer revision")
     if not review.get("reviewId"):
         result.error("review.id", "reviewId is required")
     if review.get("status") not in REVIEW_STATES:
         result.error("review.status", f"review status must be one of {sorted(REVIEW_STATES)}")
     if not review.get("reviewerModel") or not review.get("hostId"):
-        result.error("review.model", "v3 Review requires hostId and actual reviewerModel")
+        result.error("review.model", "v4 Review requires hostId and actual reviewerModel")
     elif profile:
         host_id = review.get("hostId")
         choices = (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or [])
@@ -1090,8 +1132,17 @@ def validate_review(
             result.error("review.baseline", "review subject sha must equal phase baselineSha")
         if review.get("status") != "Accepted":
             result.error("review.baseline_status", "Strict baseline review must be Accepted")
+    elif kind == "plan":
+        owner = task if subject.get("ownerKind") == "task" else phase if subject.get("ownerKind") == "phase" else None
+        owner_id = (owner or {}).get("taskId") or (owner or {}).get("phaseId")
+        if not owner or subject.get("ownerId") != owner_id:
+            result.error("review.plan_owner", "plan review must name its Task or Phase owner")
+        elif subject.get("planDigest") != plan_digest(owner):
+            result.error("review.plan_stale", "plan review digest is stale")
+        if review.get("status") != "Accepted":
+            result.error("review.plan_status", "plan review must be Accepted")
     else:
-        result.error("review.subject", "review subject.kind must be candidate or baseline")
+        result.error("review.subject", "review subject.kind must be candidate, baseline, or plan")
     return result
 
 
@@ -1115,7 +1166,7 @@ def validate_repository_commits(repo: Path, task: Mapping[str, Any], phase: Mapp
     baseline = task.get("baseSha") or (phase or {}).get("baselineSha")
     if phase and task.get("baseSha") and phase.get("baselineSha"):
         if git(repo, "merge-base", "--is-ancestor", str(phase.get("baselineSha")), str(task.get("baseSha"))).returncode:
-            result.error("commit.phase_base", "v3 task baseSha must contain the Phase baseline")
+            result.error("commit.phase_base", "v4 task baseSha must contain the Phase baseline")
     if baseline and head:
         baseline_process = git(repo, "rev-parse", "--verify", f"{baseline}^{{commit}}")
         if baseline_process.returncode:
@@ -1160,6 +1211,18 @@ def validate_repository_evidence(
         baseline = phase.get("baselineSha")
         if baseline and git(repo, "rev-parse", "--verify", f"{baseline}^{{commit}}").returncode:
             result.error("commit.baseline_missing", f"phase baseline does not resolve: {baseline}")
+    plan_ref = task.get("planReviewRef")
+    if task.get("planReviewRequired") or plan_ref:
+        relative, target = canonical_evidence_path(repo, plan_ref)
+        if not relative or not target or not target.is_file():
+            result.error("review.plan_evidence", "planReviewRef must be an existing file inside the repository")
+        else:
+            try:
+                evidence = read_object(target)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                result.error("review.plan_parse", f"invalid plan review evidence: {error}")
+            else:
+                result.extend(validate_review(evidence, task, phase, profile))
     if review:
         embedded = task.get("reviewRef")
         embedded_relative, embedded_target = canonical_evidence_path(repo, embedded)
@@ -1278,13 +1341,25 @@ def validate_batch(
     phase: Mapping[str, Any],
     selected: Iterable[str],
     profile: Mapping[str, Any] | None = None,
+    *,
+    available_slots: int | None = None,
+    active_writers: int = 0,
+    active_readers: int = 0,
 ) -> ValidationResult:
     result = ValidationResult()
-    task_map = {str(task.get("taskId") or ""): task for task in tasks}
+    task_list = list(tasks)
+    task_map = {str(task.get("taskId") or ""): task for task in task_list}
     ids = [str(item) for item in selected]
-    if not ids or len(ids) > 2:
-        result.error("batch.size", "a writer batch must contain one or two tasks")
+    configured = int((((profile or {}).get("orchestration") or {}).get("maxConcurrentWriters") or 2))
+    if not ids or len(ids) > configured:
+        result.error("batch.size", f"writer batch must contain between 1 and {configured} tasks")
         return result
+    if len(ids) != len(set(ids)):
+        result.error("batch.duplicate", "writer batch contains duplicate task ids")
+    if len(task_map) != len(task_list):
+        result.error("batch.task_duplicate", "loaded tasks contain duplicate task ids")
+    if available_slots is not None and 1 + active_writers + active_readers + len(ids) > available_slots:
+        result.error("batch.capacity", "writer batch exceeds confirmed host slots including the manager")
     eligibility = dispatchable_tasks(task_map.values(), phase)
     for task_id in ids:
         if task_id not in task_map:
@@ -1312,17 +1387,16 @@ def validate_batch(
     if len(current) > 1:
         result.error("workspace.parallel", f"parallel writers cannot share current checkout: {', '.join(current)}")
     for index, task in enumerate(chosen):
-        left = as_list((task.get("ownership") or {}).get("owned"))
+        left = [*as_list((task.get("ownership") or {}).get("owned")), *as_list((task.get("ownership") or {}).get("shared"))]
         left_resources = set(as_list((task.get("resources") or {}).get("exclusive")))
         for other in chosen[index + 1:]:
-            right = as_list((other.get("ownership") or {}).get("owned"))
+            right = [*as_list((other.get("ownership") or {}).get("owned")), *as_list((other.get("ownership") or {}).get("shared"))]
             if any(paths_overlap(str(a), str(b)) for a in left for b in right):
-                result.error("ownership.overlap", f"owned paths overlap: {task.get('taskId')} and {other.get('taskId')}")
+                result.error("ownership.overlap", f"owned/shared paths overlap: {task.get('taskId')} and {other.get('taskId')}")
             overlap = left_resources.intersection(as_list((other.get("resources") or {}).get("exclusive")))
             if overlap:
                 result.error("lease.conflict", f"exclusive resources overlap: {', '.join(sorted(map(str, overlap)))}")
     return result
-
 
 def validate_wave(
     repo: Path,

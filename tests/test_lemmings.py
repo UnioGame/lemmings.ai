@@ -8,9 +8,13 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/lemmings/scripts"))
 from unittest.mock import patch
 
 from lemmings import cli
+import lemmings.hooks as hooks_module
 from lemmings.contracts import ValidationResult, runtime_marker, validate_phase, validate_profile, validate_repository_evidence, validate_review, validate_task
 from lemmings.hooks import derive_context_packet, handle, hydrate, is_read_only_shell
 
@@ -19,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def profile() -> dict:
     return {
-        "schemaVersion": 3,
-        "distributionVersion": "3.3.0",
+        "schemaVersion": 4,
+        "distributionVersion": "4.0.0",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -35,7 +39,7 @@ def profile() -> dict:
 
 
 def task(*, mode: str = "standard", state: str = "Ready", task_id: str = "T-1") -> dict:
-    value = json.loads((ROOT / "Documentation~" / "tasks" / "templates" / "task.json").read_text(encoding="utf-8"))
+    value = json.loads((ROOT / "skills" / "lemmings" / "templates" / "task.json").read_text(encoding="utf-8"))
     value.update({"taskId": task_id, "requestedMode": mode, "resolvedMode": mode, "modeFloor": mode, "state": state})
     value["modeReasons"] = ["explicit-mode-pin"]
     value["riskClass"] = "low" if mode == "simple" else "medium"
@@ -49,7 +53,7 @@ def init_repo(path: Path) -> None:
 
 class SchemaOnlyTests(unittest.TestCase):
     def test_v2_artifacts_have_one_breaking_error(self):
-        expected = "schemaVersion 2 is unsupported by Lemmings 3.3; replace the legacy bundle"
+        expected = "schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle"
         for validator, value in ((validate_profile, {"schemaVersion": 2}), (validate_task, {"schemaVersion": 2}), (validate_phase, {"schemaVersion": 2}), (validate_review, {"schemaVersion": 2})):
             with self.subTest(validator=validator.__name__):
                 checked = validator(value)
@@ -59,8 +63,8 @@ class SchemaOnlyTests(unittest.TestCase):
     def test_distribution_versions_are_33(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual("3.3.0", package["version"])
-        self.assertEqual("3.3.0", plugin["version"])
+        self.assertEqual("4.0.0", package["version"])
+        self.assertEqual("4.0.0", plugin["version"])
 
     def test_specialization_is_optional_hint_and_cross_review_degrades(self):
         configured = profile()
@@ -93,7 +97,7 @@ class SchemaOnlyTests(unittest.TestCase):
         accepted["execution"]["validationEvidence"] = ["ok"]
 
         def evidence(review_id: str, model: str) -> dict:
-            return {"schemaVersion": 3, "revision": 0, "reviewId": review_id, "subject": {"kind": "candidate", "taskId": accepted["taskId"], "baseSha": "base", "headSha": "head"}, "status": "Accepted", "hostId": "codex", "reviewerModel": model, "cycle": 1, "findings": [], "validation": []}
+            return {"schemaVersion": 4, "revision": 0, "reviewId": review_id, "subject": {"kind": "candidate", "taskId": accepted["taskId"], "baseSha": "base", "headSha": "head"}, "status": "Accepted", "hostId": "codex", "reviewerModel": model, "cycle": 1, "findings": [], "validation": []}
 
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo)
@@ -119,14 +123,14 @@ class RuntimeTests(unittest.TestCase):
         packet.write_text(json.dumps(value), encoding="utf-8")
         return repo
 
-    def test_activate_status_and_deactivate_use_relative_v3_marker(self):
+    def test_activate_status_and_deactivate_use_relative_v4_marker(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = self._repo(Path(temp), task())
             with redirect_stdout(StringIO()):
                 self.assertEqual(0, cli.main(["runtime", "activate", "--repo", str(repo), "--task", "docs/tasks/task.json"]))
                 self.assertEqual(0, cli.main(["runtime", "status", "--repo", str(repo)]))
             marker = runtime_marker(repo)
-            self.assertEqual({"schemaVersion": 3, "profilePath": ".agents/lemmings.json", "taskPath": "docs/tasks/task.json"}, json.loads(marker.read_text(encoding="utf-8")))
+            self.assertEqual({"schemaVersion": 4, "profilePath": ".agents/lemmings.json", "taskPaths": ["docs/tasks/task.json"]}, json.loads(marker.read_text(encoding="utf-8")))
             with redirect_stdout(StringIO()):
                 self.assertEqual(0, cli.main(["runtime", "deactivate", "--repo", str(repo)]))
                 self.assertEqual(0, cli.main(["runtime", "deactivate", "--repo", str(repo)]))
@@ -190,10 +194,14 @@ class HookPolicyTests(unittest.TestCase):
             "reviewer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-sol", "variantId": "high"}],
             "explorer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "high"}],
         }
+        value["execution"]["invocations"].append(derive_context_packet(value, None, "reviewer", {"profile": configured}))
         cross = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": configured, "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
         self.assertEqual("allow", cross["decision"])
         self.assertNotIn("capabilityDegradation", cross)
-        single = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": profile(), "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
+        single_profile = profile()
+        single_value = json.loads(json.dumps(value))
+        single_value["execution"]["invocations"] = [derive_context_packet(single_value, None, "reviewer", {"profile": single_profile})]
+        single = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": single_value, "profile": single_profile, "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
         self.assertEqual("cross-review-unavailable", single.get("capabilityDegradation"))
 
     def test_candidate_no_longer_requires_handoff(self):
@@ -203,6 +211,18 @@ class HookPolicyTests(unittest.TestCase):
         value["models"]["actual"] = value["models"]["assigned"]
         value["execution"]["validationEvidence"] = ["ok"]
         self.assertTrue(validate_task(value, profile()).ok, validate_task(value, profile()).as_dict())
+
+    def test_hook_launcher_never_hides_invalid_input_as_success(self):
+        output = StringIO()
+        with patch("sys.stdin", StringIO("{invalid")), redirect_stdout(output):
+            self.assertEqual(1, hooks_module.main())
+        self.assertIn("invalid Lemmings hook input", output.getvalue())
+
+        output = StringIO()
+        payload = json.dumps({"hook_event_name": "PreToolUse", "cwd": str(ROOT), "tool_name": "spawn_agent"})
+        with patch("sys.stdin", StringIO(payload)), patch.object(hooks_module, "hydrate", side_effect=ValueError("broken launcher")), redirect_stdout(output):
+            self.assertEqual(0, hooks_module.main())
+        self.assertEqual("deny", json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"])
 
     def test_agent_result_paths_must_match_actual_candidate_diff(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -220,9 +240,11 @@ class HookPolicyTests(unittest.TestCase):
             head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
             value = task(state="Candidate")
             value.update({"baseSha": base, "previousState": "Active"})
+            value["ownership"] = {"owned": ["owned.txt"], "shared": [], "forbidden": []}
             value["commits"]["candidate"] = head
             invocation = derive_context_packet(value, {}, "worker", {"profile": profile()})
-            result = {"schemaVersion": 3, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"], "status": "succeeded", "candidateHead": head, "changedPaths": ["wrong.txt"], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+            value["execution"]["invocations"].append(invocation)
+            result = {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"], "status": "succeeded", "candidateHead": head, "changedPaths": ["wrong.txt"], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
             payload = {"event": "SubagentStop", "cwd": str(repo), "task": value, "profile": profile(), "task_name": "lemmings-worker", "agentInvocation": invocation, "agentResult": result}
             self.assertEqual("block", handle(payload)["decision"])
             result["changedPaths"] = ["owned.txt"]
@@ -284,7 +306,7 @@ class CheckEfficiencyTests(unittest.TestCase):
                 path.write_text(json.dumps(task(task_id=task_id)), encoding="utf-8")
                 paths.append(str(path))
             phase_path = repo / "phase.json"
-            phase_path.write_text(json.dumps({"schemaVersion": 3}), encoding="utf-8")
+            phase_path.write_text(json.dumps({"schemaVersion": 4}), encoding="utf-8")
             args = argparse.Namespace(repo=str(repo), profile=None, task=paths, phase=str(phase_path), review=None, all=True, distribution=False, dispatchable=False, batch=None)
             calls = []
             with patch.object(cli, "check_task_repository", side_effect=lambda *values, **kwargs: calls.append(values[2]["taskId"]) or ValidationResult()), patch.object(cli, "validate_wave", return_value=ValidationResult()) as wave:

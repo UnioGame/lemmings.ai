@@ -240,7 +240,7 @@ def build_recovery_proposal(
     if task.get("schemaVersion") != SCHEMA_VERSION:
         raise ValueError(schema_error("Task", task))
     if not isinstance(task.get("revision"), int):
-        raise ValueError("recovery requires a schema v3 Task with revision")
+        raise ValueError("recovery requires a schema v4 Task with revision")
     catalogs = _normalize_catalogs(catalog_values)
     failure = normalize_route_failure(failure_value)
     options = _normalize_recovery_options(plan_value, catalogs, failure)

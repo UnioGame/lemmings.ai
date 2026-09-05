@@ -192,7 +192,7 @@ def utc_timestamp() -> str:
 
 
 def registry_path(repo: Path) -> Path:
-    return git_common_dir(repo) / "lemmings" / "workspaces-v3.json"
+    return git_common_dir(repo) / "lemmings" / "workspaces-v4.json"
 
 
 def common_dir_identity(repo: Path) -> str:

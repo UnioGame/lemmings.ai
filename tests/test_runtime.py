@@ -5,6 +5,9 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/lemmings/scripts"))
 from unittest.mock import patch
 
 from lemmings.contracts import (
@@ -37,8 +40,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def profile() -> dict:
     return {
-        "schemaVersion": 3,
-        "distributionVersion": "3.3.0",
+        "schemaVersion": 4,
+        "distributionVersion": "4.0.0",
         "mode": "auto",
         "modelRoutes": {
             "codex": {
@@ -57,7 +60,7 @@ def profile() -> dict:
 
 
 def task(task_id: str = "TASK-1") -> dict:
-    value = json.loads((ROOT / "Documentation~/tasks/templates/task.json").read_text(encoding="utf-8"))
+    value = json.loads((ROOT / "skills/lemmings/templates/task.json").read_text(encoding="utf-8"))
     value["taskId"] = task_id
     return value
 
@@ -77,7 +80,7 @@ def init_repo(root: Path) -> str:
     return git(root, "rev-parse", "HEAD")
 
 
-class AutoAndContractV3Tests(unittest.TestCase):
+class AutoAndContractV4Tests(unittest.TestCase):
     def test_profile_and_template_are_valid(self):
         self.assertTrue(validate_profile(profile()).ok)
         self.assertTrue(validate_task(task(), profile()).ok)
@@ -107,7 +110,7 @@ class AutoAndContractV3Tests(unittest.TestCase):
         value["execution"]["validationEvidence"] = ["tests pass"]
         value["close"] = {
             "mergeCommit": "integrated",
-            "integrationValidationPassed": True,
+            "integrationEvidence": [{"headSha": "integrated", "command": "tests", "passed": True}],
             "workspaceDisposition": {"workspaceId": "ws-1", "releaseAction": "removed", "releaseReason": "safe-auto", "lastClean": True, "lastHead": "candidate"},
         }
         self.assertTrue(validate_task(value, profile()).ok, validate_task(value, profile()).as_dict())
@@ -120,12 +123,12 @@ class AutoAndContractV3Tests(unittest.TestCase):
         too_large = dict(invocation)
         too_large["contextRefs"] = [{"ref": f"p/{i}", "purpose": "x", "contentHash": "h"} for i in range(13)]
         self.assertIn("context.entries", {item.code for item in validate_invocation(too_large).findings})
-        result = {"schemaVersion": 3, "invocationId": invocation["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": "head", "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+        result = {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": "head", "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
         self.assertTrue(validate_agent_result(result, invocation, value).ok)
         value["revision"] += 1
         self.assertIn("result.revision", {item.code for item in validate_agent_result(result, invocation, value).findings})
 
-    def test_v3_context_overflow_blocks_instead_of_warning(self):
+    def test_v4_context_overflow_blocks_instead_of_warning(self):
         value = task()
         value["workingSet"] = [{"ref": f"src/{i}", "purpose": "needed"} for i in range(13)]
         output = handle({"event": "SubagentStart", "task": value, "profile": profile(), "task_name": "lemmings-worker"})
@@ -138,7 +141,7 @@ class AutoAndContractV3Tests(unittest.TestCase):
         first["models"]["actual"] = first["models"]["assigned"]
         first["commits"]["candidate"] = "head"
         first["execution"].update({"handoff": {}, "validationEvidence": ["ok"]})
-        first["close"] = {"mergeCommit": "merge", "integrationValidationPassed": True, "workspaceDisposition": {"workspaceId": None, "releaseAction": "current", "releaseReason": "external"}}
+        first["close"] = {"mergeCommit": "merge", "integrationEvidence": [{"headSha": "integrated", "command": "tests", "passed": True}], "workspaceDisposition": {"workspaceId": None, "releaseAction": "current", "releaseReason": "external"}}
         second["dependencies"] = ["A"]
         second["parallelReason"] = "independent_paths"
         phase = {"taskDag": [{"taskId": "A", "dependencies": []}, {"taskId": "B", "dependencies": ["A"]}]}
@@ -147,7 +150,7 @@ class AutoAndContractV3Tests(unittest.TestCase):
         self.assertTrue(checked.ok, checked.as_dict())
 
 
-class ModelsAndUsageV3Tests(unittest.TestCase):
+class ModelsAndUsageV4Tests(unittest.TestCase):
     def test_reconfigure_is_stale_safe_and_changes_only_routes(self):
         config = profile()
         catalog = {"hostId": "opencode", "models": [{"providerId": "anthropic", "modelId": "claude", "variants": ["fast", "deep"]}]}
@@ -258,6 +261,7 @@ class ModelsAndUsageV3Tests(unittest.TestCase):
             candidate["models"]["actual"] = candidate["models"]["assigned"]
             candidate["commits"]["candidate"] = "head"
             candidate["execution"].update({"handoff": {"changedPaths": []}, "validationEvidence": ["ok"]})
+            candidate["execution"]["invocations"].append(derive_context_packet(candidate, None, "reviewer", {"profile": config}))
             reviewer = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": "head"})
             wrong_range = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": "other"})
             self.assertEqual("allow", reviewer["decision"])
@@ -304,14 +308,16 @@ class ModelsAndUsageV3Tests(unittest.TestCase):
         output = handle({"event": "SubagentStop", "task": value, "profile": profile(), "task_name": "lemmings-worker", "routeFailure": failure})
         self.assertEqual("allow", output["decision"])
         self.assertEqual("recover", output["recoveryAction"])
-        common = {"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": profile(), "task_name": "lemmings-worker", "requestedModel": value["models"]["assigned"]}
+        configured = profile()
+        value["execution"]["invocations"].append(derive_context_packet(value, None, "worker", {"profile": configured}))
+        common = {"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": configured, "task_name": "lemmings-worker", "requestedModel": value["models"]["assigned"]}
         unknown = handle({**common, "capacityProbe": {"status": "unknown", "route": failure["route"]}})
         depleted = handle({**common, "capacityProbe": {"status": "depleted", "route": failure["route"]}})
         self.assertEqual("allow", unknown["decision"])
         self.assertEqual("block", depleted["decision"])
 
 
-class WorkspacePoolV3Tests(unittest.TestCase):
+class WorkspacePoolV4Tests(unittest.TestCase):
     def add_workspace(self, repo: Path, root: Path, name: str) -> Path:
         path = root / name
         git(repo, "worktree", "add", "-b", name, str(path), "HEAD")
@@ -396,7 +402,7 @@ class WorkspacePoolV3Tests(unittest.TestCase):
                 claim_workspace(repo, workspace_id="ws", task_id="T", base_sha=head, integration_head=head, branch="new", expected_revision=0)
 
     def test_cleanup_code_has_no_force_reset_clean_or_prune(self):
-        source = (ROOT / "lemmings/workspace.py").read_text(encoding="utf-8")
+        source = (ROOT / "skills/lemmings/scripts/lemmings/workspace.py").read_text(encoding="utf-8")
         self.assertNotIn('"--force"', source)
         self.assertNotIn('git(repo, "reset"', source)
         self.assertNotIn('git(repo, "clean"', source)

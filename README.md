@@ -1,4 +1,4 @@
-# Lemmings 3.3
+# Lemmings 4.0
 
 Lemmings is a repository skill for proportional agent delivery. `Auto` resolves Simple, Standard, or Strict after discovery. The current agent remains the sole manager; bounded worker, reviewer, and explorer invocations receive compact assignments.
 
@@ -15,7 +15,7 @@ flowchart TD
 
     S --> FV[Focused validation]
     FV --> AC
-    T --> RT[Activate schema-v3 runtime]
+    T --> RT[Activate schema-v4 runtime]
     P --> RT
     RT --> W[Claim pooled or provision workspace]
     W --> I[Worker invocation]
@@ -42,6 +42,8 @@ flowchart TD
 ```
 
 Text fallback: `Discover → Plan → Refine → Implement → Verify`.
+
+Independent Ready tasks may run in waves of one to four isolated writers. The configured default is two; confirmed host capacity, including one manager slot and active readers/writers, is the hard limit. Integration remains sequential after the whole wave finishes.
 
 The manager is the only orchestrator. Contracts, hooks, and the CLI only validate or atomically execute a decision already made by the manager. Telemetry is optional, offline, and never part of the delivery critical path.
 
@@ -96,9 +98,9 @@ For security, payments, or high-risk refactors, the manager may set `reviewPolic
 Model identifiers are opaque host catalog values. A larger catalog does not raise the orchestration mode. Permanent route changes are stale-safe and require confirmation:
 
 ```text
-python -m lemmings models inspect --repo <repo>
-python -m lemmings models propose --repo <repo> --catalog catalog.json --routes routes.json
-python -m lemmings models apply --repo <repo> --catalog catalog.json --routes routes.json --confirm <proposalDigest>
+python .agents/skills/lemmings/scripts/run.py models inspect --repo <repo>
+python .agents/skills/lemmings/scripts/run.py models propose --repo <repo> --catalog catalog.json --routes routes.json
+python .agents/skills/lemmings/scripts/run.py models apply --repo <repo> --catalog catalog.json --routes routes.json --confirm <proposalDigest>
 ```
 
 `apply` changes only `modelRoutes`; it cannot change prompts, topology, workspaces, concurrency, telemetry, or Task state.
@@ -112,9 +114,9 @@ The manager responds with two to four choices: the same model through another so
 A selected route plan is stored only in the current Task. It does not mutate `.agents/lemmings.json` and expires when the Task finishes. One confirmation approves its ordered worker/reviewer/explorer chains; `advance` can only move to the next already approved route:
 
 ```text
-python -m lemmings models recover propose --repo <repo> --task task.json --failure failure.json --plan recovery.json --catalog codex.json --catalog opencode.json
-python -m lemmings models recover apply --repo <repo> --task task.json --failure failure.json --plan recovery.json --catalog codex.json --catalog opencode.json --option same-model-other-host --confirm <proposalDigest>
-python -m lemmings models recover advance --repo <repo> --task task.json --failure next-failure.json --role worker --expected-revision 4
+python .agents/skills/lemmings/scripts/run.py models recover propose --repo <repo> --task task.json --failure failure.json --plan recovery.json --catalog codex.json --catalog opencode.json
+python .agents/skills/lemmings/scripts/run.py models recover apply --repo <repo> --task task.json --failure failure.json --plan recovery.json --catalog codex.json --catalog opencode.json --option same-model-other-host --confirm <proposalDigest>
+python .agents/skills/lemmings/scripts/run.py models recover advance --repo <repo> --task task.json --failure next-failure.json --role worker --expected-revision 4
 ```
 
 Before confirmation, dispatch is blocked. A short rate limit up to 30 seconds or one transport failure receives one retry; context overflow receives one focused context reduction. Exhausting an approved chain pauses the Task and requires a new proposal.
@@ -149,32 +151,27 @@ The installer writes `.agents/lemmings.json`, the skill, and exactly three bound
 Useful checks:
 
 ```text
-python -m lemmings check --repo <repo>
-python -m lemmings check --distribution --repo <repo>
-python -m lemmings runtime activate --repo <repo> --task docs/tasks/TASK.json [--phase docs/tasks/PHASE.json]
-python -m lemmings runtime status --repo <repo>
-python -m lemmings runtime deactivate --repo <repo>
-python -m lemmings workspace inspect --repo <repo>
-python -m lemmings models inspect --repo <repo>
-python -m lemmings metrics usage --host opencode --file usage.json
+python .agents/skills/lemmings/scripts/run.py doctor --repo <repo>
+python .agents/skills/lemmings/scripts/run.py check --repo <repo>
+python .agents/skills/lemmings/scripts/run.py check --distribution --repo <repo>
+python .agents/skills/lemmings/scripts/run.py invocation create --repo <repo> --task docs/tasks/TASK.json --role worker --attempt 1 --expected-revision 0
+python .agents/skills/lemmings/scripts/run.py invocation accept --repo <repo> --task docs/tasks/TASK.json --result result.json --expected-revision 1
+python .agents/skills/lemmings/scripts/run.py integration validate --repo <repo> --task docs/tasks/TASK.json --expected-revision 2
+python .agents/skills/lemmings/scripts/run.py runtime activate --repo <repo> --task docs/tasks/TASK.json [--phase docs/tasks/PHASE.json]
+python .agents/skills/lemmings/scripts/run.py runtime status --repo <repo>
+python .agents/skills/lemmings/scripts/run.py runtime deactivate --repo <repo>
+python .agents/skills/lemmings/scripts/run.py workspace inspect --repo <repo>
+python .agents/skills/lemmings/scripts/run.py models inspect --repo <repo>
+python .agents/skills/lemmings/scripts/run.py metrics usage --host opencode --file usage.json
 ```
 
 Normal `check` validates lifecycle/configuration without rereading the installed skill and agent trees. Use `--distribution` for the explicit byte-level bundle comparison; installers perform the equivalent comparison before committing their transaction.
 
-## Upgrading to 3.3
+## Installing or upgrading to 4.0
 
-3.3 keeps schema v3 and removes the Unity Editor/BatchMode count limit. Agents may run editors independently for distinct project directories; Unity's lock still applies to the same project directory. Legacy `maxUnityEditors` settings are ignored by the skill and omitted from newly installed profiles.
+Run `scripts/install.ps1 -Repo <repo>` on Windows or `scripts/install.sh --repo <repo>` on macOS/Linux. The installer replaces the complete owned skill, profile, and three Lemmings agent files, removes obsolete owned roles, validates the installed runtime with `doctor`, and restores the prior bundle if validation fails. Existing model routes and settings are not migrated. Active sessions and leased workspaces block replacement.
 
-Schema v2 and side-by-side v2/v3 operation remain unsupported. Upgrade by running the 3.3 installer. A recognized legacy v2 bundle is replaced without `Force`; replacing a 3.2 or modified current v3 bundle requires `Force`. The installer replaces the owned profile with defaults, so preserve any custom settings before upgrading.
-
-The installer replaces `.agents/skills/lemmings`, `.agents/lemmings.json`, and the worker/reviewer/explorer profiles. It removes these legacy-owned targets after a successful transactional validation:
-
-- `.codex/lemmings.json`;
-- `.git/lemmings/active.json` when it is a v2 marker;
-- `lemmings-orchestrator.toml`, `lemmings-validator.toml`, and `lemmings-summarizer.toml`;
-- a legacy `environment.json` when an embedded package no longer needs it.
-
-It never removes Task/review history, telemetry events, workspace registry v3, worktrees, branches, validation clones, or foreign agent profiles. On failure it restores the complete previous owned bundle and runtime marker. After a successful upgrade runtime remains inactive until `lemmings runtime activate`; Simple mode never creates a marker.
+Schema versions before 4 are rejected. Task history and user-owned files remain untouched. Plugin hooks are configured separately and are not proven by repository skill installation.
 
 ## Optional telemetry
 
@@ -190,4 +187,4 @@ Codex, OpenCode, and Kilo token exports can be normalized offline. Missing field
 - [Model routing and recovery](skills/lemmings/references/model-routing.md)
 - [Game-project workspaces](skills/lemmings/references/game-projects.md)
 - [Optional telemetry](skills/lemmings/references/telemetry.md)
-- [Task, Phase, and Review templates](Documentation~/tasks/templates)
+- [Task, Phase, and Review templates](skills/lemmings/templates)

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "revision": 0,
   "reviewId": "REVIEW-17",
   "subject": { "kind": "candidate", "taskId": "TASK-17", "baseSha": "<sha>", "headSha": "<candidate-or-fix-sha>" },

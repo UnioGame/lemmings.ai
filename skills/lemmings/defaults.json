@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 4,
+  "distributionVersion": "4.0.0",
+  "mode": "auto",
+  "roadmap": "docs/tasks/ROADMAP.md",
+  "taskGlobs": ["docs/tasks/**/*.json"],
+  "reviewGlobs": ["docs/tasks/reviews/*.json"],
+  "worktreeRoot": "../lemmings-worktrees",
+  "modelRoutes": {
+    "codex": {
+      "worker": [
+        { "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max", "specializations": ["default"] },
+        { "providerId": "openai", "modelId": "gpt-5.6-terra", "variantId": "max", "specializations": ["default"] }
+      ],
+      "reviewer": [{ "providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high", "specializations": ["default"] }],
+      "explorer": [{ "providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "high", "specializations": ["default"] }]
+    }
+  },
+  "contextPolicy": { "maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1 },
+  "orchestration": { "maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1 },
+  "workspacePool": { "enabled": true, "maxIdle": 2, "maxIdleGiB": 10, "eviction": "lru" },
+  "game": {
+    "engine": "unity",
+    "projectPath": "GameClient",
+    "workspace": {
+      "policy": "auto",
+      "parallelStrategy": "hybrid",
+      "largeThresholdGiB": 10,
+      "validationBackend": "clone",
+      "validationPath": "../PROJECT.lemmings.validation"
+    }
+  }
+}

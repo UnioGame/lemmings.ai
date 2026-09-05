@@ -1,6 +1,6 @@
 {
   "name": "unigame.ai.lemmings",
-  "version": "3.3.0",
+  "version": "4.0.0",
   "displayName": "Lemmings",
   "description": "Proportional repository orchestration for multiple agent hosts.",
   "unity": "6000.0",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/UnioGame/unigame.ai.tools.git"
+    "url": "https://github.com/UnioGame/unigame.ai.lemmings.git"
   },
   "keywords": [
     "ai",
