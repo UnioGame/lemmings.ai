@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 4,
-        "distributionVersion": "4.1.0",
+        "distributionVersion": "4.1.1",
         "mode": "auto",
         "modelRoutes": {
             "codex": {

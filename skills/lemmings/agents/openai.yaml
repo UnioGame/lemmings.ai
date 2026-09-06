@@ -1,4 +1,6 @@
 interface:
   display_name: "Lemmings"
   short_description: "Smart proportional delivery orchestration"
+  icon_small: "./assets/icon.png"
+  icon_large: "./assets/icon.png"
   default_prompt: "Use $lemmings Auto to discover, resolve a safe mode and workspace, then plan, refine, implement, and verify this repository task."

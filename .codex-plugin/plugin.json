@@ -1,6 +1,6 @@
 {
   "name": "lemmings",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "description": "Proportional repository orchestration for multiple agent hosts",
   "author": {
     "name": "Lemmings Maintainers"
@@ -15,6 +15,8 @@
     "developerName": "Lemmings Maintainers",
     "category": "Productivity",
     "capabilities": [],
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
     "defaultPrompt": "Use $lemmings Auto to discover, resolve the lightest safe mode, and complete this repository task."
   }
 }

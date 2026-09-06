@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "4.1.0"
+VERSION = "4.1.1"
 OWNED_AGENTS = (
     "lemmings-worker.toml", "lemmings-reviewer.toml", "lemmings-explorer.toml",
     "lemmings-orchestrator.toml", "lemmings-validator.toml", "lemmings-summarizer.toml",

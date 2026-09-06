@@ -1,4 +1,6 @@
-# Lemmings 4.0
+# Lemmings 4.1
+
+![Lemmings package icon](assets/icon.png)
 
 Lemmings is a repository skill for proportional agent delivery. `Auto` resolves Simple, Standard, or Strict after discovery. The current agent remains the sole manager; bounded worker, reviewer, and explorer invocations receive compact assignments.
 

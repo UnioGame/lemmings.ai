@@ -1,6 +1,6 @@
 {
   "name": "unigame.ai.lemmings",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "displayName": "Lemmings",
   "description": "Proportional repository orchestration for multiple agent hosts.",
   "unity": "6000.0",
