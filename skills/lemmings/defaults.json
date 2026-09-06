@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "distributionVersion": "4.0.0",
+  "distributionVersion": "4.1.0",
   "mode": "auto",
   "roadmap": "docs/tasks/ROADMAP.md",
   "taskGlobs": ["docs/tasks/**/*.json"],
