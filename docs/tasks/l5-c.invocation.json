@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-C",
+  "taskId": "L5-C",
+  "taskRevision": 5,
+  "invocationId": "abe58ee641262a712f4d9fbb",
+  "attempt": 1,
+  "role": "worker",
+  "baseSha": "444486fe8b12334bb50cefbc02d11136ac0b7dc3",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "f261d1ec1f727b459bf6317bc53c304523231aa3a5dfa061399edbe7e58c875b",
+  "contextDigest": "b184193e57cb7faea35511886bbb50e79f98f436e151476da3b6bbe8d0cd43b9",
+  "objective": "Manager implements C sequentially under user authorization: scoped resolver and seven substantive packs plus platforms, bounded detection and hashes, focused tests. No unrelated edits.",
+  "acceptanceCriteria": [
+    "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
+  ],
+  "ownedPaths": [
+    "skills/lemmings/scripts/lemmings/rules.py",
+    "skills/lemmings/rules/**",
+    "tests/test_rules.py"
+  ],
+  "forbiddenPaths": [
+    "skills/lemmings/scripts/lemmings/cli.py",
+    "skills/lemmings/scripts/lemmings/contracts.py",
+    "docs/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Bounded accepted implementation context",
+      "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/bundle.py",
+      "purpose": "Bounded accepted implementation context",
+      "contentHash": "38a2a1a0c9d5ddfbd267a2b58c89762f52200f7aed1b1e64be445435f8f523ad"
+    },
+    {
+      "ref": "docs/context/l5-pack-content.md",
+      "purpose": "Bounded accepted implementation context",
+      "contentHash": "1a1a5df308d9b6a02d97e68178d2d9216f4a03850b9706be3ab916d73bdc2cd0"
+    },
+    {
+      "ref": "docs/context/l5-rule-sources.md",
+      "purpose": "Bounded accepted implementation context",
+      "contentHash": "455baf60b8a51e88a56e9d9385a8361878ca4b36de2d9ef8617dfcac5c2b5c2b"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests -p test_rules.py",
+    "git diff --check"
+  ],
+  "candidateHead": null,
+  "limits": {
+    "maxTurns": 12,
+    "maxToolCalls": 24,
+    "deadlineSeconds": 2700
+  },
+  "outputSchemaVersion": 4
+}

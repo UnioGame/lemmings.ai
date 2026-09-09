@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 4,
+  "revision": 0,
+  "reviewId": "L5-C-1",
+  "subject": {
+    "kind": "candidate",
+    "taskId": "L5-C",
+    "baseSha": "444486fe8b12334bb50cefbc02d11136ac0b7dc3",
+    "headSha": "b3e8f67a83ca2f6e5a53dad25b6f0d5b49f2454a"
+  },
+  "status": "Accepted",
+  "hostId": "native",
+  "reviewerModel": "current-host/default",
+  "cycle": 1,
+  "findings": [],
+  "validation": [
+    "7 focused rule tests passed; diffcheck passed; manager self-review checked direct-import project root and scope limits.",
+    "User-authorized manager self-review."
+  ]
+}

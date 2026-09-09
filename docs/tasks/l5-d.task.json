@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 3,
+  "revision": 7,
   "taskId": "L5-D",
   "goal": "Implement native and external role-restricted execution adapters",
   "acceptance": [
@@ -18,18 +18,20 @@
     "parallelWriters",
     "sharedContracts"
   ],
-  "capabilityDegradations": [],
+  "capabilityDegradations": [
+    "user-authorized-sequential-manager-delivery-and-self-review"
+  ],
   "writerCount": 1,
   "ownershipDomainCount": 1,
-  "workerRequired": true,
+  "workerRequired": false,
   "parallelReason": "independent_paths",
   "reviewRequired": true,
   "planReviewRequired": false,
   "planReviewRef": null,
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Draft",
-  "previousState": null,
+  "state": "Accepted",
+  "previousState": "Candidate",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -51,21 +53,31 @@
   "workingSet": [
     {
       "ref": "docs/context/l5-contracts.md",
-      "purpose": "Frozen APIs, ownership, topology, lifecycle and validation contract",
+      "purpose": "Bounded accepted implementation context",
       "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
     },
     {
-      "ref": "skills/lemmings/scripts/lemmings/invocations.py",
-      "purpose": "Existing API and compatibility conventions",
-      "contentHash": "e67ead65f06f9028aa7d90858dcf0089e49be1154ba894fcb501bd46e1fc1c5f"
+      "ref": "skills/lemmings/scripts/lemmings/bundle.py",
+      "purpose": "Bounded accepted implementation context",
+      "contentHash": "cba764a4c0370c6a4ff664385de9a97b98d229864251772946a8ac2d719fe3e4"
+    },
+    {
+      "ref": "docs/context/l5-runner-capabilities.md",
+      "purpose": "Bounded accepted implementation context",
+      "contentHash": "7cfd607e8a51e3f3909e4b0a576b659f6d040892fd4cf3b266479c216b740571"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+      "purpose": "Bounded accepted implementation context",
+      "contentHash": "f7fd0413be785835e362dbe99bd482cfc9c9f9947eaa2fb88f12e243aafd4eb5"
     }
   ],
   "models": {
-    "hostId": "codex",
+    "hostId": "native",
     "requested": null,
-    "assigned": "openai/gpt-5.6-luna:max",
-    "actual": null,
-    "fallbackReason": null
+    "assigned": "current-host/default",
+    "actual": "current-host/default",
+    "fallbackReason": "User authorized sequential manager execution."
   },
   "routingRecovery": null,
   "workspace": {
@@ -76,7 +88,12 @@
     "lifetime": "task",
     "estimatedGiB": 0.002,
     "approval": "not-required",
-    "reason": "Independent package worktree; one worker owns one branch"
+    "reason": "Independent package worktree; one worker owns one branch",
+    "repoRoot": "D:\\Dev\\kontora\\merge\\mtt.client\\.lemmings-worktrees\\l5-manager",
+    "destination": "D:\\Dev\\kontora\\merge\\mtt.client\\.lemmings-worktrees\\l5-d",
+    "branch": "codex/lemmings-d-sequential",
+    "packagePath": ".",
+    "baseSha": "444486fe8b12334bb50cefbc02d11136ac0b7dc3"
   },
   "execution": {
     "interfaces": [],
@@ -85,12 +102,95 @@
     "handoff": null,
     "validationEvidence": [],
     "attempts": [],
-    "invocations": [],
-    "agentResults": []
+    "invocations": [
+      {
+        "schemaVersion": 4,
+        "runId": "L5-D",
+        "taskId": "L5-D",
+        "taskRevision": 5,
+        "invocationId": "617860312521db5c0b60a405",
+        "attempt": 1,
+        "role": "worker",
+        "baseSha": "444486fe8b12334bb50cefbc02d11136ac0b7dc3",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "ad435b00d1aa7b59c259b8d8a229d35f4853ed782ce0b22cad63a6044e00b93e",
+        "contextDigest": "0e9d29801883c2a6d1682c38c32391657498a9001ed620a0d56b8866ce4ce65c",
+        "objective": "Manager implements D sequentially under user authorization: native/Codex/OpenCode adapters with explicit capabilities, fresh sessions, real lifecycle ownership, bounded logs and fake-process tests. No inference or personal config mutations.",
+        "acceptanceCriteria": [
+          "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
+        ],
+        "ownedPaths": [
+          "skills/lemmings/scripts/lemmings/runners.py",
+          "tests/test_runners.py"
+        ],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Bounded accepted implementation context",
+            "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/bundle.py",
+            "purpose": "Bounded accepted implementation context",
+            "contentHash": "38a2a1a0c9d5ddfbd267a2b58c89762f52200f7aed1b1e64be445435f8f523ad"
+          },
+          {
+            "ref": "docs/context/l5-runner-capabilities.md",
+            "purpose": "Bounded accepted implementation context",
+            "contentHash": "1a571c2f877df94fc9018a4cf479ac58aa9bacc97fc1812f81985f9234cd47a6"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+            "purpose": "Bounded accepted implementation context",
+            "contentHash": "f7fd0413be785835e362dbe99bd482cfc9c9f9947eaa2fb88f12e243aafd4eb5"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_runners.py",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 12,
+          "maxToolCalls": 24,
+          "deadlineSeconds": 2700
+        },
+        "outputSchemaVersion": 4
+      }
+    ],
+    "agentResults": [
+      {
+        "schemaVersion": 4,
+        "invocationId": "617860312521db5c0b60a405",
+        "attempt": 1,
+        "status": "succeeded",
+        "candidateHead": "ade6d7f03f545f70d0228905a4aa701322544b86",
+        "changedPaths": [
+          "skills/lemmings/scripts/lemmings/runners.py",
+          "tests/test_runners.py"
+        ],
+        "acceptanceEvidence": [
+          "Fresh native/Codex/OpenCode adapters; selected protocol connection; role restrictions; registry/process ownership; suspended Windows child assigned to Job before execution; confirmed tree termination before unlock."
+        ],
+        "validationEvidence": [
+          "7 focused runner tests passed including real child cancellation/timeout, concurrent writer exclusion, managed cleanup retention and result envelope parsing; diffcheck passed."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": [
+          "Paid model execution not run. OpenCode provides tool permissions rather than OS sandbox; CLI tool-call budget is instruction-only, deadline enforced. Native bridge guarantees explicitly required."
+        ]
+      }
+    ]
   },
-  "baseSha": null,
+  "baseSha": "444486fe8b12334bb50cefbc02d11136ac0b7dc3",
   "commits": {
-    "candidate": null,
+    "candidate": "ade6d7f03f545f70d0228905a4aa701322544b86",
     "fix": []
   },
   "validation": {
@@ -102,9 +202,11 @@
     "allowedOutputs": [],
     "debt": []
   },
-  "reviewRef": null,
+  "reviewRef": "docs/tasks/reviews/l5-d-1.json",
   "crossReviewRefs": [],
-  "reviewHistory": [],
+  "reviewHistory": [
+    "docs/tasks/reviews/l5-d-1.json"
+  ],
   "close": {
     "mergeCommit": null,
     "integrationEvidence": [],
