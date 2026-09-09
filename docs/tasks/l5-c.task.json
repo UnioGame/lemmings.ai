@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 8,
+  "revision": 11,
   "taskId": "L5-C",
   "goal": "Implement scoped technology detection and seven rule packs",
   "acceptance": [
@@ -30,8 +30,8 @@
   "planReviewRef": null,
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Accepted",
-  "previousState": "Candidate",
+  "state": "Integrated",
+  "previousState": "Accepted",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -221,8 +221,36 @@
     "docs/tasks/reviews/l5-c-1.json"
   ],
   "close": {
-    "mergeCommit": null,
-    "integrationEvidence": [],
-    "workspaceDisposition": null
+    "mergeCommit": "78748e5ca2b1ba4f036205293b24d3eb3d1005fe",
+    "integrationEvidence": [
+      {
+        "headSha": "78748e5ca2b1ba4f036205293b24d3eb3d1005fe",
+        "command": "python -B -m unittest discover -s tests -p test_rules.py",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": ".......\r\n----------------------------------------------------------------------\r\nRan 7 tests in 0.170s\r\n\r\nOK\r\n",
+          "totalBytes": 110,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/78748e5ca2b1ba4f036205293b24d3eb3d1005fe-b7b54ced2c5d.log"
+        }
+      },
+      {
+        "headSha": "78748e5ca2b1ba4f036205293b24d3eb3d1005fe",
+        "command": "git diff --check",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": "warning: in the working copy of 'docs/tasks/l5-c.task.json', CRLF will be replaced by LF the next time Git touches it\n",
+          "totalBytes": 118,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/78748e5ca2b1ba4f036205293b24d3eb3d1005fe-466c2f308b48.log"
+        }
+      }
+    ],
+    "workspaceDisposition": {
+      "releaseAction": "retained",
+      "releaseReason": "Retained through final assembled validation."
+    }
   }
 }
