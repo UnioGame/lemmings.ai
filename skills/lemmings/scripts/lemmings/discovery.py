@@ -163,7 +163,7 @@ def _jsonc(text: str) -> Any:
         if char == '"':
             quoted = True
             output.append(char)
-        elif char == "," and re.match(r"\s*[\]}]", source[index + 1:]):
+        elif char == "," and re.compile(r"\s*[\]}]").match(source, index + 1):
             pass
         else:
             output.append(char)
@@ -176,7 +176,10 @@ def _read(path: Path) -> Any | None:
         return None
     try:
         if path.suffix.lower() in {".json", ".jsonc"}:
-            return _jsonc(text)
+            try:
+                return json.loads(text)
+            except ValueError:
+                return _jsonc(text)
         try:
             import tomllib
         except (ImportError, AttributeError) as error:
@@ -506,9 +509,12 @@ def _catalog(value: Any, diagnostics: list[dict[str, str]], *, go_catalog: str |
     hosts: set[str] = set()
     for parent, item in _catalog_items(value):
         host = _identifier(item.get("hostId")) or _identifier(parent) or "unknown"
+        cache_provider = _identifier(parent) if go_catalog == "cache" and "_catalogEndpoint" in item else None
+        if cache_provider:
+            host = "opencode-go" if _route_name(cache_provider) in _GO_CATALOG_HOSTS else "opencode"
         hosts.add(host)
         raw = _identifier(item.get("modelId")) or _identifier(item.get("model")) or _identifier(item.get("id")) or _identifier(item.get("name"))
-        provider = _identifier(item.get("providerId")) or _identifier(item.get("provider"))
+        provider = cache_provider or _identifier(item.get("providerId")) or _identifier(item.get("provider"))
         model = raw
         if raw and not provider and "/" in raw:
             provider, model = raw.split("/", 1)
@@ -673,6 +679,13 @@ def _scan_providers(repo: Path | str | None, *, offline: bool = False, home: Pat
         cached = _read_safe(candidate, diagnostics)
         if cached is not None:
             local_routes, local_hosts = _catalog(cached, diagnostics, go_catalog="cache")
+            connected = {str(route["providerId"]) for route in routes.values() if route.get("configured")} | auth_ids
+            if connected:
+                # The shared cache contains every vendor, not account access.
+                # Keep connected providers and visible spelling mismatches only.
+                names = {_route_name(provider) for provider in connected}
+                local_routes = [route for route in local_routes if _route_name(route["providerId"]) in names]
+                local_hosts = {route["hostId"] for route in local_routes}
             catalog_routes.extend(local_routes)
             catalog_hosts.update(local_hosts)
             catalog_loaded = catalog_loaded or bool(local_routes)

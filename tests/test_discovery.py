@@ -356,5 +356,29 @@ wire_api = "responses"
         self.assertEqual("Bearer CATALOG_SECRET", headers["authorization"])
         self.assertNotIn("CATALOG_SECRET", json.dumps(first))
 
+    def test_large_json_cache_uses_fast_parser_and_keeps_provider_identity(self) -> None:
+        cache = self.home / ".cache" / "opencode"
+        cache.mkdir(parents=True)
+        models = {f"vendor/model-{i}": {"description": "x" * 1000} for i in range(4500)}
+        (cache / "models.json").write_text(json.dumps({"router": {"api": "https://router.example/v1", "models": models}}), encoding="utf-8")
+        with patch("lemmings.discovery._jsonc", side_effect=AssertionError("ordinary JSON must use native parser")):
+            snapshot = scan_providers(self.repo, offline=True, home=self.home)
+        self.assertEqual(4500, len(snapshot["routes"]))
+        self.assertEqual({"router"}, {r["providerId"] for r in snapshot["routes"]})
+        self.assertTrue(all(r["modelId"].startswith("vendor/") for r in snapshot["routes"]))
+        self.assertEqual({"opencode"}, {r["hostId"] for r in snapshot["routes"]})
+
+    def test_shared_cache_does_not_add_unconnected_subscriptions(self) -> None:
+        (self.repo / "opencode.json").write_text(json.dumps({"model": "connected/vendor/local"}), encoding="utf-8")
+        cache = self.home / ".cache" / "opencode"
+        cache.mkdir(parents=True)
+        (cache / "models.json").write_text(json.dumps({provider: {"models": {"vendor/model": {}}} for provider in ("connected", "unconnected")}), encoding="utf-8")
+        snapshot = scan_providers(self.repo, offline=True, home=self.home)
+        self.assertEqual({"connected"}, {r["providerId"] for r in snapshot["routes"]})
+
+    def test_jsonc_trailing_commas_preserve_strings_and_comments(self) -> None:
+        from lemmings.discovery import _jsonc
+        self.assertEqual({"a": [1, 2], "literal": ", } // untouched"}, _jsonc('{ /* comment */ "a": [1,2,], "literal": ", } // untouched", }'))
+
 if __name__ == "__main__":
     unittest.main()
