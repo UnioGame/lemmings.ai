@@ -418,5 +418,227 @@ class WorkspaceSafetyTests(unittest.TestCase):
         self.assertTrue(destination.exists())
 
 
+    def _prepare_workspace_in(self, root: Path, branch: str = "codex/task") -> tuple[Path, str, Path, Path, dict[str, object]]:
+        repo = root / "repo"
+        repo.mkdir()
+        base = init_repo(repo)
+        destination = root / "worktree"
+        task_path = write_task(repo, base, destination, branch=branch)
+        prepared = prepare_workspace(
+            repo,
+            task_path=task_path,
+            destination=destination,
+            branch=branch,
+            expected_revision=0,
+            approval="not-required",
+        )
+        return repo, base, destination, task_path, prepared
+
+    def _pooled_workspace_in(self, root: Path) -> tuple[Path, str, Path, Path, dict[str, object]]:
+        repo, base, destination, task_path, prepared = self._prepare_workspace_in(root)
+        pooled = release_workspace(
+            repo,
+            task_path=task_path,
+            task_revision=0,
+            expected_revision=prepared["revision"],
+            action="pool",
+        )
+        self.assertEqual("released-to-pool", pooled["action"])
+        return repo, base, destination, task_path, pooled
+
+    @staticmethod
+    def _corrupt_prior_evidence(entry: dict[str, object], field: str, missing: bool) -> object | None:
+        if missing:
+            entry.pop(field, None)
+            return None
+        if field == "lastTaskId":
+            entry[field] = "TASK-FORGED"
+        elif field == "lastTaskPath":
+            entry[field] = str(Path(str(entry[field])).with_name("forged-task.json"))
+        elif field == "lastTaskRevision":
+            entry[field] = int(entry[field]) + 1
+        else:
+            evidence = dict(entry[field])
+            evidence["mergeCommit"] = "forged"
+            entry[field] = evidence
+        return entry[field]
+
+    def test_active_idempotent_claim_rejects_stored_branch_and_base_mutation(self) -> None:
+        for field, forged, reason in (
+            ("branch", "codex/forged", "registry-branch-mismatch"),
+            ("baseSha", "f" * 40, "registry-base-mismatch"),
+        ):
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as directory:
+                    repo, base, _, _, prepared = self._prepare_workspace_in(Path(directory))
+                    registry = load_registry(repo)
+                    registry["entries"][0][field] = forged
+                    write_object(workspace_module.registry_path(repo), registry)
+                    with self.assertRaisesRegex(ValueError, "reserved workspace"):
+                        claim_workspace(
+                            repo,
+                            workspace_id="WS-1",
+                            task_id="TASK-1",
+                            base_sha=base,
+                            integration_head=base,
+                            branch="codex/task",
+                            expected_revision=prepared["revision"],
+                        )
+                    self.assertIn(reason, load_registry(repo)["entries"][0]["quarantineReason"])
+
+    def test_active_idempotent_claim_rejects_coherent_foreign_source_identity(self) -> None:
+        destination = self.root / "worktree"
+        task_path = write_task(self.repo, self.base, destination)
+        prepared = prepare_workspace(
+            self.repo,
+            task_path=task_path,
+            destination=destination,
+            branch="codex/task",
+            expected_revision=0,
+            approval="not-required",
+        )
+        foreign = self.root / "foreign"
+        subprocess.run(["git", "clone", "-q", str(self.repo), str(foreign)], check=True)
+        subprocess.run(["git", "-C", str(foreign), "switch", "-c", "codex/task", "HEAD"], check=True)
+        registry = load_registry(self.repo)
+        entry = registry["entries"][0]
+        entry["path"] = str(foreign)
+        entry["destination"] = str(foreign)
+        entry["sourceRepoRoot"] = str(foreign)
+        entry["commonDirIdentity"] = workspace_module.common_dir_identity(foreign)
+        write_object(workspace_module.registry_path(self.repo), registry)
+        with self.assertRaisesRegex(ValueError, "reserved workspace"):
+            claim_workspace(
+                self.repo,
+                workspace_id="WS-1",
+                task_id="TASK-1",
+                base_sha=self.base,
+                integration_head=self.base,
+                branch="codex/task",
+                expected_revision=prepared["revision"],
+            )
+        reason = load_registry(self.repo)["entries"][0]["quarantineReason"]
+        self.assertIn("source-repository-root-mismatch", reason)
+        self.assertIn("git-common-dir-mismatch", reason)
+
+    def test_corrupt_prior_pool_evidence_blocks_remove_and_eviction(self) -> None:
+        fields = ("lastTaskId", "lastTaskPath", "lastTaskRevision", "releaseEvidence")
+        for operation in ("remove", "evict"):
+            for missing in (False, True):
+                for field in fields:
+                    with self.subTest(operation=operation, missing=missing, field=field):
+                        with tempfile.TemporaryDirectory() as directory:
+                            repo, _, destination, task_path, pooled = self._pooled_workspace_in(Path(directory))
+                            registry = load_registry(repo)
+                            entry = registry["entries"][0]
+                            corrupted = self._corrupt_prior_evidence(entry, field, missing)
+                            if operation == "remove":
+                                write_object(workspace_module.registry_path(repo), registry)
+                                result = remove_workspace(
+                                    repo,
+                                    task_path=task_path,
+                                    task_revision=0,
+                                    expected_revision=pooled["revision"],
+                                )
+                                self.assertFalse(result["ok"])
+                                self.assertEqual("quarantined", result["action"])
+                                retained = load_registry(repo)["entries"][0]
+                            else:
+                                result = workspace_module._evict_pool(
+                                    repo,
+                                    registry,
+                                    {"workspacePool": {"enabled": True, "maxIdle": 0, "maxIdleGiB": 10}},
+                                )
+                                self.assertFalse(result[0]["removed"])
+                                retained = registry["entries"][0]
+                            self.assertEqual("quarantined", retained["state"])
+                            self.assertTrue(destination.exists())
+                            if missing:
+                                self.assertNotIn(field, retained)
+                            elif field == "releaseEvidence":
+                                self.assertEqual("forged", retained[field]["mergeCommit"])
+                            else:
+                                self.assertEqual(corrupted, retained[field])
+
+    def test_pooled_workspace_can_be_removed_with_its_original_canonical_release(self) -> None:
+        destination = self.root / "worktree"
+        task_path = write_task(self.repo, self.base, destination)
+        prepared = prepare_workspace(
+            self.repo,
+            task_path=task_path,
+            destination=destination,
+            branch="codex/task",
+            expected_revision=0,
+            approval="not-required",
+        )
+        pooled = release_workspace(
+            self.repo,
+            task_path=task_path,
+            task_revision=0,
+            expected_revision=prepared["revision"],
+            action="pool",
+        )
+        removed = remove_workspace(
+            self.repo,
+            task_path=task_path,
+            task_revision=0,
+            expected_revision=pooled["revision"],
+        )
+        self.assertTrue(removed["ok"])
+        self.assertEqual("removed", removed["action"])
+        self.assertFalse(destination.exists())
+
+    def test_unactivated_idle_workspace_cannot_use_an_unrelated_integrated_task_for_removal(self) -> None:
+        destination = self.root / "idle-worktree"
+        subprocess.run(
+            ["git", "-C", str(self.repo), "worktree", "add", "-b", "codex/idle", str(destination), self.base],
+            check=True,
+        )
+        registered = register_workspace(
+            self.repo,
+            workspace_id="WS-1",
+            path=destination,
+            backend="code-worktree",
+            managed_by="lemmings",
+            lifetime="task",
+            expected_revision=0,
+            branch="codex/idle",
+            base_sha=self.base,
+        )
+        task_path = write_task(self.repo, self.base, destination, branch="codex/idle")
+        result = remove_workspace(
+            self.repo,
+            task_path=task_path,
+            task_revision=0,
+            expected_revision=registered["revision"],
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual("quarantined", result["action"])
+        self.assertTrue(destination.exists())
+
+    def test_standalone_clone_keeps_its_distinct_git_identity(self) -> None:
+        destination = self.root / "clone"
+        task_path = write_task(self.repo, self.base, destination, branch="codex/clone")
+        task = json.loads(task_path.read_text(encoding="utf-8"))
+        task["workspace"]["backend"] = "unity-clone"
+        task_path.write_text(json.dumps(task), encoding="utf-8")
+        prepared = prepare_workspace(
+            self.repo,
+            task_path=task_path,
+            destination=destination,
+            branch="codex/clone",
+            expected_revision=0,
+            approval="not-required",
+        )
+        removed = release_workspace(
+            self.repo,
+            task_path=task_path,
+            task_revision=0,
+            expected_revision=prepared["revision"],
+            action="remove",
+        )
+        self.assertEqual("removed", removed["action"])
+        self.assertFalse(destination.exists())
+
 if __name__ == "__main__":
     unittest.main()

@@ -191,6 +191,42 @@ def _verified_mapping(close: Mapping[str, Any], candidate: str, merge: str) -> b
     return False
 
 
+def _active_task_entry(entry: Mapping[str, Any]) -> bool:
+    task_id = entry.get("taskId")
+    return entry.get("state") == "active" and isinstance(task_id, str) and bool(task_id)
+
+
+def _stored_pool_release_evidence(entry: Mapping[str, Any]) -> dict[str, Any]:
+    task_id = entry.get("lastTaskId")
+    task_path = entry.get("lastTaskPath")
+    task_revision = entry.get("lastTaskRevision")
+    evidence = entry.get("releaseEvidence")
+    if (
+        not isinstance(task_id, str)
+        or not task_id
+        or not isinstance(task_path, str)
+        or not task_path
+        or not isinstance(task_revision, int)
+        or isinstance(task_revision, bool)
+        or task_revision < 0
+        or not isinstance(evidence, Mapping)
+    ):
+        raise ValueError("pooled workspace lacks complete prior canonical Task release evidence")
+    for key, expected in {
+        "taskId": task_id,
+        "taskPath": task_path,
+        "taskRevision": task_revision,
+        "state": "Integrated",
+    }.items():
+        if evidence.get(key) != expected:
+            raise ValueError("pooled workspace release evidence does not match its prior canonical Task")
+    for key in ("candidateHead", "mergeCommit"):
+        value = evidence.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValueError("pooled workspace release evidence is incomplete")
+    return dict(evidence)
+
+
 def _verify_cleanup_task(
     repo: Path,
     entry: Mapping[str, Any],
@@ -202,22 +238,15 @@ def _verify_cleanup_task(
     workspace_id = workspace.get("workspaceId")
     if workspace_id != entry.get("workspaceId"):
         raise ValueError("canonical Task workspace id does not match the registry entry")
-    active_task_id = entry.get("taskId")
-    prior_task_id = entry.get("lastTaskId") if not active_task_id else None
+    active_task_id = entry.get("taskId") if _active_task_entry(entry) else None
+    stored_evidence = None if active_task_id else _stored_pool_release_evidence(entry)
+    prior_task_id = stored_evidence.get("taskId") if stored_evidence else None
     expected_task_id = active_task_id or prior_task_id
-    if not active_task_id and (
-        entry.get("lastTaskPath")
-        or entry.get("lastTaskRevision") is not None
-        or entry.get("releaseEvidence") is not None
-    ) and not prior_task_id:
-        raise ValueError("pooled workspace is missing its prior canonical Task identity")
     if expected_task_id and task.get("taskId") != expected_task_id:
         raise ValueError("canonical Task id does not match the registry entry")
-    if not active_task_id and entry.get("lastTaskPath") and not _same_path(
-        path, Path(str(entry["lastTaskPath"]))
-    ):
+    if not active_task_id and str(path) != stored_evidence["taskPath"]:
         raise ValueError("canonical Task path does not match the pooled workspace release")
-    stored_revision = entry.get("lastTaskRevision") if not active_task_id else None
+    stored_revision = stored_evidence.get("taskRevision") if stored_evidence else None
     if stored_revision is not None and task.get("revision") != stored_revision:
         raise ValueError("canonical Task revision does not match the pooled workspace release")
     if task_revision is not None and task.get("revision") != task_revision:
@@ -285,8 +314,7 @@ def _verify_cleanup_task(
         "candidateHead": candidate,
         "mergeCommit": merge_commit,
     }
-    stored_evidence = entry.get("releaseEvidence")
-    if isinstance(stored_evidence, Mapping):
+    if stored_evidence:
         for key in ("taskId", "taskPath", "taskRevision", "candidateHead", "mergeCommit"):
             if stored_evidence.get(key) != result[key]:
                 raise ValueError("canonical Task release evidence does not match the pooled workspace")
@@ -601,6 +629,49 @@ def _entry_source_repo(repo: Path, entry: Mapping[str, Any]) -> Path:
     return Path(str(entry.get("sourceRepoRoot") or repo)).resolve()
 
 
+def _entry_identity_reasons(repo: Path, entry: Mapping[str, Any]) -> list[str]:
+    actual_repo = repo.resolve()
+    reasons: list[str] = []
+    backend = entry.get("backend")
+    if backend not in {"code-worktree", "package-worktree", "unity-clone"}:
+        reasons.append("invalid-managed-backend")
+    declared_root = entry.get("repoRoot")
+    try:
+        root_matches = bool(
+            declared_root
+            and _same_path(
+                _canonical_path(repo, str(declared_root), label="registered repository root"),
+                actual_repo,
+            )
+        )
+    except ValueError:
+        root_matches = False
+    if not root_matches:
+        reasons.append("repository-root-mismatch")
+    declared_source = entry.get("sourceRepoRoot")
+    try:
+        source_matches = bool(
+            declared_source
+            and _same_path(
+                _canonical_path(repo, str(declared_source), label="registered source repository"),
+                actual_repo,
+            )
+        )
+    except ValueError:
+        source_matches = False
+    if not source_matches:
+        reasons.append("source-repository-root-mismatch")
+    try:
+        actual_common_identity = common_dir_identity(actual_repo)
+    except ValueError:
+        actual_common_identity = None
+    if entry.get("commonDirIdentity") != actual_common_identity:
+        reasons.append("git-common-dir-mismatch")
+    if backend == "package-worktree" and _git_root(actual_repo) != actual_repo:
+        reasons.append("package-source-not-git-root")
+    return reasons
+
+
 def register_workspace(
     repo: Path,
     *,
@@ -704,6 +775,7 @@ def _reuse_reasons(repo: Path, entry: Mapping[str, Any]) -> tuple[list[str], dic
     )
     reasons: list[str] = []
     if entry.get("commonDirIdentity") != common_dir_identity(source_repo): reasons.append("git-common-dir-mismatch")
+    reasons.extend(_entry_identity_reasons(repo, entry))
     if entry.get("managedBy") != "lemmings": reasons.append("not-lemmings-managed")
     if entry.get("state") != "idle": reasons.append("not-idle")
     if entry.get("everActive") and entry.get("lastTaskState") != "Integrated": reasons.append("previous-task-not-integrated")
@@ -742,6 +814,7 @@ def claim_workspace(
         if entry.get("state") == "active" and entry.get("taskId") == task_id:
             info = inspect_registered_workspace(repo, target, list(entry.get("allowedCaches") or []), source_repo=source_repo)
             active_reasons = _process_owner_reasons(entry)
+            active_reasons.extend(_entry_identity_reasons(repo, entry))
             backend = entry.get("backend")
             if entry.get("managedBy") != "lemmings":
                 active_reasons.append("not-lemmings-managed")
@@ -783,6 +856,10 @@ def claim_workspace(
                 or not _is_relative_to(target.resolve(), intended_root.resolve())
             ):
                 active_reasons.append("outside-intended-root")
+            if entry.get("branch") != branch:
+                active_reasons.append("registry-branch-mismatch")
+            if entry.get("baseSha") != base_sha:
+                active_reasons.append("registry-base-mismatch")
             if active_reasons or not info["clean"] or info["unfinishedOperations"] or info["unexpectedIgnored"] or info["head"] != base_sha or info["branch"] != branch:
                 if not info["clean"]:
                     active_reasons.append("dirty-or-untracked")
@@ -834,8 +911,18 @@ def _remove_entry(
     entry: dict[str, Any],
     *,
     cleanup_evidence: Mapping[str, Any] | None = None,
+    active_release: bool = False,
 ) -> tuple[bool, str | None]:
     reasons, info = _reuse_reasons(repo, entry)
+    if active_release:
+        if not _active_task_entry(entry):
+            reasons.append("active-release-state-mismatch")
+        reasons = [reason for reason in reasons if reason != "not-idle"]
+    else:
+        try:
+            _stored_pool_release_evidence(entry)
+        except ValueError as error:
+            reasons.append(str(error) or "canonical-task-required")
     if cleanup_evidence is None:
         reasons.append("canonical-task-required")
     expected_task_id = entry.get("taskId") or entry.get("lastTaskId")
@@ -898,15 +985,12 @@ def _evict_pool(repo: Path, registry: dict[str, Any], profile: Mapping[str, Any]
         idle.remove(candidate)
         evidence = None
         try:
-            stored_path = candidate.get("lastTaskPath")
-            stored_revision = candidate.get("lastTaskRevision")
-            if not candidate.get("lastTaskId") or not stored_path or stored_revision is None:
-                raise ValueError("pooled workspace lacks prior canonical Task release evidence")
+            stored_evidence = _stored_pool_release_evidence(candidate)
             evidence = _verify_cleanup_task(
                 repo,
                 candidate,
-                stored_path,
-                stored_revision,
+                stored_evidence["taskPath"],
+                stored_evidence["taskRevision"],
             )
         except ValueError as error:
             candidate["state"] = "quarantined"
@@ -1155,6 +1239,7 @@ def release_workspace(
             if not workspace_id:
                 raise ValueError("canonical Task workspaceId is required")
         entry = _entry(registry, workspace_id)
+        active_release = _active_task_entry(entry)
         owner_reasons = _process_owner_reasons(entry)
         if owner_reasons:
             reason = ",".join(owner_reasons)
@@ -1181,11 +1266,12 @@ def release_workspace(
                 entry["quarantineReason"] = "protected-workspace"
             _save_registry(repo, registry, expected_revision)
             return {"ok": True, "revision": expected_revision + 1, "action": "retained", "reason": reason, "evicted": []}
-        entry["lastTaskState"] = "Integrated"
-        entry["lastTaskId"] = evidence["taskId"]
-        entry["lastTaskPath"] = evidence["taskPath"]
-        entry["lastTaskRevision"] = evidence["taskRevision"]
-        entry["releaseEvidence"] = dict(evidence)
+        if active_release:
+            entry["lastTaskState"] = "Integrated"
+            entry["lastTaskId"] = evidence["taskId"]
+            entry["lastTaskPath"] = evidence["taskPath"]
+            entry["lastTaskRevision"] = evidence["taskRevision"]
+            entry["releaseEvidence"] = dict(evidence)
         entry["retentionApproved"] = bool(retention_approved)
         entry["observedGiB"] = round(_size(Path(str(entry.get("path")))) / GIB, 3)
         protected = entry.get("managedBy") != "lemmings" or entry.get("lifetime") == "project" or entry.get("kind") == "validation"
@@ -1199,8 +1285,13 @@ def release_workspace(
             entry.update({"state": "idle", "taskId": None, "phaseId": None, "lastUsedAt": utc_timestamp(), "quarantineReason": None})
             reason = "retained-by-lifecycle-policy"
         elif action == "remove" or not _pool_policy(profile).get("enabled"):
-            entry["state"] = "idle"
-            removed, reason = _remove_entry(repo, registry, entry, cleanup_evidence=evidence)
+            removed, reason = _remove_entry(
+                repo,
+                registry,
+                entry,
+                cleanup_evidence=evidence,
+                active_release=active_release,
+            )
             action = "remove"
         else:
             entry["state"] = "idle"
@@ -1246,6 +1337,7 @@ def remove_workspace(
             if not workspace_id:
                 raise ValueError("canonical Task workspaceId is required")
         entry = _entry(registry, workspace_id)
+        active_release = _active_task_entry(entry)
         evidence = None
         reason: str | None = None
         if task_path:
@@ -1264,12 +1356,18 @@ def remove_workspace(
                 entry["quarantineReason"] = "protected-workspace"
             _save_registry(repo, registry, expected_revision)
             return {"ok": False, "revision": expected_revision + 1, "action": "quarantined", "reason": reason}
-        entry["lastTaskState"] = "Integrated"
-        entry["lastTaskId"] = evidence["taskId"]
-        entry["lastTaskPath"] = evidence["taskPath"]
-        entry["lastTaskRevision"] = evidence["taskRevision"]
-        entry["releaseEvidence"] = dict(evidence)
-        entry["state"] = "idle"
-        removed, reason = _remove_entry(repo, registry, entry, cleanup_evidence=evidence)
+        if active_release:
+            entry["lastTaskState"] = "Integrated"
+            entry["lastTaskId"] = evidence["taskId"]
+            entry["lastTaskPath"] = evidence["taskPath"]
+            entry["lastTaskRevision"] = evidence["taskRevision"]
+            entry["releaseEvidence"] = dict(evidence)
+        removed, reason = _remove_entry(
+            repo,
+            registry,
+            entry,
+            cleanup_evidence=evidence,
+            active_release=active_release,
+        )
         _save_registry(repo, registry, expected_revision)
         return {"ok": removed, "revision": expected_revision + 1, "action": "removed" if removed else "quarantined", "reason": reason}
