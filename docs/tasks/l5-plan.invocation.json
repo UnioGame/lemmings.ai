@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-DELIVERY",
+  "taskId": "L5-DELIVERY",
+  "taskRevision": 3,
+  "invocationId": "81bf4b581099431a3f801b04",
+  "attempt": 2,
+  "role": "reviewer",
+  "baseSha": "f228b2056bcb3d2161daa4006343340724c7613c",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "bcc7037435eb066f26253efd5a4dc902879aea69565c758e77ed16c8566b8c8f",
+  "contextDigest": "500a8512a87b0dcf165e34c962211160d3d661adecd9f4e4ae5547bba0de3e58",
+  "objective": "Review only the revised hashed docs/context/l5-contracts.md against previous material findings. Do not rerun baseline tests. Return AgentResult v4 and plan Accepted/ChangesRequested plus baseline Accepted for use as migration baseline if appropriate.",
+  "acceptanceCriteria": [
+    "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
+    "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
+    "Manager-directed builtin/Codex/OpenCode launch uses identical invocation/result contracts, explicit capabilities, role restrictions, cancellation and approved fallback.",
+    "Workspace prepare/claim/remove checks real repo paths, task lifecycle, integration evidence, invocations and processes; package worktrees isolate package Git repository.",
+    "Ship seven complete technology packs plus platforms; detect only task-scoped technologies, pin rules and keep context bounded; README provides runnable use cases.",
+    "Run all Python tests, focused CLI/installer fixtures, skill validation, package JSON/link/diff checks and immutable review before final integration."
+  ],
+  "ownedPaths": [],
+  "forbiddenPaths": [
+    "assets/**",
+    ".codex-plugin/**",
+    "hooks/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Frozen APIs, ownership, topology, lifecycle and validation contract",
+      "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests",
+    "git diff --check"
+  ],
+  "candidateHead": null,
+  "limits": {
+    "maxTurns": 8,
+    "maxToolCalls": 16,
+    "deadlineSeconds": 1200
+  },
+  "outputSchemaVersion": 4
+}

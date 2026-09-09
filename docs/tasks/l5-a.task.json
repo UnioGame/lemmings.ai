@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 4,
+  "revision": 0,
+  "taskId": "L5-A",
+  "goal": "Implement canonical workspace provisioning and lifecycle safety",
+  "acceptance": [
+    "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
+  ],
+  "dependencies": [],
+  "requestedMode": "auto",
+  "resolvedMode": "strict",
+  "modeFloor": "strict",
+  "riskClass": "high",
+  "modeReasons": [
+    "parallelWriters",
+    "sharedContracts"
+  ],
+  "capabilityDegradations": [],
+  "writerCount": 1,
+  "ownershipDomainCount": 1,
+  "workerRequired": true,
+  "parallelReason": "independent_paths",
+  "reviewRequired": true,
+  "planReviewRequired": false,
+  "planReviewRef": null,
+  "reviewPolicy": null,
+  "specialization": null,
+  "state": "Draft",
+  "previousState": null,
+  "role": "worker",
+  "risks": [],
+  "telemetryCohort": null,
+  "ownership": {
+    "owned": [
+      "skills/lemmings/scripts/lemmings/workspace.py",
+      "tests/test_workspace_safety.py"
+    ],
+    "shared": [],
+    "forbidden": [
+      "skills/lemmings/scripts/lemmings/cli.py",
+      "skills/lemmings/scripts/lemmings/contracts.py",
+      "docs/**"
+    ]
+  },
+  "resources": {
+    "exclusive": []
+  },
+  "workingSet": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Frozen APIs, ownership, topology, lifecycle and validation contract",
+      "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+      "purpose": "Existing API and compatibility conventions",
+      "contentHash": "4be68ce6380f328a8a79ec3d80cfcf978c911ec9b43141cf625eafd488db2244"
+    }
+  ],
+  "models": {
+    "hostId": "codex",
+    "requested": null,
+    "assigned": "openai/gpt-5.6-luna:max",
+    "actual": null,
+    "fallbackReason": null
+  },
+  "routingRecovery": null,
+  "workspace": {
+    "policy": "auto",
+    "backend": "package-worktree",
+    "workspaceId": "l5-a",
+    "managedBy": "lemmings",
+    "lifetime": "task",
+    "estimatedGiB": 0.002,
+    "approval": "not-required",
+    "reason": "Independent package worktree; one worker owns one branch"
+  },
+  "execution": {
+    "interfaces": [],
+    "tests": [],
+    "dependencyHandoffs": [],
+    "handoff": null,
+    "validationEvidence": [],
+    "attempts": [],
+    "invocations": [],
+    "agentResults": []
+  },
+  "baseSha": null,
+  "commits": {
+    "candidate": null,
+    "fix": []
+  },
+  "validation": {
+    "riskToTest": [],
+    "commands": [
+      "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+      "git diff --check"
+    ],
+    "allowedOutputs": [],
+    "debt": []
+  },
+  "reviewRef": null,
+  "crossReviewRefs": [],
+  "reviewHistory": [],
+  "close": {
+    "mergeCommit": null,
+    "integrationEvidence": [],
+    "workspaceDisposition": null
+  }
+}

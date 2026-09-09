@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 4,
+  "revision": 5,
+  "taskId": "L5-DELIVERY",
+  "goal": "Deliver zero-config Lemmings with provider discovery, named presets, execution adapters, safe workspaces and seven technology rule packs.",
+  "acceptance": [
+    "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
+    "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
+    "Manager-directed builtin/Codex/OpenCode launch uses identical invocation/result contracts, explicit capabilities, role restrictions, cancellation and approved fallback.",
+    "Workspace prepare/claim/remove checks real repo paths, task lifecycle, integration evidence, invocations and processes; package worktrees isolate package Git repository.",
+    "Ship seven complete technology packs plus platforms; detect only task-scoped technologies, pin rules and keep context bounded; README provides runnable use cases.",
+    "Run all Python tests, focused CLI/installer fixtures, skill validation, package JSON/link/diff checks and immutable review before final integration."
+  ],
+  "dependencies": [],
+  "requestedMode": "auto",
+  "resolvedMode": "strict",
+  "modeFloor": "strict",
+  "riskClass": "high",
+  "modeReasons": [
+    "sharedContracts",
+    "submodules",
+    "integrationBranch"
+  ],
+  "capabilityDegradations": [],
+  "writerCount": 2,
+  "ownershipDomainCount": 4,
+  "workerRequired": true,
+  "parallelReason": "independent_paths",
+  "reviewRequired": true,
+  "planReviewRequired": true,
+  "planReviewRef": "docs/tasks/reviews/l5-plan.json",
+  "reviewPolicy": null,
+  "specialization": null,
+  "state": "Ready",
+  "previousState": "Draft",
+  "role": "manager",
+  "risks": [],
+  "telemetryCohort": null,
+  "ownership": {
+    "owned": [
+      "skills/**",
+      "tests/**",
+      "agents/**",
+      "scripts/**",
+      "README.md",
+      "AGENTS.md",
+      "pyproject.toml",
+      "package.json",
+      "Documentation~/**",
+      "docs/**"
+    ],
+    "shared": [],
+    "forbidden": [
+      "assets/**",
+      ".codex-plugin/**",
+      "hooks/**"
+    ]
+  },
+  "resources": {
+    "exclusive": []
+  },
+  "workingSet": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Frozen APIs, ownership, topology, lifecycle and validation contract",
+      "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+    }
+  ],
+  "models": {
+    "hostId": "codex",
+    "requested": null,
+    "assigned": "openai/gpt-6-astra:high",
+    "actual": "openai/gpt-6-astra:high",
+    "fallbackReason": null
+  },
+  "routingRecovery": null,
+  "workspace": {
+    "policy": "auto",
+    "backend": "package-worktree",
+    "workspaceId": "l5-manager",
+    "managedBy": "user",
+    "lifetime": "project",
+    "estimatedGiB": 0.002,
+    "approval": "not-required",
+    "reason": "Manager isolated package integration checkout; each worker gets a separate worktree"
+  },
+  "execution": {
+    "interfaces": [
+      {
+        "name": "workspace",
+        "contract": "Worker A owns workspace.py and tests/test_workspace_safety.py. Add prepare_workspace(repo, *, task_path, destination, branch, expected_revision, approval) and optional task_path for release/remove. New module APIs accept Path and JSON dict; no CLI edits. Fail closed for lifecycle, primary and active process. No force cleanup."
+      },
+      {
+        "name": "discovery",
+        "contract": "Worker B owns discovery.py, profiles.py, tests/test_discovery.py, tests/test_profiles.py. scan_providers(repo, *, offline=False, home=None, host_catalog=None) -> snapshot; probe_route(route, *, home=None) -> bounded evidence; inspect_profiles(repo, *, home=None); build_profile_proposal(repo, name, routes, *, home=None); apply_profile_proposal(repo, proposal, confirmation, *, home=None); use_profile(repo,name,*,home=None); resolve_profile(repo,name=None,*,home=None,host_catalog=None) -> effective snapshot. Module state under ~/.lemmings; preserve manual project modelRoutes. No implicit model calls. Injectable stdlib HTTP, filesystem fixtures."
+      },
+      {
+        "name": "rules",
+        "contract": "Worker C owns rules.py, rules/**, tests/test_rules.py. resolve_rules(repo, paths=None, technologies=None, platforms=None) -> {projects,ruleRefs,digest}; ruleRefs {ref,purpose,contentHash}. Manifest static, scoped detection, no generated dirs or transitive lockfile triggers. Seven substantive packs."
+      },
+      {
+        "name": "integration",
+        "contract": "Manager owns CLI/contracts/invocations/defaults/installers/role files/README/SKILL/references; worker D later owns runners.py and tests/test_runners.py. Frozen task effectiveConfig/route/ruleRefs use optional v4 fields; legacy v4 accepted. No generated registry or creds in Task. No automatic global provider edits; alias diagnostics only."
+      }
+    ],
+    "tests": [
+      "tests/test_workspace_safety.py",
+      "tests/test_discovery.py",
+      "tests/test_profiles.py",
+      "tests/test_rules.py",
+      "tests/test_runners.py",
+      "tests/test_zero_config.py",
+      "tests/test_effective_config.py",
+      "tests/test_cli_extensions.py"
+    ],
+    "dependencyHandoffs": [],
+    "handoff": null,
+    "validationEvidence": [],
+    "attempts": [],
+    "invocations": [
+      {
+        "schemaVersion": 4,
+        "runId": "L5-DELIVERY",
+        "taskId": "L5-DELIVERY",
+        "taskRevision": 1,
+        "invocationId": "67a79a816a89a761dcc94fd2",
+        "attempt": 1,
+        "role": "reviewer",
+        "baseSha": "f228b2056bcb3d2161daa4006343340724c7613c",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "9b8de166b83d64b99df11fbe0341f2ff01a59992907a5b4a613e78fa36aa9df7",
+        "contextDigest": "7ba8bcdb09b97c16dd420dede2fe12d27b706961a234063c4e51575388df1952",
+        "objective": "Review the recorded delivery plan and frozen implementation interfaces. Identify only material gaps before isolated writers start. Return AgentResult v4 and accepted/changes-requested verdict; also assess baseline risks in workspace.py.",
+        "acceptanceCriteria": [
+          "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
+          "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
+          "Manager-directed builtin/Codex/OpenCode launch uses identical invocation/result contracts, explicit capabilities, role restrictions, cancellation and approved fallback.",
+          "Workspace prepare/claim/remove checks real repo paths, task lifecycle, integration evidence, invocations and processes; package worktrees isolate package Git repository.",
+          "Ship seven complete technology packs plus platforms; detect only task-scoped technologies, pin rules and keep context bounded; README provides runnable use cases.",
+          "Run all Python tests, focused CLI/installer fixtures, skill validation, package JSON/link/diff checks and immutable review before final integration."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "assets/**",
+          ".codex-plugin/**",
+          "hooks/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "skills/lemmings/SKILL.md",
+            "purpose": "Current orchestration guarantees",
+            "contentHash": "7eb8e0d8ce2a6159d9bb683e8d1df3d2a103d4e35f4188e3c71dc143bb8269d3"
+          },
+          {
+            "ref": "skills/lemmings/references/game-projects.md",
+            "purpose": "Workspace lifecycle",
+            "contentHash": "b4a37ee86cfde3d9c54647ac313af5dbe30f24507a0577b82b5c3a9608eea0d7"
+          },
+          {
+            "ref": "skills/lemmings/references/model-routing.md",
+            "purpose": "Existing routing/recovery compatibility",
+            "contentHash": "e4490a9bcbb4e27d83664b1d5a656aceff33ba97a3a6deb13f573713b6f334da"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+            "purpose": "Safety fixes",
+            "contentHash": "4be68ce6380f328a8a79ec3d80cfcf978c911ec9b43141cf625eafd488db2244"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/models.py",
+            "purpose": "Routing seam",
+            "contentHash": "1ec9b668b963389ddd8a1314e77fd4941aba3a79935fffcbf7925e1431d67ff2"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/invocations.py",
+            "purpose": "Dispatch seam",
+            "contentHash": "e67ead65f06f9028aa7d90858dcf0089e49be1154ba894fcb501bd46e1fc1c5f"
+          },
+          {
+            "ref": "skills/lemmings/scripts/install.py",
+            "purpose": "Zero-config install and preserve settings",
+            "contentHash": "001daa61d459c4c349f7c20e074126a68e66885feb8758c222bf3b1986f5f223"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-DELIVERY",
+        "taskId": "L5-DELIVERY",
+        "taskRevision": 3,
+        "invocationId": "81bf4b581099431a3f801b04",
+        "attempt": 2,
+        "role": "reviewer",
+        "baseSha": "f228b2056bcb3d2161daa4006343340724c7613c",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "bcc7037435eb066f26253efd5a4dc902879aea69565c758e77ed16c8566b8c8f",
+        "contextDigest": "500a8512a87b0dcf165e34c962211160d3d661adecd9f4e4ae5547bba0de3e58",
+        "objective": "Review only the revised hashed docs/context/l5-contracts.md against previous material findings. Do not rerun baseline tests. Return AgentResult v4 and plan Accepted/ChangesRequested plus baseline Accepted for use as migration baseline if appropriate.",
+        "acceptanceCriteria": [
+          "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
+          "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
+          "Manager-directed builtin/Codex/OpenCode launch uses identical invocation/result contracts, explicit capabilities, role restrictions, cancellation and approved fallback.",
+          "Workspace prepare/claim/remove checks real repo paths, task lifecycle, integration evidence, invocations and processes; package worktrees isolate package Git repository.",
+          "Ship seven complete technology packs plus platforms; detect only task-scoped technologies, pin rules and keep context bounded; README provides runnable use cases.",
+          "Run all Python tests, focused CLI/installer fixtures, skill validation, package JSON/link/diff checks and immutable review before final integration."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "assets/**",
+          ".codex-plugin/**",
+          "hooks/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Frozen APIs, ownership, topology, lifecycle and validation contract",
+            "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
+      }
+    ],
+    "agentResults": [
+      {
+        "schemaVersion": 4,
+        "invocationId": "81bf4b581099431a3f801b04",
+        "attempt": 2,
+        "status": "succeeded",
+        "changedPaths": [],
+        "acceptanceEvidence": [
+          "Independent reviewer accepted digest-bound l5-contracts.md; all previous material findings resolved."
+        ],
+        "validationEvidence": [
+          "Baseline 87 tests and diff check passed; focused plan revision accepted without repeated tests."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": [
+          "Live provider execution unvalidated; baseline cleanup APIs unsafe until A integration."
+        ],
+        "verdict": "Accepted"
+      }
+    ]
+  },
+  "baseSha": "f228b2056bcb3d2161daa4006343340724c7613c",
+  "commits": {
+    "candidate": null,
+    "fix": []
+  },
+  "validation": {
+    "riskToTest": [
+      {
+        "risk": "unsafe cleanup or stale routing",
+        "test": "tests/test_runtime.py and new targeted fixtures"
+      }
+    ],
+    "commands": [
+      "python -B -m unittest discover -s tests",
+      "git diff --check"
+    ],
+    "allowedOutputs": [
+      "**/__pycache__/**"
+    ],
+    "debt": []
+  },
+  "reviewRef": null,
+  "crossReviewRefs": [],
+  "reviewHistory": [],
+  "close": {
+    "mergeCommit": null,
+    "integrationEvidence": [],
+    "workspaceDisposition": null
+  }
+}
