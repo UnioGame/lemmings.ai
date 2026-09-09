@@ -191,6 +191,28 @@ def _verified_mapping(close: Mapping[str, Any], candidate: str, merge: str) -> b
     return False
 
 
+def _integration_evidence_digest(evidence: list[Mapping[str, Any]]) -> str:
+    snapshot: list[dict[str, Any]] = []
+    for item in evidence:
+        exit_code = item.get("exitCode")
+        if exit_code is not None and (not isinstance(exit_code, int) or isinstance(exit_code, bool)):
+            raise ValueError("canonical Task integration evidence exitCode must be an integer when supplied")
+        snapshot.append(
+            {
+                "command": str(item["command"]).strip(),
+                "headSha": str(item["headSha"]),
+                "passed": item["passed"],
+                "exitCode": exit_code,
+            }
+        )
+    payload = json.dumps(
+        sorted(snapshot, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def _active_task_entry(entry: Mapping[str, Any]) -> bool:
     task_id = entry.get("taskId")
     return entry.get("state") == "active" and isinstance(task_id, str) and bool(task_id)
@@ -224,6 +246,21 @@ def _stored_pool_release_evidence(entry: Mapping[str, Any]) -> dict[str, Any]:
         value = evidence.get(key)
         if not isinstance(value, str) or not value:
             raise ValueError("pooled workspace release evidence is incomplete")
+    commands = evidence.get("validationCommands")
+    if (
+        not isinstance(commands, list)
+        or not commands
+        or any(not isinstance(command, str) or not command.strip() for command in commands)
+        or len({command.strip() for command in commands}) != len(commands)
+    ):
+        raise ValueError("pooled workspace release evidence is missing declared validation commands")
+    digest = evidence.get("integrationEvidenceDigest")
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError("pooled workspace release evidence is missing canonical integration evidence")
     return dict(evidence)
 
 
@@ -313,9 +350,19 @@ def _verify_cleanup_task(
         "state": "Integrated",
         "candidateHead": candidate,
         "mergeCommit": merge_commit,
+        "validationCommands": [command.strip() for command in declared_commands],
+        "integrationEvidenceDigest": _integration_evidence_digest(evidence),
     }
     if stored_evidence:
-        for key in ("taskId", "taskPath", "taskRevision", "candidateHead", "mergeCommit"):
+        for key in (
+            "taskId",
+            "taskPath",
+            "taskRevision",
+            "candidateHead",
+            "mergeCommit",
+            "validationCommands",
+            "integrationEvidenceDigest",
+        ):
             if stored_evidence.get(key) != result[key]:
                 raise ValueError("canonical Task release evidence does not match the pooled workspace")
     return result

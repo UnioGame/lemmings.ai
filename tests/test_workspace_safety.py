@@ -523,13 +523,14 @@ class WorkspaceSafetyTests(unittest.TestCase):
 
     def test_corrupt_prior_pool_evidence_blocks_remove_and_eviction(self) -> None:
         fields = ("lastTaskId", "lastTaskPath", "lastTaskRevision", "releaseEvidence")
-        for operation in ("remove", "evict"):
-            for missing in (False, True):
-                for field in fields:
-                    with self.subTest(operation=operation, missing=missing, field=field):
-                        with tempfile.TemporaryDirectory() as directory:
-                            repo, _, destination, task_path, pooled = self._pooled_workspace_in(Path(directory))
-                            registry = load_registry(repo)
+        with tempfile.TemporaryDirectory() as directory:
+            repo, _, destination, task_path, pooled = self._pooled_workspace_in(Path(directory))
+            original_registry = json.loads(json.dumps(load_registry(repo)))
+            for operation in ("remove", "evict"):
+                for missing in (False, True):
+                    for field in fields:
+                        with self.subTest(operation=operation, missing=missing, field=field):
+                            registry = json.loads(json.dumps(original_registry))
                             entry = registry["entries"][0]
                             corrupted = self._corrupt_prior_evidence(entry, field, missing)
                             if operation == "remove":
@@ -559,6 +560,7 @@ class WorkspaceSafetyTests(unittest.TestCase):
                                 self.assertEqual("forged", retained[field]["mergeCommit"])
                             else:
                                 self.assertEqual(corrupted, retained[field])
+                            write_object(workspace_module.registry_path(repo), original_registry)
 
     def test_pooled_workspace_can_be_removed_with_its_original_canonical_release(self) -> None:
         destination = self.root / "worktree"
@@ -639,6 +641,100 @@ class WorkspaceSafetyTests(unittest.TestCase):
         )
         self.assertEqual("removed", removed["action"])
         self.assertFalse(destination.exists())
+
+    def test_pooled_release_requires_stored_command_and_evidence_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo, _, destination, task_path, pooled = self._pooled_workspace_in(Path(directory))
+            original_registry = json.loads(json.dumps(load_registry(repo)))
+            for operation in ("remove", "evict"):
+                for missing in (False, True):
+                    for field in ("validationCommands", "integrationEvidenceDigest"):
+                        with self.subTest(operation=operation, missing=missing, field=field):
+                            registry = json.loads(json.dumps(original_registry))
+                            stored = registry["entries"][0]["releaseEvidence"]
+                            if missing:
+                                stored.pop(field)
+                            elif field == "validationCommands":
+                                stored[field] = ["git status --short"]
+                            else:
+                                stored[field] = "0" * 64
+                            if operation == "remove":
+                                write_object(workspace_module.registry_path(repo), registry)
+                                result = remove_workspace(
+                                    repo,
+                                    task_path=task_path,
+                                    task_revision=0,
+                                    expected_revision=pooled["revision"],
+                                )
+                                self.assertFalse(result["ok"])
+                                retained = load_registry(repo)["entries"][0]
+                            else:
+                                result = workspace_module._evict_pool(
+                                    repo,
+                                    registry,
+                                    {"workspacePool": {"enabled": True, "maxIdle": 0, "maxIdleGiB": 10}},
+                                )
+                                self.assertFalse(result[0]["removed"])
+                                retained = registry["entries"][0]
+                            self.assertEqual("quarantined", retained["state"])
+                            self.assertTrue(destination.exists())
+                            write_object(workspace_module.registry_path(repo), original_registry)
+
+    def test_pooled_cleanup_rejects_current_command_or_evidence_changes_without_revision_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo, _, destination, task_path, pooled = self._pooled_workspace_in(Path(directory))
+            original_registry = json.loads(json.dumps(load_registry(repo)))
+            original_task = task_path.read_text(encoding="utf-8")
+            for operation in ("remove", "evict"):
+                for mutation in ("missing-commands", "altered-commands", "missing-evidence", "altered-evidence"):
+                    with self.subTest(operation=operation, mutation=mutation):
+                        registry = json.loads(json.dumps(original_registry))
+                        task = json.loads(original_task)
+                        original_identity = (
+                            task["revision"],
+                            task["commits"]["candidate"],
+                            task["close"]["mergeCommit"],
+                        )
+                        if mutation == "missing-commands":
+                            task["validation"].pop("commands")
+                        elif mutation == "missing-evidence":
+                            task["close"].pop("integrationEvidence")
+                        elif mutation == "altered-evidence":
+                            task["close"]["integrationEvidence"][0]["exitCode"] = 1
+                        else:
+                            task["validation"]["commands"] = ["git status --short"]
+                            task["close"]["integrationEvidence"][0]["command"] = "git status --short"
+                        self.assertEqual(
+                            original_identity,
+                            (
+                                task["revision"],
+                                task["commits"]["candidate"],
+                                task["close"]["mergeCommit"],
+                            ),
+                        )
+                        task_path.write_text(json.dumps(task), encoding="utf-8")
+                        if operation == "remove":
+                            write_object(workspace_module.registry_path(repo), registry)
+                            result = remove_workspace(
+                                repo,
+                                task_path=task_path,
+                                task_revision=0,
+                                expected_revision=pooled["revision"],
+                            )
+                            self.assertFalse(result["ok"])
+                            retained = load_registry(repo)["entries"][0]
+                        else:
+                            result = workspace_module._evict_pool(
+                                repo,
+                                registry,
+                                {"workspacePool": {"enabled": True, "maxIdle": 0, "maxIdleGiB": 10}},
+                            )
+                            self.assertFalse(result[0]["removed"])
+                            retained = registry["entries"][0]
+                        self.assertEqual("quarantined", retained["state"])
+                        self.assertTrue(destination.exists())
+                        write_object(workspace_module.registry_path(repo), original_registry)
+                        task_path.write_text(original_task, encoding="utf-8")
 
 if __name__ == "__main__":
     unittest.main()
