@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 7,
+  "revision": 10,
   "taskId": "L5-B3",
   "goal": "Make production cached discovery fast and preserve catalog provider identity",
   "acceptance": [
@@ -29,8 +29,8 @@
   "planReviewRef": null,
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Accepted",
-  "previousState": "Blocked",
+  "state": "Integrated",
+  "previousState": "Accepted",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -255,8 +255,45 @@
     "docs/tasks/reviews/l5-b3-1.json"
   ],
   "close": {
-    "mergeCommit": null,
-    "integrationEvidence": [],
-    "workspaceDisposition": null
+    "mergeCommit": "df5e57f1591312c16cbb81aa237548bc1948946c",
+    "integrationEvidence": [
+      {
+        "headSha": "df5e57f1591312c16cbb81aa237548bc1948946c",
+        "command": "python -B -m unittest discover -s tests -p test_discovery.py",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": "................\r\n----------------------------------------------------------------------\r\nRan 16 tests in 0.455s\r\n\r\nOK\r\n",
+          "totalBytes": 120,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/df5e57f1591312c16cbb81aa237548bc1948946c-2f0095cc07e1.log"
+        }
+      },
+      {
+        "headSha": "df5e57f1591312c16cbb81aa237548bc1948946c",
+        "command": "python -B -m unittest discover -s tests -p test_profiles.py",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": ".........\r\n----------------------------------------------------------------------\r\nRan 9 tests in 0.249s\r\n\r\nOK\r\n",
+          "totalBytes": 112,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/df5e57f1591312c16cbb81aa237548bc1948946c-001814c92e91.log"
+        }
+      },
+      {
+        "headSha": "df5e57f1591312c16cbb81aa237548bc1948946c",
+        "command": "git diff --check",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": "warning: in the working copy of 'docs/tasks/l5-b3.task.json', CRLF will be replaced by LF the next time Git touches it\n",
+          "totalBytes": 119,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/df5e57f1591312c16cbb81aa237548bc1948946c-466c2f308b48.log"
+        }
+      }
+    ],
+    "workspaceDisposition": "retained-for-final-phase"
   }
 }
