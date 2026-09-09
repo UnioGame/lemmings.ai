@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 8,
+  "revision": 11,
   "taskId": "L5-D",
   "goal": "Implement native and external role-restricted execution adapters",
   "acceptance": [
@@ -30,8 +30,8 @@
   "planReviewRef": null,
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Accepted",
-  "previousState": "Candidate",
+  "state": "Integrated",
+  "previousState": "Accepted",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -210,8 +210,36 @@
     "docs/tasks/reviews/l5-d-1.json"
   ],
   "close": {
-    "mergeCommit": null,
-    "integrationEvidence": [],
-    "workspaceDisposition": null
+    "mergeCommit": "d1fb886766c92289e163c9b5c0dbbc5f6e9a1766",
+    "integrationEvidence": [
+      {
+        "headSha": "d1fb886766c92289e163c9b5c0dbbc5f6e9a1766",
+        "command": "python -B -m unittest discover -s tests -p test_runners.py",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": ".......\r\n----------------------------------------------------------------------\r\nRan 7 tests in 3.983s\r\n\r\nOK\r\n",
+          "totalBytes": 110,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/d1fb886766c92289e163c9b5c0dbbc5f6e9a1766-e2c85715f086.log"
+        }
+      },
+      {
+        "headSha": "d1fb886766c92289e163c9b5c0dbbc5f6e9a1766",
+        "command": "git diff --check",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": "warning: in the working copy of 'docs/tasks/l5-d.task.json', CRLF will be replaced by LF the next time Git touches it\n",
+          "totalBytes": 118,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/d1fb886766c92289e163c9b5c0dbbc5f6e9a1766-466c2f308b48.log"
+        }
+      }
+    ],
+    "workspaceDisposition": {
+      "releaseAction": "retained",
+      "releaseReason": "Retained through final assembled validation."
+    }
   }
 }
