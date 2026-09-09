@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 21,
+  "revision": 22,
   "taskId": "L5-A2",
   "goal": "Complete immutable claim identity and pooled cleanup lifecycle binding",
   "acceptance": [
@@ -582,6 +582,9 @@
         }
       }
     ],
-    "workspaceDisposition": "retained-for-final-phase"
+    "workspaceDisposition": {
+      "releaseAction": "retained",
+      "releaseReason": "Retained until complete assembled phase validation."
+    }
   }
 }

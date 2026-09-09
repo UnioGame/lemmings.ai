@@ -308,7 +308,7 @@ wire_api = "responses"
         codex.mkdir()
         (codex / "config.toml").write_text('model="m"\nmodel_provider="custom"\n[model_providers.custom]\nbase_url="https://base.example/v1"\nwire_api="responses"\n', encoding="utf-8")
         for name in ("one", "two"):
-            (codex / f"{name}.config.toml").write_text(f'model="m"\nmodel_provider="custom"\n[model_providers.custom]\nbase_url="https://{name}.example/v1"\nwire_api="responses"\napi_key="PROFILE_SECRET"\n', encoding="utf-8")
+            (codex / f"{name}.config.toml").write_text(f'model="m"\nmodel_provider="custom"\n[model_providers.custom]\nbase_url="https://{name}.example/v1"\nwire_api="responses"\nexperimental_bearer_token="PROFILE_SECRET"\n', encoding="utf-8")
         (codex / "auth.json").write_text(json.dumps({"tokens": {"access_token": "PRIVATE_TOKEN"}}), encoding="utf-8")
         (codex / "models_cache.json").write_text(json.dumps({"models": [
             {"slug": "visible", "visibility": "list", "supported_in_api": False, "supported_reasoning_levels": [{"effort": "high"}, {"effort": "max"}], "model_messages": "PRIVATE_INSTRUCTIONS"},

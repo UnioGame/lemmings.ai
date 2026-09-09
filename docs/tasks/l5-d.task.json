@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 7,
+  "revision": 8,
   "taskId": "L5-D",
   "goal": "Implement native and external role-restricted execution adapters",
   "acceptance": [
@@ -100,7 +100,9 @@
     "tests": [],
     "dependencyHandoffs": [],
     "handoff": null,
-    "validationEvidence": [],
+    "validationEvidence": [
+      "7 focused runner tests passed including real child cancellation/timeout, concurrent writer exclusion, managed cleanup retention and result envelope parsing; diffcheck passed."
+    ],
     "attempts": [],
     "invocations": [
       {

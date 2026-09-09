@@ -636,8 +636,9 @@ def command_doctor(args: argparse.Namespace) -> int:
     runtime = Path(__file__).resolve().parent
     skill = skill_root(repo)
     required = [
-        *(runtime / name for name in ("contracts.py", "hooks.py", "invocations.py", "workspace.py")),
+        *(runtime / name for name in ("contracts.py", "hooks.py", "invocations.py", "workspace.py", "bundle.py", "effective.py", "discovery.py", "profiles.py", "rules.py", "runners.py")),
         skill / "SKILL.md", skill / "defaults.json", skill / "scripts/run.py",
+        *(skill / "rules" / name for name in ("manifest.json", "unity.md", "unreal.md", "godot.md", "defold.md", "flutter.md", "phaser.md", "pixijs.md", "platforms.md")),
         *(skill / "templates" / name for name in ("task.json", "phase.json", "review.json")),
     ]
     if any(not path.is_file() for path in required):

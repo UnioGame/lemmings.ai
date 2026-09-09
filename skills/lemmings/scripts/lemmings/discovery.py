@@ -19,7 +19,7 @@ PROTOCOLS = {"responses", "chat-completions", "messages", "unknown"}
 EXECUTORS = {"native", "codex", "opencode"}
 ROUTE_KEYS = ("hostId", "providerId", "modelId", "variantId", "executor", "profileName", "protocol", "configured", "catalogued", "compatible", "authConfigured", "probed", "quotaGroup", "source")
 SAFE_SOURCES = {"codex-config", "codex-profile", "codex-auth", "codex-cache", "opencode-config", "opencode-auth", "host-catalog", "state-inventory", "manual", "project-manual", "personal-manual", "generated", "unknown"}
-SECRET_KEYS = {"access", "access_token", "api_key", "apikey", "auth", "authorization", "client_secret", "credential", "credentials", "key", "password", "private_key", "refresh", "refresh_token", "secret", "token"}
+SECRET_KEYS = {"experimental_bearer_token", "bearer_token", "access", "access_token", "api_key", "apikey", "auth", "authorization", "client_secret", "credential", "credentials", "key", "password", "private_key", "refresh", "refresh_token", "secret", "token"}
 
 # https://opencode.ai/docs/go/ documents these endpoint protocols by exact
 # model ID. The public /zen/go/v1/models response intentionally carries only

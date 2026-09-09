@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 10,
+  "revision": 11,
   "taskId": "L5-B3",
   "goal": "Make production cached discovery fast and preserve catalog provider identity",
   "acceptance": [
@@ -9,11 +9,11 @@
   ],
   "dependencies": [],
   "requestedMode": "auto",
-  "resolvedMode": "standard",
-  "modeFloor": "standard",
+  "resolvedMode": "strict",
+  "modeFloor": "strict",
   "riskClass": "medium",
   "modeReasons": [
-    "boundedPublicBehavior"
+    "integrationBranch"
   ],
   "capabilityDegradations": [
     "manager-completes-isolated-repair-after-worker-startup-failure",
@@ -87,7 +87,9 @@
     "interfaces": [],
     "tests": [],
     "dependencyHandoffs": [],
-    "validationEvidence": [],
+    "validationEvidence": [
+      "16 discovery tests and 9 profile tests passed; 4.5MB regression included; real home scan0.868seconds before final connected filter; diffcheck passed."
+    ],
     "attempts": [],
     "invocations": [
       {
@@ -294,6 +296,9 @@
         }
       }
     ],
-    "workspaceDisposition": "retained-for-final-phase"
+    "workspaceDisposition": {
+      "releaseAction": "retained",
+      "releaseReason": "Retained until complete assembled phase validation."
+    }
   }
 }

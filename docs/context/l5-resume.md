@@ -14,3 +14,5 @@ Source package remains at baseline f228b20; do not overwrite the active root hor
 - Only after acceptance fast-forward original package if still clean. Do not reinstall root skill while its other task is active. Deactivate only this package runtime marker. Preserve unaccepted/dirty workspaces.
 
 User subsequently authorized sequential continuation with manager self-review. Independent reviewer availability no longer blocks this delivery. Preserve all other safety and exact integration guarantees.
+
+Completion progress: both waves are assembled; 162 tests, doctor, skill schema and JSON/links passed. Final integration evidence and primary package fast-forward are the remaining steps. See l5-forward-results.md for the user-authorized scenario checks.

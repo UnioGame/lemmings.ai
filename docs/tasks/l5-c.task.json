@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 7,
+  "revision": 8,
   "taskId": "L5-C",
   "goal": "Implement scoped technology detection and seven rule packs",
   "acceptance": [
@@ -101,7 +101,9 @@
     "tests": [],
     "dependencyHandoffs": [],
     "handoff": null,
-    "validationEvidence": [],
+    "validationEvidence": [
+      "7 focused rule tests passed; diffcheck passed; manager self-review checked direct-import project root and scope limits."
+    ],
     "attempts": [],
     "invocations": [
       {

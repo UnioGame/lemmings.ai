@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 11,
+  "revision": 12,
   "taskId": "L5-A",
   "goal": "Implement canonical workspace provisioning and lifecycle safety",
   "acceptance": [
@@ -426,11 +426,11 @@
     "allowedOutputs": [],
     "debt": []
   },
-  "reviewRef": "docs/tasks/reviews/l5-a-2.json",
+  "reviewRef": "docs/tasks/reviews/l5-a-2.schema4.json",
   "crossReviewRefs": [],
   "reviewHistory": [
     "docs/tasks/reviews/l5-a-1.json",
-    "docs/tasks/reviews/l5-a-2.json"
+    "docs/tasks/reviews/l5-a-2.schema4.json"
   ],
   "close": {
     "mergeCommit": null,
