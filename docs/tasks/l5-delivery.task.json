@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 12,
+  "revision": 13,
   "taskId": "L5-DELIVERY",
   "goal": "Deliver zero-config Lemmings with provider discovery, named presets, execution adapters, safe workspaces and seven technology rule packs.",
   "acceptance": [
@@ -22,7 +22,8 @@
     "integrationBranch"
   ],
   "capabilityDegradations": [
-    "required-reviewer-unavailable-host-slots"
+    "required-reviewer-unavailable-host-slots",
+    "user-authorized-sequential-manager-delivery-and-self-review"
   ],
   "writerCount": 2,
   "ownershipDomainCount": 4,
@@ -33,8 +34,8 @@
   "planReviewRef": "docs/tasks/reviews/l5-plan-refreshed.json",
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Blocked",
-  "previousState": "Ready",
+  "state": "Active",
+  "previousState": "Blocked",
   "role": "manager",
   "risks": [],
   "telemetryCohort": null,

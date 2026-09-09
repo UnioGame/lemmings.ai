@@ -12,3 +12,5 @@ Source package remains at baseline f228b20; do not overwrite the active root hor
 - C/D Draft dependencies already point to A2+B3. Create separate package worktrees at that phase head. Serialize if host slots limited. C content prepared in l5-pack-content.md and l5-rule-sources.md; D contract in l5-runner-capabilities.md. Neither rules.py/packs nor runners.py is implemented yet.
 - Finish full tests, CLI workflows, skill/link/JSON checks, forward cases, immutable assembled review, exact integration. Move bootstrap .agents/lemmings.json to docs/tasks/l5.profile.json before final delivery; do not ship task-specific manual model defaults.
 - Only after acceptance fast-forward original package if still clean. Do not reinstall root skill while its other task is active. Deactivate only this package runtime marker. Preserve unaccepted/dirty workspaces.
+
+User subsequently authorized sequential continuation with manager self-review. Independent reviewer availability no longer blocks this delivery. Preserve all other safety and exact integration guarantees.

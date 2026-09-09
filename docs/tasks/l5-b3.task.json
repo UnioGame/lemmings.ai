@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 6,
+  "revision": 7,
   "taskId": "L5-B3",
   "goal": "Make production cached discovery fast and preserve catalog provider identity",
   "acceptance": [
@@ -17,7 +17,8 @@
   ],
   "capabilityDegradations": [
     "manager-completes-isolated-repair-after-worker-startup-failure",
-    "required-reviewer-unavailable-host-slots"
+    "required-reviewer-unavailable-host-slots",
+    "user-authorized-manager-self-review"
   ],
   "writerCount": 1,
   "ownershipDomainCount": 1,
@@ -28,8 +29,8 @@
   "planReviewRef": null,
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Blocked",
-  "previousState": "Candidate",
+  "state": "Accepted",
+  "previousState": "Blocked",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -248,9 +249,11 @@
     "allowedOutputs": [],
     "debt": []
   },
-  "reviewRef": null,
+  "reviewRef": "docs/tasks/reviews/l5-b3-1.json",
   "crossReviewRefs": [],
-  "reviewHistory": [],
+  "reviewHistory": [
+    "docs/tasks/reviews/l5-b3-1.json"
+  ],
   "close": {
     "mergeCommit": null,
     "integrationEvidence": [],
