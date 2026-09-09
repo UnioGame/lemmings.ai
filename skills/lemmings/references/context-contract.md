@@ -21,3 +21,5 @@ Deterministic validation stores the complete output outside prompt context and r
 New Task invocations freeze `effectiveConfig` with resolved profile, selected rule references and hashes. `--preset` names a profile; the existing `--profile` still identifies a settings JSON file. Preference changes affect future Tasks. Selected rule changes or modified frozen contents invalidate the invocation; replan deliberately. Add selected rule refs to the same 12-reference/16-KiB budget rather than expanding the budget.
 
 Create the invocation with the target worker repository as `--repo`, so context hashes describe its checkout bytes (including Git line-ending conversion), not the manager checkout. The canonical Task may be supplied separately. Verify the recorded hashes before dispatch; do not silently rewrite a running invocation.
+
+Keep hashed text references byte-stable across worktrees. This distribution pins LF for source, rules and JSON/TOML through `.gitattributes`; project owners can apply an equivalent policy to their own frozen contracts. Hash the target checkout bytes and never silently rewrite a user file to satisfy a digest.
