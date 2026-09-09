@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 11,
+  "revision": 12,
   "taskId": "L5-C",
   "goal": "Implement scoped technology detection and seven rule packs",
   "acceptance": [
@@ -249,8 +249,8 @@
       }
     ],
     "workspaceDisposition": {
-      "releaseAction": "retained",
-      "releaseReason": "Retained through final assembled validation."
+      "releaseAction": "released-to-pool",
+      "releaseReason": "Verified integrated workspace retained for reuse."
     }
   }
 }

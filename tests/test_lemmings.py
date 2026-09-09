@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 4,
-        "distributionVersion": "4.1.1",
+        "distributionVersion": "4.5.0",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -61,11 +61,11 @@ class SchemaOnlyTests(unittest.TestCase):
                 self.assertEqual(1, len(checked.findings))
                 self.assertEqual(expected, checked.findings[0].message)
 
-    def test_distribution_versions_are_33(self):
+    def test_distribution_versions_are_consistent(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual("4.1.1", package["version"])
-        self.assertEqual("4.1.1", plugin["version"])
+        self.assertEqual("4.5.0", package["version"])
+        self.assertEqual("4.5.0", plugin["version"])
 
     def test_specialization_is_optional_hint_and_cross_review_degrades(self):
         configured = profile()

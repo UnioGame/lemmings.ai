@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 11,
+  "revision": 12,
   "taskId": "L5-B",
   "goal": "Implement sanitized provider discovery and named profiles",
   "acceptance": [
@@ -468,6 +468,9 @@
   "close": {
     "mergeCommit": null,
     "integrationEvidence": [],
-    "workspaceDisposition": null
+    "workspaceDisposition": {
+      "releaseAction": "retained",
+      "releaseReason": "Superseded replan workspace preserved for inspection."
+    }
   }
 }

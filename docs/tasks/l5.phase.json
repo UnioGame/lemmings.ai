@@ -1,9 +1,9 @@
 {
   "schemaVersion": 4,
-  "revision": 6,
+  "revision": 7,
   "phaseId": "L5",
   "baselineSha": "f228b2056bcb3d2161daa4006343340724c7613c",
-  "integrationHead": "4290ff9872908e3b3fa0b38287f291fde2adbcac",
+  "integrationHead": "0cc2e060f106ecdae654d309f376a9e2bac218a3",
   "integrationBranch": "codex/lemmings-platform-delivery",
   "contractsFrozen": true,
   "contracts": [
@@ -58,9 +58,59 @@
   "close": {
     "mergeCommits": [
       "444486fe8b12334bb50cefbc02d11136ac0b7dc3",
-      "4290ff9872908e3b3fa0b38287f291fde2adbcac"
+      "4290ff9872908e3b3fa0b38287f291fde2adbcac",
+      "0cc2e060f106ecdae654d309f376a9e2bac218a3"
     ],
-    "phaseValidation": [],
-    "workspaceDispositions": []
+    "phaseValidation": [
+      {
+        "headSha": "0cc2e060f106ecdae654d309f376a9e2bac218a3",
+        "command": "python -B -m unittest discover -s tests",
+        "passed": true,
+        "exitCode": 0
+      },
+      {
+        "headSha": "0cc2e060f106ecdae654d309f376a9e2bac218a3",
+        "command": "git diff --check",
+        "passed": true,
+        "exitCode": 0
+      }
+    ],
+    "workspaceDispositions": [
+      {
+        "workspaceId": "l5-a",
+        "releaseAction": "retained",
+        "releaseReason": "Superseded replan workspace preserved for inspection."
+      },
+      {
+        "workspaceId": "l5-b",
+        "releaseAction": "retained",
+        "releaseReason": "Superseded replan workspace preserved for inspection."
+      },
+      {
+        "workspaceId": "l5-c",
+        "releaseAction": "released-to-pool",
+        "releaseReason": "Verified integrated workspace retained for reuse."
+      },
+      {
+        "workspaceId": "l5-d",
+        "releaseAction": "released-to-pool",
+        "releaseReason": "Verified integrated workspace retained for reuse."
+      },
+      {
+        "workspaceId": "l5-manager",
+        "releaseAction": "retained",
+        "releaseReason": "User-managed integration checkout."
+      },
+      {
+        "workspaceId": "l5-a2",
+        "releaseAction": "retained",
+        "releaseReason": "Unregistered recovery worktree preserved."
+      },
+      {
+        "workspaceId": "l5-b2",
+        "releaseAction": "retained",
+        "releaseReason": "Unregistered recovery worktree preserved."
+      }
+    ]
   }
 }

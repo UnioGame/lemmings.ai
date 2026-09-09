@@ -1,18 +1,9 @@
-# Delivery checkpoint
+# Completed delivery checkpoint
 
-Source package remains at baseline f228b20; do not overwrite the active root horde-cards runtime or unrelated game changes.
+Both implementation waves are integrated. Final exact integration at0cc2e06 passed162 tests and diff checks. The canonical L5-DELIVERY Task contains the accepted candidate/fix and final evidence; l5.phase.json records the complete phase.
 
-- Manager branch: codex/lemmings-platform-delivery. CORE/defaults/frozen profiles/CLI/installer/README committed or staged here.
-- A2 candidate 3d7c5ba: independent review accepted; not integrated yet.
-- B2 candidate 7b09bac: protocol/auth/profile invariants accepted, terminal replan for production cache performance.
-- B3 candidate 191bc3f: native JSON fast path, linear JSONC, correct provider-keyed model IDs and connected-cache filtering.16 discovery tests +9 profile tests; large4.5MB fixture; measured real offline scan0.868seconds before connected filter. Independent review is pending.
-- Host twice rejected fresh reviewer spawn with agent thread limit. Old provider_completion and workspace_completion remain pending_init despite repeated interrupts. No model quota failure. Cancelled reviewer invocation90e351eeae225100086dbe90 was never executed.
-- Resume with fresh reviewer for B3, new saved invocation attempt2; same immutable candidate. Review only40-line source followup7b09bac..191bc3f; prior protocol/auth work already accepted. No paid probe or personal config edit.
-- Then integrate whole A2+B3 wave into manager preserving commit ancestry; targeted integration evidence at exact HEAD and canonical lifecycle. Update phase integrationHead.
-- C/D Draft dependencies already point to A2+B3. Create separate package worktrees at that phase head. Serialize if host slots limited. C content prepared in l5-pack-content.md and l5-rule-sources.md; D contract in l5-runner-capabilities.md. Neither rules.py/packs nor runners.py is implemented yet.
-- Finish full tests, CLI workflows, skill/link/JSON checks, forward cases, immutable assembled review, exact integration. Move bootstrap .agents/lemmings.json to docs/tasks/l5.profile.json before final delivery; do not ship task-specific manual model defaults.
-- Only after acceptance fast-forward original package if still clean. Do not reinstall root skill while its other task is active. Deactivate only this package runtime marker. Preserve unaccepted/dirty workspaces.
+User authorized sequential manager execution and self-review after unavailable host agent slots. Earlier independent workspace/provider reviews are preserved; schema-corrected copies explicitly name their original serialized artifacts. No paid model generation or personal provider configuration edits were performed.
 
-User subsequently authorized sequential continuation with manager self-review. Independent reviewer availability no longer blocks this delivery. Preserve all other safety and exact integration guarantees.
+Core is generic/current-host by default. Task-only bootstrap routes were moved out of .agents into docs/tasks/l5.profile.json; final governance uses l5.final-profile.json. Shipped defaults contain no model pins. Seven engine packs, platform rules, discovery/presets and native/CLI adapters are complete; README contains commands/use cases and capability limits.
 
-Completion progress: both waves are assembled; 162 tests, doctor, skill schema and JSON/links passed. Final integration evidence and primary package fast-forward are the remaining steps. See l5-forward-results.md for the user-authorized scenario checks.
+Verified integrated workspaces are pooled when lifecycle permits; superseded/unregistered/user workspaces are preserved. Do not reinstall the game-root skill while its separate horde-cards task is active. Package runtime deactivation must affect only L5, never that game-root marker. Forward-scenario evidence is in l5-forward-results.md.
