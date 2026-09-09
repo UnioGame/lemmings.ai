@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 19,
+  "revision": 20,
   "taskId": "L5-DELIVERY",
   "goal": "Deliver zero-config Lemmings with provider discovery, named presets, execution adapters, safe workspaces and seven technology rule packs.",
   "acceptance": [
@@ -34,8 +34,8 @@
   "planReviewRef": "docs/tasks/reviews/l5-plan-final.schema4.json",
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Repair",
-  "previousState": "Accepted",
+  "state": "Accepted",
+  "previousState": "Candidate",
   "role": "manager",
   "risks": [],
   "telemetryCohort": null,
@@ -542,7 +542,9 @@
   "baseSha": "f228b2056bcb3d2161daa4006343340724c7613c",
   "commits": {
     "candidate": "ea5e2929abecd8b136402f8e188e5526c5adbaba",
-    "fix": []
+    "fix": [
+      "37563db3979dcdd68ac0f034f5e8ef321b215fa2"
+    ]
   },
   "validation": {
     "riskToTest": [
@@ -560,10 +562,11 @@
     ],
     "debt": []
   },
-  "reviewRef": "docs/tasks/reviews/l5-final.json",
+  "reviewRef": "docs/tasks/reviews/l5-final-2.json",
   "crossReviewRefs": [],
   "reviewHistory": [
-    "docs/tasks/reviews/l5-final.json"
+    "docs/tasks/reviews/l5-final.json",
+    "docs/tasks/reviews/l5-final-2.json"
   ],
   "close": {
     "mergeCommit": "4db7644532d0a3205ae2d0f05ea4b33c456e1b8e",
