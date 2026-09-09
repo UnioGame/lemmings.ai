@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 8,
+  "revision": 18,
   "taskId": "L5-A2",
   "goal": "Complete immutable claim identity and pooled cleanup lifecycle binding",
   "acceptance": [
@@ -25,8 +25,8 @@
   "planReviewRef": "docs/tasks/reviews/l5-a2-plan.json",
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Candidate",
-  "previousState": "Active",
+  "state": "Accepted",
+  "previousState": "Candidate",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -248,6 +248,165 @@
           "deadlineSeconds": 1200
         },
         "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-A2",
+        "taskId": "L5-A2",
+        "taskRevision": 11,
+        "invocationId": "6c89f2944a182301507865ce",
+        "attempt": 2,
+        "role": "worker",
+        "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
+        "contextDigest": "d9523e2f3bd69fbb5d22a07a02618acdb52d30e6e5e8d91c3e1cc53d29a3e279",
+        "objective": "One bounded repair: bind pooled release record to original declared validation commands and exact integration evidence via snapshot or deterministic digest. Require stored binding for remove/eviction and compare canonical Task evidence even when Task revision/candidate/merge are unchanged. Add missing/altered current and stored evidence regressions, retain valid cleanup. No other scope changes; commit owned files and return full AgentResult v4 arrays.",
+        "acceptanceCriteria": [
+          "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
+        ],
+        "ownedPaths": [
+          "skills/lemmings/scripts/lemmings/workspace.py",
+          "tests/test_workspace_safety.py"
+        ],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Unchanged public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-workspace-replan.md",
+            "purpose": "Bounded replacement plan",
+            "contentHash": "1d7f900bce6e9eb1bac1dcfafe6bf491ab244a1ef85d8d49ca8dd52130e2ff77"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+            "purpose": "Current safety implementation",
+            "contentHash": "ff15be46953f5b237bf4b842ec3ce941840e26a4a4f5acd8844b1d70b3bdde5d"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 12,
+          "maxToolCalls": 24,
+          "deadlineSeconds": 2700
+        },
+        "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-A2",
+        "taskId": "L5-A2",
+        "taskRevision": 13,
+        "invocationId": "704fc628b9c9fba465780728",
+        "attempt": 3,
+        "role": "worker",
+        "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
+        "contextDigest": "768f26f9c432d25c36fe5168ca046d1e92bbc101eaf9b68d21909bda00573535",
+        "objective": "Resume the SAME one repair after confirmed host initialization stall/interruption. Preserve partial owned edits. Complete only the recorded first candidate-review findings; no additional repair budget or model change. Run focused declared checks, commit owned files and return complete AgentResult v4 arrays.",
+        "acceptanceCriteria": [
+          "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
+        ],
+        "ownedPaths": [
+          "skills/lemmings/scripts/lemmings/workspace.py",
+          "tests/test_workspace_safety.py"
+        ],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Unchanged public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-workspace-replan.md",
+            "purpose": "Bounded replacement plan",
+            "contentHash": "1d7f900bce6e9eb1bac1dcfafe6bf491ab244a1ef85d8d49ca8dd52130e2ff77"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+            "purpose": "Current safety implementation",
+            "contentHash": "fa534b88d74f91e1b21d60b891c75700783ce85dddcb8dccccadb5e12b31f3f2"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 12,
+          "maxToolCalls": 24,
+          "deadlineSeconds": 2700
+        },
+        "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-A2",
+        "taskId": "L5-A2",
+        "taskRevision": 16,
+        "invocationId": "06790d2b4389bbee547a5975",
+        "attempt": 3,
+        "role": "reviewer",
+        "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
+        "contextDigest": "70045a5760e3d18e3545c66581d005887ec0e787a377fded181e2e48392c9566",
+        "objective": "Review immutable A2 repair only against remaining pool-command-evidence-not-bound P1: successful release stores exact declared commands and integration evidence; direct removal and eviction reject missing/changed stored or canonical bindings even with unchanged task identity/revision. Reuse reported focused suite; inspect regressions and return complete AgentResult v4 verdict, material findings only. At most 8 tool calls; no edits.",
+        "acceptanceCriteria": [
+          "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Unchanged public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-workspace-replan.md",
+            "purpose": "Bounded replacement plan",
+            "contentHash": "1d7f900bce6e9eb1bac1dcfafe6bf491ab244a1ef85d8d49ca8dd52130e2ff77"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+            "purpose": "Current safety implementation",
+            "contentHash": "fa534b88d74f91e1b21d60b891c75700783ce85dddcb8dccccadb5e12b31f3f2"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+          "git diff --check"
+        ],
+        "candidateHead": "3d7c5ba17de3c7620f3e141d3030b34312da8c16",
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
       }
     ],
     "agentResults": [
@@ -287,6 +446,88 @@
         "findings": [],
         "blockers": [],
         "remainingRisks": []
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "cef1d2342ff539451bd0a9ca",
+        "attempt": 2,
+        "status": "succeeded",
+        "candidateHead": "a5fecd127946d86f9289743979be1572b7fce9c9",
+        "changedPaths": [],
+        "acceptanceEvidence": [
+          "Stored branch/base and actual managed repository identity accepted; mandatory prior Task identity accepted."
+        ],
+        "validationEvidence": [
+          "Reused expanded focused suite and diff check."
+        ],
+        "findings": [
+          {
+            "severity": "P1",
+            "code": "pool-command-evidence-not-bound",
+            "requiredChange": "Store and require original declared commands and canonical integration evidence snapshot or stable digest at successful release; compare on remove/eviction. Same Task revision/merge/candidate with changed command evidence must be rejected. Add missing/altered stored/current evidence regressions."
+          }
+        ],
+        "blockers": [
+          "pool-command-evidence-not-bound"
+        ],
+        "remainingRisks": [],
+        "verdict": "ChangesRequested"
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "6c89f2944a182301507865ce",
+        "attempt": 2,
+        "status": "cancelled",
+        "changedPaths": [],
+        "acceptanceEvidence": [],
+        "validationEvidence": [
+          "Host reported pending_init; invocation interrupted before restart. Partial owned edits retained."
+        ],
+        "findings": [],
+        "blockers": [
+          "host-initialization-stalled"
+        ],
+        "remainingRisks": []
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "704fc628b9c9fba465780728",
+        "attempt": 3,
+        "status": "succeeded",
+        "candidateHead": "3d7c5ba17de3c7620f3e141d3030b34312da8c16",
+        "changedPaths": [
+          "skills/lemmings/scripts/lemmings/workspace.py",
+          "tests/test_workspace_safety.py"
+        ],
+        "acceptanceEvidence": [
+          "Pool release binds normalized validation commands and deterministic integration evidence; removal and eviction require unchanged canonical and stored bindings."
+        ],
+        "validationEvidence": [
+          "Focused workspace safety suite passed; git diff --check passed."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": [
+          "Worker stale phase dependency metadata differs from canonical manager phase; no source-code blocker."
+        ]
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "06790d2b4389bbee547a5975",
+        "attempt": 3,
+        "status": "succeeded",
+        "candidateHead": "3d7c5ba17de3c7620f3e141d3030b34312da8c16",
+        "changedPaths": [],
+        "acceptanceEvidence": [
+          "Independent reviewer accepted normalized command and exact evidence binding for pool release, direct removal and eviction; inspected regression mutation matrix."
+        ],
+        "validationEvidence": [
+          "Reviewer inspected immutable repair diff and reused worker-reported focused suite."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": [],
+        "verdict": "Accepted"
       }
     ],
     "handoff": null
@@ -294,7 +535,9 @@
   "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
   "commits": {
     "candidate": "a5fecd127946d86f9289743979be1572b7fce9c9",
-    "fix": []
+    "fix": [
+      "3d7c5ba17de3c7620f3e141d3030b34312da8c16"
+    ]
   },
   "validation": {
     "riskToTest": [],
@@ -305,9 +548,12 @@
     "allowedOutputs": [],
     "debt": []
   },
-  "reviewRef": null,
+  "reviewRef": "docs/tasks/reviews/l5-a2-2.json",
   "crossReviewRefs": [],
-  "reviewHistory": [],
+  "reviewHistory": [
+    "docs/tasks/reviews/l5-a2-1.json",
+    "docs/tasks/reviews/l5-a2-2.json"
+  ],
   "close": {
     "mergeCommit": null,
     "integrationEvidence": [],

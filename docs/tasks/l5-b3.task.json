@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 4,
+  "revision": 6,
+  "taskId": "L5-B3",
+  "goal": "Make production cached discovery fast and preserve catalog provider identity",
+  "acceptance": [
+    "Ordinary JSON uses the standard parser; JSONC trailing commas scan linearly; 4.5MB production-shaped cache completes a bounded scan.",
+    "Provider-keyed OpenCode cache retains provider identity when model IDs contain vendor slashes; no invented provider from model prefix."
+  ],
+  "dependencies": [],
+  "requestedMode": "auto",
+  "resolvedMode": "standard",
+  "modeFloor": "standard",
+  "riskClass": "medium",
+  "modeReasons": [
+    "boundedPublicBehavior"
+  ],
+  "capabilityDegradations": [
+    "manager-completes-isolated-repair-after-worker-startup-failure",
+    "required-reviewer-unavailable-host-slots"
+  ],
+  "writerCount": 1,
+  "ownershipDomainCount": 1,
+  "workerRequired": false,
+  "parallelReason": "independent_paths",
+  "reviewRequired": true,
+  "planReviewRequired": false,
+  "planReviewRef": null,
+  "reviewPolicy": null,
+  "specialization": null,
+  "state": "Blocked",
+  "previousState": "Candidate",
+  "role": "worker",
+  "risks": [],
+  "telemetryCohort": null,
+  "ownership": {
+    "owned": [
+      "skills/lemmings/scripts/lemmings/discovery.py",
+      "tests/test_discovery.py"
+    ],
+    "shared": [],
+    "forbidden": [
+      "skills/lemmings/scripts/lemmings/cli.py",
+      "skills/lemmings/scripts/lemmings/contracts.py",
+      "docs/**"
+    ]
+  },
+  "resources": {
+    "exclusive": []
+  },
+  "workingSet": [
+    {
+      "ref": "docs/tasks/reviews/l5-b2-2.json",
+      "purpose": "Independent remaining finding",
+      "contentHash": "540820acc8a46ef0b5a32f25d4c009167dccc6396bb55afde8bb8aebd7fe8c6e"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+      "purpose": "Owned parser/catalog code",
+      "contentHash": "e6f5adab74bbb21b75da771180c72499313bfc0f96d2b69fe8c850a454039358"
+    }
+  ],
+  "models": {
+    "hostId": "native",
+    "requested": null,
+    "assigned": "current-host/default",
+    "actual": "current-host/default",
+    "fallbackReason": "Host initialization/agent-slot failure; current manager completes existing isolated repair. No external model switch."
+  },
+  "routingRecovery": null,
+  "workspace": {
+    "policy": "auto",
+    "backend": "package-worktree",
+    "workspaceId": "l5-b2",
+    "managedBy": "lemmings",
+    "lifetime": "task",
+    "estimatedGiB": 0.002,
+    "approval": "not-required",
+    "reason": "Independent package worktree; one worker owns one branch",
+    "repoRoot": "D:\\Dev\\kontora\\merge\\mtt.client\\.lemmings-worktrees\\l5-manager",
+    "destination": "D:\\Dev\\kontora\\merge\\mtt.client\\.lemmings-worktrees\\l5-b2",
+    "branch": "codex/lemmings-providers-v2",
+    "packagePath": "."
+  },
+  "execution": {
+    "interfaces": [],
+    "tests": [],
+    "dependencyHandoffs": [],
+    "validationEvidence": [],
+    "attempts": [],
+    "invocations": [
+      {
+        "schemaVersion": 4,
+        "runId": "L5-B3",
+        "taskId": "L5-B3",
+        "taskRevision": 1,
+        "invocationId": "2f71206ca06afd5370a46169",
+        "attempt": 1,
+        "role": "worker",
+        "baseSha": "7b09bacccf1fedd95007e2e449a9f080f4f1a936",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "42c783485f7cd43aa9de3601be70ac6075b1687bbbf163de83db7c2a4ae32232",
+        "contextDigest": "1e48a8a229f57bad01c2d4ed847d9ad0e6c0d8110690b461b724b4c43ad55db4",
+        "objective": "Current manager executes bounded B3 followup in retained isolated provider worktree after B2 terminal replan. Fix quadratic JSON/JSONC parsing and provider-keyed cache model identity, add production-shaped regressions, run focused checks, commit only two owned files. Independent review required; no personal config writes or paid calls.",
+        "acceptanceCriteria": [
+          "Ordinary JSON uses the standard parser; JSONC trailing commas scan linearly; 4.5MB production-shaped cache completes a bounded scan.",
+          "Provider-keyed OpenCode cache retains provider identity when model IDs contain vendor slashes; no invented provider from model prefix."
+        ],
+        "ownedPaths": [
+          "skills/lemmings/scripts/lemmings/discovery.py",
+          "tests/test_discovery.py"
+        ],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/tasks/reviews/l5-b2-2.json",
+            "purpose": "Independent remaining finding",
+            "contentHash": "540820acc8a46ef0b5a32f25d4c009167dccc6396bb55afde8bb8aebd7fe8c6e"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+            "purpose": "Owned parser/catalog code",
+            "contentHash": "e6f5adab74bbb21b75da771180c72499313bfc0f96d2b69fe8c850a454039358"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_discovery.py",
+          "python -B -m unittest discover -s tests -p test_profiles.py",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 12,
+          "maxToolCalls": 24,
+          "deadlineSeconds": 2700
+        },
+        "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-B3",
+        "taskId": "L5-B3",
+        "taskRevision": 4,
+        "invocationId": "90e351eeae225100086dbe90",
+        "attempt": 1,
+        "role": "reviewer",
+        "baseSha": "7b09bacccf1fedd95007e2e449a9f080f4f1a936",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "42c783485f7cd43aa9de3601be70ac6075b1687bbbf163de83db7c2a4ae32232",
+        "contextDigest": "903d5ebb5ec5039e3d910a327595997b059ebcdb94b22eeda979fc9700bf1705",
+        "objective": "Review only40-line B3 bounded performance/provider-identity followup at7b09..191bc. Ordinary JSON fast path, linear JSONC trailing commas, provider cache key retains slash-bearing model identity, shared cache excludes unconnected providers when configured/auth providers exist. Reuse16+9 tests and measured0.868second real scan. No broader re-review; full AgentResult v4 verdict, readonly changedPaths[], max6calls.",
+        "acceptanceCriteria": [
+          "Ordinary JSON uses the standard parser; JSONC trailing commas scan linearly; 4.5MB production-shaped cache completes a bounded scan.",
+          "Provider-keyed OpenCode cache retains provider identity when model IDs contain vendor slashes; no invented provider from model prefix."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/tasks/reviews/l5-b2-2.json",
+            "purpose": "Independent remaining finding",
+            "contentHash": "540820acc8a46ef0b5a32f25d4c009167dccc6396bb55afde8bb8aebd7fe8c6e"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+            "purpose": "Owned parser/catalog code",
+            "contentHash": "ba79e280ce59b47991bcfa3a16122453b4fc81b4395c7bcc087eea2e43397445"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_discovery.py",
+          "python -B -m unittest discover -s tests -p test_profiles.py",
+          "git diff --check"
+        ],
+        "candidateHead": "191bc3fcbf81b8913108d390d67fcf4757c29771",
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
+      }
+    ],
+    "agentResults": [
+      {
+        "schemaVersion": 4,
+        "invocationId": "2f71206ca06afd5370a46169",
+        "attempt": 1,
+        "status": "succeeded",
+        "candidateHead": "191bc3fcbf81b8913108d390d67fcf4757c29771",
+        "changedPaths": [
+          "skills/lemmings/scripts/lemmings/discovery.py",
+          "tests/test_discovery.py"
+        ],
+        "acceptanceEvidence": [
+          "Native JSON fast path and linear JSONC suffix match; provider keyed cache retains vendor/model ID; shared cache filtered to connected providers when known."
+        ],
+        "validationEvidence": [
+          "16 discovery tests and 9 profile tests passed; 4.5MB regression included; real home scan0.868seconds before final connected filter; diffcheck passed."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": [
+          "No paid access probe."
+        ]
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "90e351eeae225100086dbe90",
+        "attempt": 1,
+        "status": "cancelled",
+        "changedPaths": [],
+        "acceptanceEvidence": [],
+        "validationEvidence": [
+          "Fresh reviewer spawn rejected twice by host agent thread limit; two old stopped agents remain pending_init. No reviewer executed."
+        ],
+        "findings": [],
+        "blockers": [
+          "host-agent-thread-limit"
+        ],
+        "remainingRisks": [
+          "Candidate191bc3f awaits independent review."
+        ]
+      }
+    ],
+    "handoff": null
+  },
+  "baseSha": "7b09bacccf1fedd95007e2e449a9f080f4f1a936",
+  "commits": {
+    "candidate": "191bc3fcbf81b8913108d390d67fcf4757c29771",
+    "fix": []
+  },
+  "validation": {
+    "riskToTest": [],
+    "commands": [
+      "python -B -m unittest discover -s tests -p test_discovery.py",
+      "python -B -m unittest discover -s tests -p test_profiles.py",
+      "git diff --check"
+    ],
+    "allowedOutputs": [],
+    "debt": []
+  },
+  "reviewRef": null,
+  "crossReviewRefs": [],
+  "reviewHistory": [],
+  "close": {
+    "mergeCommit": null,
+    "integrationEvidence": [],
+    "workspaceDisposition": null
+  }
+}

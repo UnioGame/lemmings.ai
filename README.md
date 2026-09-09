@@ -67,7 +67,7 @@ lemmings models inspect --inventory --provider <provider-id> --limit 20
 lemmings profiles list
 ```
 
-Default output is a compact provider/count summary; `models inspect --inventory` returns a bounded provider slice. `models scan --details` explicitly emits the full sanitized snapshot. The scan reads standard Codex/OpenCode configuration and documented catalogs; it sends no inference requests. Generated state is stored in `~/.lemmings/state.json`, with no credential values. Offline/partial scans preserve earlier catalogue evidence as stale and report limitations. Provider IDs must match exactly: `opencode_go` and `opencode-go` are different config keys. A mismatch produces a diagnostic, not an automatic personal-config rewrite.
+Default output is a compact provider/count summary; `models inspect --inventory` returns a bounded provider slice. `models scan --details` explicitly emits the full sanitized snapshot. The scan reads standard Codex/OpenCode configuration and documented catalogs; it sends no inference requests. Generated state is stored in `~/.lemmings/state.json`, with no credential values. Offline/partial scans preserve earlier catalogue evidence as stale and report limitations. When configured or authenticated providers are known, the shared OpenCode cache is restricted to those provider identities; models from unrelated cached vendors are not treated as connected subscriptions. Provider IDs must match exactly: `opencode_go` and `opencode-go` are different config keys. A mismatch produces a diagnostic, not an automatic personal-config rewrite.
 
 | Evidence | Meaning |
 | --- | --- |
@@ -85,7 +85,7 @@ lemmings models probe --route route.json
 
 Use a sanitized route object from the scan. This command can consume provider usage; ordinary scan, installation and proposals never call it.
 
-[OpenCode Go](https://opencode.ai/docs/go/) contains models with different protocols. A list of Codex Responses profiles is not the complete Go catalogue. Responses-compatible routes can use Codex CLI; Chat Completions or Messages routes need a compatible OpenCode provider. Missing models can therefore mean an alias/configuration mismatch, an incomplete local catalogue, or executor incompatibility. Inspect these separately before editing configuration.
+[OpenCode Go](https://opencode.ai/docs/go/) contains models with different protocols. A list of Codex Responses profiles is not the complete Go catalogue. Responses-compatible routes can use Codex CLI; Chat Completions or Messages routes need a compatible OpenCode provider. Missing models can therefore mean an alias/configuration mismatch, an incomplete local catalogue, or executor incompatibility. Inspect these separately before editing configuration. Codex discovery includes visible entries and reasoning variants from `models_cache.json`, named `[profiles.*]`, and standalone `*.config.toml` files. Profiles using the same model retain separate identities. Hidden cache entries and embedded model instructions are excluded. A public Go model ID gets a known protocol only from verified service metadata; newly added IDs remain unknown until their protocol is established.
 
 ## Use case: switch worker/reviewer profiles
 
@@ -111,6 +111,24 @@ Precedence, highest first:
 5. Current host defaults.
 
 Manual named files use a `profiles` map, with each name containing `roleRoutes` for worker/reviewer/explorer; an optional `activeProfile` selects the manual default. Existing project `modelRoutes` remains supported and retains priority. `profiles inspect` explains the effective sources so a manual pin that masks a generated choice is visible. Values installed by an older v4 release are also preserved: the installer cannot reliably distinguish them from your edits. To let a generated preset control a role, explicitly move or remove that role’s old manual assignment after inspecting its source.
+
+For example, merge this named profile into your personal file after replacing the example IDs with routes reported by your scan. `profileName` refers to an existing Codex profile; the Lemmings preset name is separate.
+
+```json
+{
+  "schemaVersion": 4,
+  "activeProfile": "mixed",
+  "profiles": {
+    "mixed": {
+      "roleRoutes": {
+        "worker": [{"hostId": "opencode", "providerId": "YOUR_PROVIDER", "modelId": "YOUR_WORKER_MODEL", "executor": "opencode", "protocol": "chat-completions"}],
+        "reviewer": [{"hostId": "codex", "providerId": "YOUR_PROVIDER", "modelId": "YOUR_REVIEW_MODEL", "executor": "codex", "protocol": "responses", "profileName": "YOUR_EXISTING_PROFILE"}],
+        "explorer": []
+      }
+    }
+  }
+}
+```
 
 A new Task can select a preset when its first invocation is persisted:
 

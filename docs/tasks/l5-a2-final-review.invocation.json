@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-A2",
+  "taskId": "L5-A2",
+  "taskRevision": 16,
+  "invocationId": "06790d2b4389bbee547a5975",
+  "attempt": 3,
+  "role": "reviewer",
+  "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
+  "contextDigest": "70045a5760e3d18e3545c66581d005887ec0e787a377fded181e2e48392c9566",
+  "objective": "Review immutable A2 repair only against remaining pool-command-evidence-not-bound P1: successful release stores exact declared commands and integration evidence; direct removal and eviction reject missing/changed stored or canonical bindings even with unchanged task identity/revision. Reuse reported focused suite; inspect regressions and return complete AgentResult v4 verdict, material findings only. At most 8 tool calls; no edits.",
+  "acceptanceCriteria": [
+    "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
+  ],
+  "ownedPaths": [],
+  "forbiddenPaths": [
+    "skills/lemmings/scripts/lemmings/cli.py",
+    "skills/lemmings/scripts/lemmings/contracts.py",
+    "docs/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Unchanged public contract",
+      "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+    },
+    {
+      "ref": "docs/context/l5-workspace-replan.md",
+      "purpose": "Bounded replacement plan",
+      "contentHash": "1d7f900bce6e9eb1bac1dcfafe6bf491ab244a1ef85d8d49ca8dd52130e2ff77"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+      "purpose": "Current safety implementation",
+      "contentHash": "fa534b88d74f91e1b21d60b891c75700783ce85dddcb8dccccadb5e12b31f3f2"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+    "git diff --check"
+  ],
+  "candidateHead": "3d7c5ba17de3c7620f3e141d3030b34312da8c16",
+  "limits": {
+    "maxTurns": 8,
+    "maxToolCalls": 16,
+    "deadlineSeconds": 1200
+  },
+  "outputSchemaVersion": 4
+}

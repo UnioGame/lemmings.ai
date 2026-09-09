@@ -434,7 +434,8 @@ class WorkspacePoolV4Tests(unittest.TestCase):
             self.assertEqual("active", load_registry(repo)["entries"][0]["state"])
 
             oversized = self.add_workspace(repo, root, "oversized")
-            register_workspace(repo, workspace_id="oversized", path=oversized, backend="code-worktree", managed_by="lemmings", lifetime="task", expected_revision=3, task_id="T2", estimated_gib=11)
+            with patch.object(workspace_module, "_actual_estimate_gib", return_value=11):
+                register_workspace(repo, workspace_id="oversized", path=oversized, backend="code-worktree", managed_by="lemmings", lifetime="task", expected_revision=3, task_id="T2", estimated_gib=11, approval="approved")
             claim_workspace(repo, workspace_id="oversized", task_id="T2", base_sha=head, integration_head=head, branch="oversized", expected_revision=4)
             removed = self.release(repo, workspace_id="oversized", expected_revision=5, task_state="Integrated", integration_evidence=True)
             self.assertEqual("removed", removed["action"])

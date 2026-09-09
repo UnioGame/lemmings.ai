@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 4,
+  "revision": 0,
+  "reviewId": "L5-B2-1",
+  "subject": {
+    "kind": "candidate",
+    "taskId": "L5-B2",
+    "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
+    "headSha": "4df85ffeeffa835aa8921d1520aa94483625a9f6"
+  },
+  "status": "ChangesRequested",
+  "hostId": "codex",
+  "reviewerModel": "openai/gpt-5.6-sol:high",
+  "cycle": 1,
+  "findings": [
+    {
+      "severity": "P1",
+      "code": "go-protocol-still-name-scoped",
+      "requiredChange": "Go exact-ID table applies only to verified documented endpoint/catalog provenance, never provider alias alone; test same-named custom endpoint."
+    },
+    {
+      "severity": "P1",
+      "code": "catalog-client-requirements-missing",
+      "requiredChange": "Metadata GET needs own client User-Agent, stable x-opencode-session, provenance-bound configured authentication when available; assert headers in real id-only response fixture and sanitized unavailable path."
+    },
+    {
+      "severity": "P1",
+      "code": "custom-endpoint-credential-mixing",
+      "requiredChange": "Resolve endpoint and credential as one provenance-bound bundle. A repo custom endpoint without an explicitly bound credential must never receive same-provider personal/home secret. Test non-disclosure."
+    },
+    {
+      "severity": "P2",
+      "code": "digest-stability-regression-absent",
+      "requiredChange": "Add repeated unchanged production-shaped scan/proposal test with identical inventoryDigest."
+    }
+  ],
+  "validation": [
+    "Exact diff check passed; reported8+8tests reused."
+  ]
+}
