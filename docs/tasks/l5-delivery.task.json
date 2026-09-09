@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 13,
+  "revision": 14,
   "taskId": "L5-DELIVERY",
   "goal": "Deliver zero-config Lemmings with provider discovery, named presets, execution adapters, safe workspaces and seven technology rule packs.",
   "acceptance": [
@@ -31,7 +31,7 @@
   "parallelReason": "independent_paths",
   "reviewRequired": true,
   "planReviewRequired": true,
-  "planReviewRef": "docs/tasks/reviews/l5-plan-refreshed.json",
+  "planReviewRef": "docs/tasks/reviews/l5-plan-final.json",
   "reviewPolicy": null,
   "specialization": null,
   "state": "Active",
@@ -50,7 +50,8 @@
       "pyproject.toml",
       "package.json",
       "Documentation~/**",
-      "docs/**"
+      "docs/**",
+      ".gitattributes"
     ],
     "shared": [],
     "forbidden": [
@@ -80,11 +81,11 @@
     }
   ],
   "models": {
-    "hostId": "codex",
+    "hostId": "native",
     "requested": null,
-    "assigned": "openai/gpt-6-astra:high",
-    "actual": "openai/gpt-6-astra:high",
-    "fallbackReason": null
+    "assigned": "current-host/default",
+    "actual": "current-host/default",
+    "fallbackReason": "User authorized current manager sequential execution and self-review."
   },
   "routingRecovery": null,
   "workspace": {
@@ -128,7 +129,11 @@
     ],
     "dependencyHandoffs": [],
     "handoff": null,
-    "validationEvidence": [],
+    "validationEvidence": [
+      "162 full-suite tests passed before final bearer-auth metadata correction; focused16 discovery tests passed after correction.",
+      "Doctor, skill validation,63 JSON files/local Markdown links and canonical Strict check passed.",
+      "Both waves have exact passing integration evidence; scenario verification is recorded in docs/context/l5-forward-results.md."
+    ],
     "attempts": [],
     "invocations": [
       {

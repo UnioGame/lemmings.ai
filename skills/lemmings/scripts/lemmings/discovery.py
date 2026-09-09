@@ -332,7 +332,7 @@ def _auth_present(value: Any) -> set[str]:
     return found
 
 def _provider_auth(value: Mapping[str, Any]) -> bool:
-    return bool(_auth_present(value)) or any(key in value and value[key] not in (None, "", [], {}) for key in ("apiKey", "api_key", "token", "key", "auth", "credentials", "oauth"))
+    return bool(_section_secret(value)) or bool(_auth_present(value)) or bool(value.get("oauth"))
 
 def _models(value: Any) -> list[tuple[str, Mapping[str, Any] | None]]:
     if isinstance(value, str):

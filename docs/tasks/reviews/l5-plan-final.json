@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 4,
+  "revision": 0,
+  "reviewId": "L5-PLAN-FINAL",
+  "subject": {
+    "kind": "plan",
+    "taskId": "L5-DELIVERY",
+    "planDigest": "69da01f229c0a7b2b12c8a52c002da5dae3d7f9fa59ed68a4542cbb41fb1b2bd"
+  },
+  "status": "Accepted",
+  "hostId": "native",
+  "reviewerModel": "current-host/default",
+  "cycle": 1,
+  "findings": [],
+  "validation": [
+    "User explicitly authorized sequential manager delivery/self-review after host slot failure.",
+    "Final ownership includes LF attributes required for stable context hashes; original acceptance and safety constraints preserved."
+  ]
+}

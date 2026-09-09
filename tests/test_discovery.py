@@ -325,6 +325,7 @@ wire_api = "responses"
         from lemmings.discovery import _trusted_bundle
         for route in snapshot["routes"]:
             if route.get("profileName"):
+                self.assertTrue(route["authConfigured"])
                 endpoint, secret = _trusted_bundle(self.repo, self.home, route)
                 self.assertEqual(f'https://{route["profileName"]}.example/v1', endpoint)
                 self.assertEqual("PROFILE_SECRET", secret)
