@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 16,
+  "revision": 19,
   "taskId": "L5-DELIVERY",
   "goal": "Deliver zero-config Lemmings with provider discovery, named presets, execution adapters, safe workspaces and seven technology rule packs.",
   "acceptance": [
@@ -34,8 +34,8 @@
   "planReviewRef": "docs/tasks/reviews/l5-plan-final.schema4.json",
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Accepted",
-  "previousState": "Candidate",
+  "state": "Repair",
+  "previousState": "Accepted",
   "role": "manager",
   "risks": [],
   "telemetryCohort": null,
@@ -132,7 +132,8 @@
     "validationEvidence": [
       "162 full-suite tests passed before final bearer-auth metadata correction; focused16 discovery tests passed after correction.",
       "Doctor, skill validation,63 JSON files/local Markdown links and canonical Strict check passed.",
-      "Both waves have exact passing integration evidence; scenario verification is recorded in docs/context/l5-forward-results.md."
+      "Both waves have exact passing integration evidence; scenario verification is recorded in docs/context/l5-forward-results.md.",
+      "Exact4db7644 integration passed162 tests; final review found nonlinear Flutter negative-case regex (22 blank lines took1.258s), addressed in one bounded repair."
     ],
     "attempts": [],
     "invocations": [
@@ -565,8 +566,33 @@
     "docs/tasks/reviews/l5-final.json"
   ],
   "close": {
-    "mergeCommit": null,
-    "integrationEvidence": [],
+    "mergeCommit": "4db7644532d0a3205ae2d0f05ea4b33c456e1b8e",
+    "integrationEvidence": [
+      {
+        "headSha": "4db7644532d0a3205ae2d0f05ea4b33c456e1b8e",
+        "command": "python -B -m unittest discover -s tests",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": ".........................................................................................................................................Switched to a new branch 'codex/task'\n...Switched to a new branch 'codex/task'\n....Preparing worktree (new branch 'codex/registered')\nHEAD is now at 790eb64 base\n........Preparing worktree (new branch 'dirty')\nHEAD is now at b488523 base\n...Preparing worktree (new branch 'codex/idle')\nHEAD is now at 24c90af base\n.......\r\n----------------------------------------------------------------------\r\nRan 162 tests in 110.209s\r\n\r\nOK\r\n{\r\n  \"ok\": true,\r\n  \"errors\": 0,\r\n  \"warnings\": 0,\r\n  \"findings\": [],\r\n  \"data\": {\r\n    \"python\": \"3.14.3\",\r\n    \"runtimeVersion\": \"4.1.1\",\r\n    \"runtimePath\": \"D:\\\\Dev\\\\kontora\\\\merge\\\\mtt.client\\\\.lemmings-worktrees\\\\l5-manager\\\\skills\\\\lemmings\\\\scripts\\\\lemmings\"\r\n  }\r\n}\r\n",
+          "totalBytes": 842,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/4db7644532d0a3205ae2d0f05ea4b33c456e1b8e-16792c22d70f.log"
+        }
+      },
+      {
+        "headSha": "4db7644532d0a3205ae2d0f05ea4b33c456e1b8e",
+        "command": "git diff --check",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": "warning: in the working copy of 'docs/tasks/l5-delivery.task.json', CRLF will be replaced by LF the next time Git touches it\n",
+          "totalBytes": 125,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/4db7644532d0a3205ae2d0f05ea4b33c456e1b8e-466c2f308b48.log"
+        }
+      }
+    ],
     "workspaceDisposition": null
   }
 }

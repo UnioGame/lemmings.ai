@@ -46,6 +46,30 @@ def _sources(paths: list[Path]) -> dict[str, str]:
     return result
 
 
+def _flutter_dependency(text: str) -> bool:
+    in_dependencies = False
+    flutter_indent = None
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        value = line.strip()
+        if indent == 0:
+            in_dependencies = value == "dependencies:"
+            flutter_indent = None
+            continue
+        if not in_dependencies:
+            continue
+        if flutter_indent is not None and indent > flutter_indent:
+            key, _, sdk = value.partition(":")
+            if key.strip("\"'") == "sdk" and sdk.strip().strip("\"'") == "flutter":
+                return True
+        else:
+            flutter_indent = indent if value.strip("\"'") == "flutter:" else None
+    return False
+
+
 def _detect(directory: Path, scoped_files: list[Path]) -> tuple[bool, dict]:
     technologies: dict[str, str] = {}
     evidence: list[str] = []
@@ -66,7 +90,7 @@ def _detect(directory: Path, scoped_files: list[Path]) -> tuple[bool, dict]:
     if pubspec:
         marker = True
         # Match a direct SDK dependency, not a Flutter mention in descriptions or comments.
-        if re.search(r"(?m)^dependencies:\s*(?:#.*)?\n(?:(?:[ \t]+.*|\s*)\n)*?[ \t]+flutter:\s*\n[ \t]+sdk:\s*flutter\s*(?:#.*)?$", pubspec):
+        if _flutter_dependency(pubspec):
             technologies["flutter"] = "pubspec SDK constraint"; evidence.append("pubspec.yaml")
     package = _json(directory / "package.json")
     if (directory / "package.json").is_file():

@@ -62,7 +62,7 @@ class RuleTests(unittest.TestCase):
     def test_generic_and_upm_compatibility_are_not_unity_projects(self):
         self.put("package.json", '{"name":"a-package", "unity":"2022.3"}')
         self.assertEqual([], resolve_rules(self.repo)["ruleRefs"])
-        self.put("pubspec.yaml", "description: Flutter-like example\ndependencies:\n  dart_package: any\n")
+        self.put("pubspec.yaml", "description: Flutter-like example\ndependencies:\n" + "\n" * 40 + "  dart_package: any\n")
         self.assertEqual([], resolve_rules(self.repo)["ruleRefs"])
     def test_default_root_search_finds_nested_project_but_stays_bounded(self):
         self.put("GameClient/ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 2022.3.0f1"); self.put("GameClient/Assets/a.cs")
