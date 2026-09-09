@@ -115,11 +115,16 @@ wire_api = "responses"
             "model": "opencode_go/local",
             "provider": {"opencode_go": {"protocol": "chat-completions"}},
         }), encoding="utf-8")
+        cache = self.home / ".cache" / "opencode"
+        cache.mkdir(parents=True)
+        (cache / "models.json").write_text(json.dumps({"opencode-go": {"models": {
+            "glm-5.3": {}, "new-go-model": {},
+        }}}), encoding="utf-8")
 
         class Response:
             status = 200
             def read(self, size=-1):
-                return json.dumps({"data": [{"id": "openai/gpt-go", "protocol": "chat-completions"}]}).encode()
+                return json.dumps({"data": [{"id": "gpt-5.6-luna", "object": "model", "owned_by": "opencode"}]}).encode()
             def close(self):
                 pass
 
@@ -128,7 +133,11 @@ wire_api = "responses"
         request = opened.call_args.args[0]
         self.assertEqual("https://opencode.ai/zen/go/v1/models", request.full_url)
         self.assertEqual("GET", request.method)
-        self.assertTrue(any(item["hostId"] == "opencode-go" and item["modelId"] == "gpt-go" for item in snapshot["routes"]))
+        routes = {item["modelId"]: item for item in snapshot["routes"] if item["hostId"] == "opencode-go"}
+        self.assertEqual("responses", routes["gpt-5.6-luna"]["protocol"])
+        self.assertTrue(routes["gpt-5.6-luna"]["compatible"])
+        self.assertEqual("chat-completions", routes["glm-5.3"]["protocol"])
+        self.assertEqual("unknown", routes["new-go-model"]["protocol"])
 
         class UnexpectedNetwork:
             def __call__(self, *args, **kwargs):
@@ -167,15 +176,12 @@ wire_api = "responses"
         self.assertNotIn("network body", json.dumps(snapshot))
 
     def test_targeted_probe_requires_auth_and_confirms_exact_model(self) -> None:
-        unsupported = probe_route({
-            "hostId": "opencode",
-            "providerId": "openai",
-            "modelId": "gpt",
-            "protocol": "responses",
-            "endpoint": "http://127.0.0.1:9/v1/responses",
-        }, home=self.home)
-        self.assertFalse(unsupported["probed"])
-        self.assertEqual("unsupported", unsupported["status"])
+        config = self.home / ".config" / "opencode"
+        config.mkdir(parents=True)
+        (config / "opencode.json").write_text(json.dumps({"model": "openai/gpt", "provider": {
+            "openai": {"api": "responses", "apiKey": "SECRET_PROBE", "baseUrl": "http://127.0.0.1:9/v1"},
+        }}), encoding="utf-8")
+        route = next(item for item in scan_providers(self.repo, offline=True, home=self.home)["routes"] if item["modelId"] == "gpt")
 
         class Response:
             status = 200
@@ -184,22 +190,55 @@ wire_api = "responses"
             def close(self):
                 pass
 
-        route = {
-            "hostId": "opencode",
-            "providerId": "openai",
-            "modelId": "gpt",
-            "protocol": "responses",
-            "endpoint": "http://127.0.0.1:9/v1/responses",
-            "apiKey": "SECRET_PROBE",
-        }
         with patch("lemmings.discovery.urllib.request.urlopen", return_value=Response()) as opened:
-            result = probe_route(route, home=self.home)
+            result = probe_route(route, repo=self.repo, home=self.home)
         request = opened.call_args.args[0]
         self.assertEqual("POST", request.method)
         self.assertEqual("http://127.0.0.1:9/v1/responses", request.full_url)
         self.assertIn(b'"model": "gpt"', request.data)
         self.assertNotIn("SECRET_PROBE", json.dumps(result))
         self.assertTrue(result["probed"])
+        tampered = {**route, "endpoint": "http://foreign.invalid/v1"}
+        self.assertEqual("unsupported", probe_route(tampered, repo=self.repo, home=self.home)["status"])
+
+    def test_probe_uses_selected_repo_and_each_protocol(self) -> None:
+        other_repo = self.root / "other-repo"
+        (other_repo / ".agents").mkdir(parents=True)
+
+        def write_config(repo, port, models):
+            (repo / "opencode.json").write_text(json.dumps({"provider": {"openai": {
+                "models": {model: {"api": protocol, "apiKey": "SECRET", "baseUrl": f"http://127.0.0.1:{port}/v1"}
+                           for model, protocol in models.items()},
+            }}}), encoding="utf-8")
+
+        write_config(self.repo, 9011, {"responses": "responses", "chat": "chat-completions", "messages": "messages"})
+        write_config(other_repo, 9012, {"responses": "responses"})
+
+        class Response:
+            status = 200
+            def __init__(self, model):
+                self.model = model
+            def read(self, size=-1):
+                return json.dumps({"model": self.model}).encode()
+            def close(self):
+                pass
+
+        def answer(request, timeout):
+            return Response(json.loads(request.data.decode())["model"])
+
+        routes = {item["modelId"]: item for item in scan_providers(self.repo, offline=True, home=self.home)["routes"]}
+        other = next(item for item in scan_providers(other_repo, offline=True, home=self.home)["routes"] if item["modelId"] == "responses")
+        with patch("lemmings.discovery.urllib.request.urlopen", side_effect=answer) as opened:
+            for model, route in routes.items():
+                self.assertTrue(probe_route(route, repo=self.repo, home=self.home)["probed"])
+                request = opened.call_args.args[0]
+                self.assertIn(model.encode(), request.data)
+                suffix = {"responses": "/responses", "chat-completions": "/chat/completions", "messages": "/messages"}[route["protocol"]]
+                self.assertTrue(request.full_url.endswith(suffix))
+            self.assertTrue(probe_route(other, repo=other_repo, home=self.home)["probed"])
+            self.assertIn(":9012/", opened.call_args.args[0].full_url)
+        foreign = {**routes["responses"], "protocol": "chat-completions"}
+        self.assertEqual("unsupported", probe_route(foreign, repo=self.repo, home=self.home)["status"])
 
 
 if __name__ == "__main__":

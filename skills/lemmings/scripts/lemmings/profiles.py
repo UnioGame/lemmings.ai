@@ -126,6 +126,34 @@ def _role_routes(value: Any, *, host_hint: str | None = None) -> dict[str, list[
     return output
 
 
+def _raw_role_items(value: Any, *, host_hint: str | None = None) -> dict[str, list[tuple[Mapping[str, Any], str | None]]]:
+    if not isinstance(value, Mapping):
+        raise ValueError("profile requires roleRoutes or role arrays")
+    if isinstance(value.get("roleRoutes"), Mapping):
+        value = value["roleRoutes"]
+    output: dict[str, list[tuple[Mapping[str, Any], str | None]]] = {role: [] for role in ROLES}
+    if any(role in value for role in ROLES):
+        for role in ROLES:
+            choices = value.get(role, [])
+            if choices is None:
+                choices = []
+            if not isinstance(choices, list) or not all(isinstance(item, Mapping) for item in choices):
+                raise ValueError(f"profile role {role} must be an array")
+            output[role] = [(item, host_hint) for item in choices]
+        return output
+    for host, roles in value.items():
+        if not isinstance(roles, Mapping):
+            continue
+        for role in ROLES:
+            choices = roles.get(role, [])
+            if choices is None:
+                choices = []
+            if not isinstance(choices, list) or not all(isinstance(item, Mapping) for item in choices):
+                raise ValueError(f"profile host {host} role {role} must be an array")
+            output[role].extend((item, str(host)) for item in choices)
+    return output
+
+
 def _has_routes(routes: Mapping[str, Any] | None) -> bool:
     return bool(routes and any(isinstance(routes.get(role), list) and routes.get(role) for role in ROLES))
 
@@ -161,6 +189,29 @@ def _validate_bound_routes(role_routes: Mapping[str, list[Mapping[str, Any]]], i
                 raise ValueError(f"profile route is absent from bound inventory: {role}")
             if not any(item.get("compatible") is True for item in matches):
                 raise ValueError(f"profile route is incompatible with bound inventory: {role}")
+
+
+def _canonical_bound_routes(value: Any, inventory: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    bound = [item for item in inventory.get("routes", []) if isinstance(item, Mapping)]
+    output: dict[str, list[dict[str, Any]]] = {role: [] for role in ROLES}
+    protected = ("executor", "protocol", "profileName", "compatible")
+    for role, items in _raw_role_items(value).items():
+        for raw, host_hint in items:
+            requested = _route_input(raw, host_hint)
+            matches = [item for item in bound if _route_identity(requested) == _route_identity(item)]
+            if not matches:
+                raise ValueError(f"profile route is absent from bound inventory: {role}")
+            explicit = [field for field in protected if field in raw]
+            if explicit:
+                exact = [item for item in matches if all(requested.get(field) == item.get(field) for field in explicit)]
+                if not exact:
+                    raise ValueError(f"profile route execution fields differ from bound inventory: {role}")
+                matches = exact
+            compatible = [item for item in matches if item.get("compatible") is True]
+            if not compatible:
+                raise ValueError(f"profile route is incompatible with bound inventory: {role}")
+            output[role].append(normalize_route(compatible[0]))
+    return output
 
 
 def _project_manual_routes(project: Mapping[str, Any], selected_name: str | None = None) -> tuple[dict[str, list[dict[str, Any]]], str | None]:
@@ -243,10 +294,9 @@ def build_profile_proposal(
     profile_name = name.strip() if isinstance(name, str) else ""
     if not profile_name:
         raise ValueError("profile name must be non-empty")
-    role_routes = _role_routes(routes)
     project, personal, manual_digest = _manual_source(repo_path, home_path)
     inventory = _inventory_for(repo_path, home_path)
-    _validate_bound_routes(role_routes, inventory)
+    role_routes = _canonical_bound_routes(routes, inventory)
     body = {
         "schemaVersion": SCHEMA_VERSION,
         "name": profile_name,
@@ -283,8 +333,7 @@ def apply_profile_proposal(
         raise ValueError("profile inventory changed since proposal")
     if proposal.get("manualDigest") != current_manual_digest:
         raise ValueError("manual profile inputs changed since proposal")
-    role_routes = _role_routes(proposal.get("roleRoutes") or {})
-    _validate_bound_routes(role_routes, current_inventory)
+    role_routes = _canonical_bound_routes(proposal.get("roleRoutes") or {}, current_inventory)
     state_path = _state_path(home_path)
     state = _load(state_path)
     profiles = dict(_state_profiles(state))
@@ -333,7 +382,6 @@ def use_profile(
     return {"ok": True, "schemaVersion": SCHEMA_VERSION, "name": profile_name, "selection": profile_name}
 
 
-@_transactional
 def inspect_profiles(repo: Path | str, *, home: Path | str | None = None) -> dict[str, Any]:
     repo_path, home_path = _repo(repo), _home(home)
     project, personal, _ = _manual_source(repo_path, home_path)
@@ -361,7 +409,6 @@ def inspect_profiles(repo: Path | str, *, home: Path | str | None = None) -> dic
     }
 
 
-@_transactional
 def resolve_profile(
     repo: Path | str,
     name: str | None = None,

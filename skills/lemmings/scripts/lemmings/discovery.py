@@ -21,6 +21,30 @@ ROUTE_KEYS = ("hostId", "providerId", "modelId", "variantId", "executor", "profi
 SAFE_SOURCES = {"codex-config", "codex-profile", "codex-auth", "opencode-config", "opencode-auth", "host-catalog", "state-inventory", "manual", "project-manual", "personal-manual", "generated", "unknown"}
 SECRET_KEYS = {"access", "access_token", "api_key", "apikey", "auth", "authorization", "client_secret", "credential", "credentials", "key", "password", "private_key", "refresh", "refresh_token", "secret", "token"}
 
+# https://opencode.ai/docs/go/ documents these endpoint protocols by exact
+# model ID. The public /zen/go/v1/models response intentionally carries only
+# inventory metadata, so a model-name family or provider-level setting is not
+# evidence of a protocol. Verified 2026-09-10.
+GO_CATALOG_URL = "https://opencode.ai/zen/go/v1/models"
+_GO_PROVIDER_ALIASES = {"opencode", "opencode-go", "go"}
+_GO_HOST_ALIASES = {"opencode", "opencode-go", "go", "open-code"}
+_GO_CATALOG_HOSTS = {"opencode-go", "go"}
+_GO_PROTOCOLS = {
+    "grok-4.6": "responses", "gpt-5.6-luna": "responses",
+    "muse-spark-1.3-contributor": "responses", "muse-spark-1.2-contributor": "responses",
+    "glm-5.3-flash": "chat-completions", "glm-5.3": "chat-completions",
+    "glm-5.2": "chat-completions", "glm-5.1": "chat-completions",
+    "kimi-k3": "chat-completions", "kimi-k2.7-code": "chat-completions",
+    "kimi-k2.6": "chat-completions", "longcat-2.0": "chat-completions",
+    "deepseek-v4-pro": "chat-completions", "deepseek-v4-flash": "chat-completions",
+    "deepseek-v4-flash-vision-exp": "chat-completions", "mimo-v2.5": "chat-completions",
+    "mimo-v2.5-pro": "chat-completions", "hy4-preview": "chat-completions",
+    "hy3": "chat-completions", "omen-alpha": "chat-completions",
+    "minimax-m3": "messages", "minimax-m2.7": "messages", "minimax-m2.5": "messages",
+    "qwen3.8-max": "messages", "qwen3.8-flash": "messages", "qwen3.7-max": "messages",
+    "qwen3.7-plus": "messages", "qwen3.6-plus": "messages",
+}
+
 _STATE_LOCKS: dict[str, tuple[int, int]] = {}
 
 
@@ -179,12 +203,17 @@ def _unique(paths: Iterable[Path]) -> list[Path]:
             result.append(path)
     return result
 
-def _paths(repo: Path, home: Path) -> dict[str, list[Path]]:
+def _paths(repo: Path | None, home: Path) -> dict[str, list[Path]]:
+    repo_codex = [] if repo is None else [repo / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc")]
+    repo_opencode = [] if repo is None else [repo / name for name in ("opencode.json", "opencode.jsonc")] + [repo / ".opencode" / name for name in ("opencode.json", "opencode.jsonc")]
+    repo_codex_auth = [] if repo is None else [repo / ".codex" / "auth.json"]
+    repo_opencode_auth = [] if repo is None else [repo / ".opencode" / "auth.json"]
     return {
-        "codex": _unique([home / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc", "profiles.toml", "profiles.json", "profiles.jsonc")] + [repo / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc")]),
-        "opencode": _unique([repo / name for name in ("opencode.json", "opencode.jsonc")] + [repo / ".opencode" / name for name in ("opencode.json", "opencode.jsonc")] + [home / ".config" / "opencode" / name for name in ("opencode.json", "opencode.jsonc")] + [home / ".opencode" / name for name in ("opencode.json", "opencode.jsonc", "config.json", "config.jsonc")]),
-        "codex-auth": _unique([home / ".codex" / "auth.json", repo / ".codex" / "auth.json"]),
-        "opencode-auth": _unique([repo / ".opencode" / "auth.json", home / ".config" / "opencode" / "auth.json", home / ".local" / "share" / "opencode" / "auth.json", home / ".opencode" / "auth.json"]),
+        "codex": _unique(repo_codex + [home / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc", "profiles.toml", "profiles.json", "profiles.jsonc")]),
+        "opencode": _unique(repo_opencode + [home / ".config" / "opencode" / name for name in ("opencode.json", "opencode.jsonc")] + [home / ".opencode" / name for name in ("opencode.json", "opencode.jsonc", "config.json", "config.jsonc")]),
+        "codex-auth": _unique(repo_codex_auth + [home / ".codex" / "auth.json"]),
+        "opencode-auth": _unique(repo_opencode_auth + [home / ".config" / "opencode" / "auth.json", home / ".local" / "share" / "opencode" / "auth.json", home / ".opencode" / "auth.json"]),
+        "opencode-cache": _unique([home / ".cache" / "opencode" / "models.json"]),
     }
 
 def _protocol(value: Any) -> str:
@@ -196,6 +225,23 @@ def _protocol(value: Any) -> str:
     if value in {"message", "messages", "anthropic-messages"}:
         return "messages"
     return "unknown"
+
+
+def _route_name(value: Any) -> str:
+    return (_text(value) or "").lower().replace("_", "-")
+
+
+def _is_go_identity(host: Any, provider: Any) -> bool:
+    host_name, provider_name = _route_name(host), _route_name(provider)
+    return host_name in _GO_CATALOG_HOSTS or (
+        host_name in _GO_HOST_ALIASES and provider_name in _GO_PROVIDER_ALIASES
+    )
+
+
+def _route_protocol(host: Any, provider: Any, model: Any, value: Any) -> str:
+    if _is_go_identity(host, provider):
+        return _GO_PROTOCOLS.get(_text(model) or "", "unknown")
+    return _protocol(value)
 
 def _split_model(value: Any, provider: Any = None) -> tuple[str | None, str | None]:
     model, provider = _identifier(value), _identifier(provider)
@@ -323,7 +369,7 @@ def _codex(data: Mapping[str, Any], source: str, routes: dict[tuple[str, str, st
                 diagnostics.append(_diag("route-missing-provider", "configured model has no explicit provider", source))
             return
         metadata = metadata or {}
-        _add(routes, {"hostId": "codex", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": metadata.get("wire_api", metadata.get("wireApi", metadata.get("protocol", protocol))), "executor": "codex", "configured": True, "source": source, "quotaGroup": metadata.get("quotaGroup")})
+        _add(routes, {"hostId": "codex", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": metadata.get("wire_api", metadata.get("wireApi", metadata.get("protocol", protocol))), "executor": "codex", "configured": True, "authConfigured": _provider_auth(metadata), "source": source, "quotaGroup": metadata.get("quotaGroup")})
     add(data.get("model") or data.get("modelId"), default_provider)
     for provider, config in providers.items():
         if not isinstance(config, Mapping):
@@ -344,7 +390,7 @@ def _opencode(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str], d
         if not provider_id or not model_id:
             return
         metadata = metadata or {}
-        _add(routes, {"hostId": "opencode", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": metadata.get("protocol", metadata.get("api", metadata.get("wireApi", "unknown"))), "executor": "opencode", "configured": True, "authConfigured": _provider_auth(metadata), "source": "opencode-config", "quotaGroup": metadata.get("quotaGroup")})
+        _add(routes, {"hostId": "opencode", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": _route_protocol("opencode", provider_id, model_id, metadata.get("protocol", metadata.get("api", metadata.get("wireApi", "unknown")))), "executor": "opencode", "configured": True, "authConfigured": _provider_auth(metadata), "source": "opencode-config", "quotaGroup": metadata.get("quotaGroup")})
     top_provider, top_model = _split_model(data.get("model") or data.get("modelId"))
     if top_provider and top_model:
         config = providers.get(top_provider)
@@ -367,27 +413,45 @@ def _opencode(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str], d
             if isinstance(agent, Mapping) and agent.get("model"):
                 add(None, agent["model"], agent, str(name))
 
+def _catalog_records(host: str | None, value: Any) -> list[tuple[str | None, Mapping[str, Any]]]:
+    if isinstance(value, list):
+        return [(host or _text(item.get("hostId")), item) for item in value if isinstance(item, Mapping)]
+    if not isinstance(value, Mapping):
+        return []
+    result: list[tuple[str | None, Mapping[str, Any]]] = []
+    for model_id, metadata in value.items():
+        identifier = _identifier(model_id)
+        if identifier:
+            item = dict(metadata) if isinstance(metadata, Mapping) else {}
+            item["modelId"] = identifier
+            result.append((host or _text(item.get("hostId")), item))
+    return result
+
+
 def _catalog_items(value: Any) -> list[tuple[str | None, Mapping[str, Any]]]:
     if isinstance(value, list):
         return [(_text(item.get("hostId")), item) for item in value if isinstance(item, Mapping)]
     if not isinstance(value, Mapping):
         return []
-    if isinstance(value.get("data"), list) or isinstance(value.get("models"), list):
+    providers = value.get("provider") or value.get("providers")
+    if isinstance(providers, Mapping) and not any(key in value for key in ("data", "models", "id", "model", "modelId")):
+        value = providers
+    if "data" in value or "models" in value:
         host = _text(value.get("hostId")) or _text(value.get("host"))
-        return [(host or _text(item.get("hostId")), item) for item in (value.get("data") or value.get("models") or []) if isinstance(item, Mapping)]
-    result = []
+        return _catalog_records(host, value.get("data") if "data" in value else value.get("models"))
+    result: list[tuple[str | None, Mapping[str, Any]]] = []
     for host, item in value.items():
-        if host in {"schemaVersion", "scannedAt", "providers", "routes", "diagnostics", "status"}:
+        if host in {"schemaVersion", "scannedAt", "providers", "routes", "diagnostics", "status", "provider"}:
             continue
         if isinstance(item, Mapping):
-            nested = item.get("models") or item.get("data")
-            if isinstance(nested, list):
-                result.extend((_text(model.get("hostId")) or str(host), model) for model in nested if isinstance(model, Mapping))
+            if "models" in item or "data" in item:
+                result.extend(_catalog_records(str(host), item.get("models") if "models" in item else item.get("data")))
             elif item.get("id") or item.get("model") or item.get("modelId"):
                 result.append((str(host), item))
         elif isinstance(item, list):
             result.extend((str(host), model) for model in item if isinstance(model, Mapping))
     return result
+
 
 def _catalog(value: Any, diagnostics: list[dict[str, str]]) -> tuple[list[dict[str, Any]], set[str]]:
     result = []
@@ -400,13 +464,15 @@ def _catalog(value: Any, diagnostics: list[dict[str, str]]) -> tuple[list[dict[s
         model = raw
         if raw and not provider and "/" in raw:
             provider, model = raw.split("/", 1)
+        if not provider and _route_name(host) in _GO_CATALOG_HOSTS:
+            provider = "opencode-go"
         if not provider or not model:
             continue
-        protocol = _protocol(item.get("protocol", item.get("wireApi", item.get("api"))))
-        executor = _executor(host, protocol, item.get("executor"))
+        protocol = _route_protocol(host, provider, model, item.get("protocol", item.get("wireApi", item.get("api"))))
+        executor = "opencode" if _is_go_identity(host, provider) else _executor(host, protocol, item.get("executor"))
         variants = item.get("variants") if isinstance(item.get("variants"), list) else [item.get("variantId")]
         for variant in variants or [None]:
-            route = {"hostId": host, "providerId": provider, "modelId": model, "protocol": protocol, "executor": executor, "configured": False, "catalogued": True, "compatible": _compatible(executor, protocol), "authConfigured": bool(item.get("authConfigured", False)), "probed": False, "source": "host-catalog"}
+            route = {"hostId": host, "providerId": provider, "modelId": model, "protocol": protocol, "executor": executor, "configured": False, "catalogued": True, "compatible": _compatible(executor, protocol), "authConfigured": False, "probed": False, "source": "host-catalog"}
             if _identifier(variant):
                 route["variantId"] = _identifier(variant)
             if _identifier(item.get("quotaGroup")):
@@ -444,15 +510,9 @@ def _alias(routes: Iterable[Mapping[str, Any]], known: Iterable[str]) -> list[di
                 result.append(_diag("provider-alias-mismatch", f"provider alias {value} differs from {dashed}; edit the source explicitly"))
     return result
 
-GO_CATALOG_URL = "https://opencode.ai/zen/go/v1/models"
-_GO_PROVIDER_ALIASES = {"opencode", "opencode-go", "opencode_go", "go"}
-
-
 def _go_configured(routes: Iterable[Mapping[str, Any]]) -> bool:
     for route in routes:
-        host = str(route.get("hostId", "")).lower().replace("_", "-")
-        provider = str(route.get("providerId", "")).lower().replace("_", "-")
-        if host in {"opencode-go", "go"} or provider in {item.replace("_", "-") for item in _GO_PROVIDER_ALIASES}:
+        if _is_go_identity(route.get("hostId"), route.get("providerId")):
             return True
     return False
 
@@ -491,8 +551,8 @@ def scan_providers(repo: Path | str, *, offline: bool = False, home: Path | str 
         return _scan_providers(repo, offline=offline, home=home, host_catalog=host_catalog)
 
 
-def _scan_providers(repo: Path | str, *, offline: bool = False, home: Path | str | None = None, host_catalog: Mapping[str, Any] | list[Any] | None = None) -> dict[str, Any]:
-    repo_path, home_path = _repo(repo), _home(home)
+def _scan_providers(repo: Path | str | None, *, offline: bool = False, home: Path | str | None = None, host_catalog: Mapping[str, Any] | list[Any] | None = None) -> dict[str, Any]:
+    repo_path, home_path = (_repo(repo) if repo is not None else None), _home(home)
     paths = _paths(repo_path, home_path)
     diagnostics: list[dict[str, str]] = []
     routes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
@@ -521,24 +581,41 @@ def _scan_providers(repo: Path | str, *, offline: bool = False, home: Path | str
                         auth_ids.add(provider_id)
     catalog_routes: list[dict[str, Any]] = []
     catalog_hosts: set[str] = set()
-    catalog_loaded = host_catalog is not None
+    catalog_loaded = False
     if host_catalog is not None:
         catalog_routes, catalog_hosts = _catalog(host_catalog, diagnostics)
+        catalog_loaded = bool(catalog_routes)
+    for candidate in paths["opencode-cache"]:
+        cached = _read_safe(candidate, diagnostics)
+        if cached is not None:
+            local_routes, local_hosts = _catalog(cached, diagnostics)
+            catalog_routes.extend(local_routes)
+            catalog_hosts.update(local_hosts)
+            catalog_loaded = catalog_loaded or bool(local_routes)
     go_attempted = not offline and host_catalog is None and _go_configured(routes.values())
     if go_attempted:
         fetched = _fetch_go_catalog(diagnostics)
         if fetched is not None:
-            catalog_loaded = True
-            catalog_routes, catalog_hosts = _catalog(fetched, diagnostics)
+            public_routes, public_hosts = _catalog(fetched, diagnostics)
+            catalog_routes.extend(public_routes)
+            catalog_hosts.update(public_hosts)
+            catalog_loaded = catalog_loaded or bool(public_routes)
     for route in catalog_routes:
         _add(routes, route)
     with state_lock(home_path):
         inventory = _state_inventory(home_path)
     stale_providers = [item for item in (inventory or {}).get("providers", []) if isinstance(item, Mapping)]
     stale_routes = [item for item in (inventory or {}).get("routes", []) if isinstance(item, Mapping)]
-    if not catalog_loaded and stale_routes and (offline or go_attempted):
-        for item in stale_routes:
+    stale_added = False
+    for item in stale_routes:
+        try:
+            key = _route_key(normalize_route(item))
+        except ValueError:
+            continue
+        if key not in routes:
             _add(routes, {**dict(item), "source": "state-inventory", "probed": False})
+            stale_added = True
+    if stale_added:
         diagnostics.append(_diag("catalog-stale", "using the previous sanitized inventory after catalog unavailability", "state-inventory"))
     current_catalog = catalog_loaded
     for route in routes.values():
@@ -566,37 +643,111 @@ def _scan_providers(repo: Path | str, *, offline: bool = False, home: Path | str
         "diagnostics": sorted(diagnostics, key=lambda item: (item.get("code", ""), item.get("source", ""), item.get("message", ""))),
     }
 
-def _auth_secret(home: Path, provider: str) -> str | None:
-    compact = {item.replace("_", "") for item in SECRET_KEYS}
-    target = provider.lower().replace("-", "_")
+def _same_provider(value: Any, provider: str) -> bool:
+    return isinstance(value, str) and value.casefold() == provider.casefold()
 
-    def find(node: Any, provider_hint: str | None = None) -> str | None:
-        if isinstance(node, Mapping):
-            for key, value in node.items():
-                lowered = str(key).lower().replace("-", "_")
-                if provider_hint == target and (lowered in SECRET_KEYS or lowered.replace("_", "") in compact) and isinstance(value, str) and value:
-                    return value
-                if isinstance(value, Mapping):
-                    result = find(value, target if lowered == target else provider_hint)
-                    if result:
-                        return result
-                elif isinstance(value, list):
-                    result = find(value, provider_hint)
-                    if result:
-                        return result
-        elif isinstance(node, list):
-            for value in node:
-                result = find(value, provider_hint)
-                if result:
-                    return result
+
+def _sections(value: Any, route: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    if not isinstance(value, Mapping):
+        return []
+    provider, model = str(route["providerId"]), str(route["modelId"])
+    result: list[Mapping[str, Any]] = []
+    profiles = value.get("profiles")
+    profile_name = route.get("profileName")
+    if isinstance(profiles, Mapping) and isinstance(profile_name, str) and isinstance(profiles.get(profile_name), Mapping):
+        result.append(profiles[profile_name])
+    for key in ("model_providers", "modelProviders", "provider", "providers"):
+        providers = value.get(key)
+        if not isinstance(providers, Mapping):
+            continue
+        for name, config in providers.items():
+            if not _same_provider(name, provider) or not isinstance(config, Mapping):
+                continue
+            models = config.get("models")
+            if isinstance(models, Mapping) and isinstance(models.get(model), Mapping):
+                result.append(models[model])
+            elif isinstance(models, list):
+                result.extend(item for item in models if isinstance(item, Mapping) and _text(item.get("modelId") or item.get("id") or item.get("name")) == model)
+            result.append(config)
+    if _same_provider(value.get("model_provider") or value.get("modelProvider") or value.get("providerId"), provider):
+        result.append(value)
+    direct = value.get(provider)
+    if isinstance(direct, Mapping):
+        result.append(direct)
+    return result
+
+
+def _env_secret(value: Any) -> str | None:
+    text = _text(value)
+    if not text:
         return None
+    match = re.fullmatch(r"(?:\$?\{)?env:([A-Za-z_][A-Za-z0-9_]*)(?:\})?", text) or re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", text)
+    return os.environ.get(match.group(1)) if match else text
 
-    for candidate in _paths(home, home)["codex-auth"] + _paths(home, home)["opencode-auth"] + _paths(home, home)["codex"] + _paths(home, home)["opencode"]:
-        value = _read_safe(candidate)
-        if value is not None:
-            secret = find(value)
+
+def _section_secret(section: Mapping[str, Any]) -> str | None:
+    compact = {item.replace("_", "") for item in SECRET_KEYS}
+    for key, value in section.items():
+        name = str(key).lower().replace("-", "_")
+        if name in SECRET_KEYS or name.replace("_", "") in compact:
+            secret = _env_secret(value)
             if secret:
                 return secret
+    for key in ("options", "auth", "credentials", "config"):
+        nested = section.get(key)
+        if isinstance(nested, Mapping):
+            secret = _section_secret(nested)
+            if secret:
+                return secret
+    environment = section.get("env")
+    if isinstance(environment, Mapping):
+        for name, value in environment.items():
+            if str(name).upper().endswith(("_API_KEY", "_TOKEN", "_SECRET")):
+                secret = _env_secret(value) if value is not None else os.environ.get(str(name))
+                if secret:
+                    return secret
+    return None
+
+
+def _config_paths(paths: Mapping[str, list[Path]], route: Mapping[str, Any]) -> list[Path]:
+    return paths["codex"] if _route_name(route.get("hostId")) == "codex" else paths["opencode"]
+
+
+def _auth_secret(repo: Path | None, home: Path, route: Mapping[str, Any]) -> str | None:
+    paths = _paths(repo, home)
+    for candidate in paths["codex-auth"] + paths["opencode-auth"] + _config_paths(paths, route):
+        value = _read_safe(candidate)
+        for section in _sections(value, route):
+            secret = _section_secret(section)
+            if secret:
+                return secret
+    return None
+
+
+def _section_endpoint(section: Mapping[str, Any]) -> str | None:
+    for current in (section, section.get("options"), section.get("config")):
+        if isinstance(current, Mapping):
+            for key in ("endpoint", "baseUrl", "baseURL", "base_url", "apiUrl", "apiURL", "api_url", "url"):
+                endpoint = _text(current.get(key))
+                if endpoint:
+                    return endpoint
+    return None
+
+
+def _trusted_endpoint(repo: Path | None, home: Path, route: Mapping[str, Any]) -> str | None:
+    paths = _paths(repo, home)
+    for candidate in _config_paths(paths, route):
+        value = _read_safe(candidate)
+        for section in _sections(value, route):
+            endpoint = _section_endpoint(section)
+            if endpoint:
+                return endpoint
+    if _is_go_identity(route.get("hostId"), route.get("providerId")):
+        return "https://opencode.ai/zen/go/v1"
+    if _route_name(route.get("providerId")) == "openai":
+        return "https://api.openai.com/v1"
+    if _route_name(route.get("providerId")) == "anthropic" and route.get("protocol") == "messages":
+        return "https://api.anthropic.com/v1"
     return None
 
 
@@ -616,18 +767,40 @@ def _probe_url(endpoint: str, protocol: str) -> str | None:
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
-def probe_route(route: Mapping[str, Any], *, home: Path | str | None = None) -> dict[str, Any]:
+def _probe_inventory(repo: Path | None, home: Path) -> Mapping[str, Any]:
+    if repo is not None:
+        return scan_providers(repo, offline=True, home=home)
+    with state_lock(home):
+        return _scan_providers(None, offline=True, home=home)
+
+
+def _untrusted_probe_fields(route: Mapping[str, Any]) -> bool:
+    blocked = {"endpoint", "baseurl", "base_url", "url", "apiurl", "api_url", "headers", "authtoken", "apikey"}
+    compact = {item.replace("_", "") for item in SECRET_KEYS}
+    return any((name := str(key).lower().replace("-", "_")) in blocked or name in SECRET_KEYS or name.replace("_", "") in compact for key in route)
+
+
+def probe_route(route: Mapping[str, Any], *, repo: Path | str | None = None, home: Path | str | None = None) -> dict[str, Any]:
     if not isinstance(route, Mapping):
         raise ValueError("route must be an object")
     selected = normalize_route(route)
     selected["probed"] = False
     diagnostics: list[dict[str, str]] = []
+    if _untrusted_probe_fields(route):
+        diagnostics.append(_diag("probe-untrusted-fields", "caller endpoint or credentials are not accepted"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
+    repo_path = _repo(repo) if repo is not None else None
+    inventory = _probe_inventory(repo_path, _home(home))
+    scanned = next((item for item in inventory.get("routes", []) if isinstance(item, Mapping) and all(selected.get(key) == item.get(key) for key in ROUTE_KEYS)), None)
+    if scanned is None:
+        diagnostics.append(_diag("probe-route-not-scanned", "targeted route does not match the fresh inventory"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
+    selected = dict(scanned)
+    selected["probed"] = False
     protocol = selected["protocol"]
-    endpoint = _text(route.get("endpoint"))
-    secret = _text(route.get("apiKey") or route.get("authToken") or route.get("token"))
-    if not secret:
-        secret = _auth_secret(_home(home), selected["providerId"])
-    selected["authConfigured"] = bool(secret) or bool(selected.get("authConfigured"))
+    endpoint = _trusted_endpoint(repo_path, _home(home), selected)
+    secret = _auth_secret(repo_path, _home(home), selected)
+    selected["authConfigured"] = bool(secret)
     target = _probe_url(endpoint, protocol) if endpoint else None
     if not target:
         diagnostics.append(_diag("probe-unsupported", "route lacks a supported exact protocol endpoint"))
@@ -642,6 +815,9 @@ def probe_route(route: Mapping[str, Any], *, home: Path | str | None = None) -> 
     else:
         payload = {"model": selected["modelId"], "max_tokens": 1, "messages": []}
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if _is_go_identity(selected["hostId"], selected["providerId"]):
+        headers["User-Agent"] = "opencode/1.0 (lemmings-probe)"
+        headers["x-opencode-session"] = digest({key: selected.get(key) for key in ("hostId", "providerId", "modelId", "protocol")})
     if selected["providerId"].lower().startswith("anthropic"):
         headers["x-api-key"] = secret
         headers["anthropic-version"] = "2023-06-01"
@@ -668,7 +844,7 @@ def probe_route(route: Mapping[str, Any], *, home: Path | str | None = None) -> 
     except (TypeError, ValueError, UnicodeError):
         response_value = None
     observed = response_value.get("model") if isinstance(response_value, Mapping) else None
-    if not isinstance(observed, str) or not (observed == selected["modelId"] or observed.endswith("/" + selected["modelId"])):
+    if observed != selected["modelId"]:
         diagnostics.append(_diag("probe-model-mismatch", "targeted response did not confirm the requested model"))
         return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": True, "diagnostics": diagnostics}
     selected["probed"] = True

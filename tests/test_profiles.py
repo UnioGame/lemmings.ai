@@ -15,6 +15,7 @@ from lemmings.profiles import (
     resolve_profile,
     use_profile,
 )
+from lemmings.discovery import digest
 
 
 class ProfileTests(unittest.TestCase):
@@ -115,6 +116,18 @@ bad = {}
                 "reviewer": [], "explorer": [],
             }, home=self.home)
 
+    def test_apply_rejects_tampered_execution_fields(self) -> None:
+        proposal = build_profile_proposal(self.repo, "generated", {
+            "worker": [{"hostId": "codex", "providerId": "generated", "modelId": "worker"}],
+            "reviewer": [], "explorer": [],
+        }, home=self.home)
+        tampered = json.loads(json.dumps(proposal))
+        tampered["roleRoutes"]["worker"][0]["protocol"] = "chat-completions"
+        body = {key: tampered[key] for key in ("schemaVersion", "name", "roleRoutes", "inventoryDigest", "manualDigest")}
+        tampered["proposalDigest"] = digest(body)
+        with self.assertRaisesRegex(ValueError, "execution fields differ"):
+            apply_profile_proposal(self.repo, tampered, tampered["proposalDigest"], home=self.home)
+
     def test_project_active_profile_has_manual_priority(self) -> None:
         project_path = self.repo / ".agents" / "lemmings.json"
         project = json.loads(project_path.read_text(encoding="utf-8"))
@@ -147,6 +160,13 @@ bad = {}
         self.assertIn("personal-manual", result["origins"]["personal"])
         self.assertEqual("personal", result["selection"])
         self.assertEqual(before, (self.home / ".lemmings" / "profiles.json").read_bytes())
+
+    def test_read_only_lookups_do_not_create_state_directory(self) -> None:
+        fresh_home = self.root / "fresh-home"
+        fresh_home.mkdir()
+        inspect_profiles(self.repo, home=fresh_home)
+        resolve_profile(self.repo, home=fresh_home)
+        self.assertFalse((fresh_home / ".lemmings").exists())
 
 
 if __name__ == "__main__":
