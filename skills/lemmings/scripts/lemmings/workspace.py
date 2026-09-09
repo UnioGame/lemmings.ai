@@ -1350,6 +1350,7 @@ def release_workspace(
             else:
                 entry.update({"taskId": None, "phaseId": None, "headSha": info["head"], "lastUsedAt": utc_timestamp(), "quarantineReason": None})
                 evicted = _evict_pool(repo, registry, profile)
+                removed = entry not in registry["entries"]
         _save_registry(repo, registry, expected_revision)
         if removed:
             disposition = "removed"
