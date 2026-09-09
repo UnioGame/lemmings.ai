@@ -1,9 +1,9 @@
 {
   "schemaVersion": 4,
-  "revision": 5,
+  "revision": 6,
   "phaseId": "L5",
   "baselineSha": "f228b2056bcb3d2161daa4006343340724c7613c",
-  "integrationHead": "444486fe8b12334bb50cefbc02d11136ac0b7dc3",
+  "integrationHead": "4290ff9872908e3b3fa0b38287f291fde2adbcac",
   "integrationBranch": "codex/lemmings-platform-delivery",
   "contractsFrozen": true,
   "contracts": [
@@ -57,7 +57,8 @@
   "leases": [],
   "close": {
     "mergeCommits": [
-      "444486fe8b12334bb50cefbc02d11136ac0b7dc3"
+      "444486fe8b12334bb50cefbc02d11136ac0b7dc3",
+      "4290ff9872908e3b3fa0b38287f291fde2adbcac"
     ],
     "phaseValidation": [],
     "workspaceDispositions": []
