@@ -113,11 +113,15 @@ wire_api = "responses"
         config.mkdir(parents=True)
         (config / "opencode.json").write_text(json.dumps({
             "model": "opencode_go/local",
-            "provider": {"opencode_go": {"protocol": "chat-completions"}},
+            "provider": {"opencode_go": {
+                "protocol": "chat-completions",
+                "baseUrl": "https://opencode.ai/zen/go/v1",
+                "apiKey": "SECRET_GO",
+            }},
         }), encoding="utf-8")
         cache = self.home / ".cache" / "opencode"
         cache.mkdir(parents=True)
-        (cache / "models.json").write_text(json.dumps({"opencode-go": {"models": {
+        (cache / "models.json").write_text(json.dumps({"opencode-go": {"api": "https://opencode.ai/zen/go/v1", "models": {
             "glm-5.3": {}, "new-go-model": {},
         }}}), encoding="utf-8")
 
@@ -133,6 +137,10 @@ wire_api = "responses"
         request = opened.call_args.args[0]
         self.assertEqual("https://opencode.ai/zen/go/v1/models", request.full_url)
         self.assertEqual("GET", request.method)
+        headers = {key.casefold(): value for key, value in request.header_items()}
+        self.assertEqual("lemmings-discovery/4", headers["user-agent"])
+        self.assertEqual("Bearer SECRET_GO", headers["authorization"])
+        self.assertTrue(headers["x-opencode-session"])
         routes = {item["modelId"]: item for item in snapshot["routes"] if item["hostId"] == "opencode-go"}
         self.assertEqual("responses", routes["gpt-5.6-luna"]["protocol"])
         self.assertTrue(routes["gpt-5.6-luna"]["compatible"])
@@ -161,7 +169,10 @@ wire_api = "responses"
         config.mkdir(parents=True)
         (config / "opencode.json").write_text(json.dumps({
             "model": "opencode_go/local",
-            "provider": {"opencode_go": {"protocol": "chat-completions"}},
+            "provider": {"opencode_go": {
+                "protocol": "chat-completions",
+                "baseUrl": "https://opencode.ai/zen/go/v1",
+            }},
         }), encoding="utf-8")
         state = self.home / ".lemmings"
         state.mkdir()
@@ -169,8 +180,12 @@ wire_api = "responses"
             "providers": [{"providerId": "old", "source": "host-catalog", "authConfigured": True, "catalogStatus": "current"}],
             "routes": [{"hostId": "opencode-go", "providerId": "old", "modelId": "old-model", "executor": "opencode", "protocol": "chat-completions", "configured": True, "catalogued": True, "compatible": True, "authConfigured": True, "probed": True, "source": "host-catalog"}],
         }}), encoding="utf-8")
-        with patch("lemmings.discovery.urllib.request.urlopen", side_effect=OSError("network body must stay private")):
+        with patch("lemmings.discovery.urllib.request.urlopen", side_effect=OSError("network body must stay private")) as opened:
             snapshot = scan_providers(self.repo, offline=False, home=self.home)
+        headers = {key.casefold(): value for key, value in opened.call_args.args[0].header_items()}
+        self.assertEqual("lemmings-discovery/4", headers["user-agent"])
+        self.assertTrue(headers["x-opencode-session"])
+        self.assertNotIn("authorization", headers)
         self.assertTrue(any(item["providerId"] == "old" for item in snapshot["routes"]))
         self.assertTrue(any(item["code"] == "go-catalog-unavailable" for item in snapshot["diagnostics"]))
         self.assertNotIn("network body", json.dumps(snapshot))
@@ -233,6 +248,10 @@ wire_api = "responses"
                 self.assertTrue(probe_route(route, repo=self.repo, home=self.home)["probed"])
                 request = opened.call_args.args[0]
                 self.assertIn(model.encode(), request.data)
+                payload = json.loads(request.data)
+                self.assertTrue(payload.get("input") or payload.get("messages"))
+                headers = {key.casefold(): value for key, value in request.header_items()}
+                self.assertIn("x-api-key" if route["protocol"] == "messages" else "authorization", headers)
                 suffix = {"responses": "/responses", "chat-completions": "/chat/completions", "messages": "/messages"}[route["protocol"]]
                 self.assertTrue(request.full_url.endswith(suffix))
             self.assertTrue(probe_route(other, repo=other_repo, home=self.home)["probed"])
@@ -240,6 +259,102 @@ wire_api = "responses"
         foreign = {**routes["responses"], "protocol": "chat-completions"}
         self.assertEqual("unsupported", probe_route(foreign, repo=self.repo, home=self.home)["status"])
 
+    def test_custom_go_name_keeps_custom_endpoint_protocol_and_credentials(self) -> None:
+        (self.repo / "opencode.json").write_text(json.dumps({"provider": {"opencode-go": {
+            "models": {"gpt-5.6-luna": {
+                "api": "messages",
+                "baseUrl": "https://custom.example/v1",
+                "apiKey": "CUSTOM_SECRET",
+            }},
+        }}}), encoding="utf-8")
+        cache = self.home / ".cache" / "opencode"
+        cache.mkdir(parents=True)
+        (cache / "models.json").write_text(json.dumps({"opencode-go": {"api": "https://opencode.ai/zen/go/v1", "models": {"gpt-5.6-luna": {}}}}), encoding="utf-8")
+        snapshot = scan_providers(self.repo, offline=True, home=self.home)
+        route = next(item for item in snapshot["routes"] if item["hostId"] == "opencode")
+        self.assertEqual("messages", route["protocol"])
+        self.assertTrue(any(item["hostId"] == "opencode-go" and item["protocol"] == "unknown" and not item["compatible"] for item in snapshot["routes"]))
+
+        class Response:
+            status = 200
+            def read(self, size=-1):
+                return b'{"model":"gpt-5.6-luna"}'
+            def close(self):
+                pass
+
+        with patch("lemmings.discovery.urllib.request.urlopen", return_value=Response()) as opened:
+            self.assertTrue(probe_route(route, repo=self.repo, home=self.home)["probed"])
+        request = opened.call_args.args[0]
+        self.assertEqual("https://custom.example/v1/messages", request.full_url)
+        self.assertNotIn("x-opencode-session", {key.casefold() for key, _ in request.header_items()})
+
+    def test_repo_custom_endpoint_does_not_borrow_personal_provider_secret(self) -> None:
+        personal = self.home / ".config" / "opencode"
+        personal.mkdir(parents=True)
+        (personal / "opencode.json").write_text(json.dumps({"provider": {"openai": {"apiKey": "HOME_SECRET"}}}), encoding="utf-8")
+        (self.repo / "opencode.json").write_text(json.dumps({"model": "openai/gpt", "provider": {
+            "openai": {"api": "responses", "baseUrl": "http://127.0.0.1:9013/v1"},
+        }}), encoding="utf-8")
+        route = next(item for item in scan_providers(self.repo, offline=True, home=self.home)["routes"] if item["modelId"] == "gpt")
+        with patch("lemmings.discovery.urllib.request.urlopen", side_effect=AssertionError("must not send home secret")):
+            result = probe_route(route, repo=self.repo, home=self.home)
+        self.assertEqual("unsupported", result["status"])
+        self.assertTrue(any(item["code"] == "probe-auth-required" for item in result["diagnostics"]))
+        self.assertNotIn("HOME_SECRET", json.dumps(result))
+
+
+    def test_codex_cache_and_standalone_profiles_preserve_identity(self) -> None:
+        codex = self.home / ".codex"
+        codex.mkdir()
+        (codex / "config.toml").write_text('model="m"\nmodel_provider="custom"\n[model_providers.custom]\nbase_url="https://base.example/v1"\nwire_api="responses"\n', encoding="utf-8")
+        for name in ("one", "two"):
+            (codex / f"{name}.config.toml").write_text(f'model="m"\nmodel_provider="custom"\n[model_providers.custom]\nbase_url="https://{name}.example/v1"\nwire_api="responses"\napi_key="PROFILE_SECRET"\n', encoding="utf-8")
+        (codex / "auth.json").write_text(json.dumps({"tokens": {"access_token": "PRIVATE_TOKEN"}}), encoding="utf-8")
+        (codex / "models_cache.json").write_text(json.dumps({"models": [
+            {"slug": "visible", "visibility": "list", "supported_in_api": False, "supported_reasoning_levels": [{"effort": "high"}, {"effort": "max"}], "model_messages": "PRIVATE_INSTRUCTIONS"},
+            {"slug": "hidden", "visibility": "hide"},
+        ]}), encoding="utf-8")
+        snapshot = scan_providers(self.repo, offline=True, home=self.home)
+        self.assertEqual({"one", "two"}, {r.get("profileName") for r in snapshot["routes"] if r.get("profileName")})
+        visible = [r for r in snapshot["routes"] if r["modelId"] == "visible"]
+        self.assertEqual({"high", "max"}, {r["variantId"] for r in visible if r.get("variantId")})
+        self.assertTrue(all(r["authConfigured"] for r in visible))
+        self.assertNotIn("hidden", {r["modelId"] for r in snapshot["routes"]})
+        self.assertNotIn("tokens", {p["providerId"] for p in snapshot["providers"]})
+        self.assertNotIn("PRIVATE", json.dumps(snapshot))
+        from lemmings.discovery import _trusted_bundle
+        for route in snapshot["routes"]:
+            if route.get("profileName"):
+                endpoint, secret = _trusted_bundle(self.repo, self.home, route)
+                self.assertEqual(f'https://{route["profileName"]}.example/v1', endpoint)
+                self.assertEqual("PROFILE_SECRET", secret)
+
+    def test_custom_catalog_endpoint_does_not_prove_go_protocol(self) -> None:
+        cache = self.home / ".cache" / "opencode"
+        cache.mkdir(parents=True)
+        (cache / "models.json").write_text(json.dumps({"opencode-go": {"api": "https://custom.example/v1", "models": {"gpt-5.6-luna": {}}}}), encoding="utf-8")
+        route = scan_providers(self.repo, offline=True, home=self.home)["routes"][0]
+        self.assertEqual("unknown", route["protocol"])
+        self.assertFalse(route["compatible"])
+
+    def test_codex_go_metadata_and_repeat_proposal_are_stable(self) -> None:
+        codex = self.home / ".codex"
+        codex.mkdir()
+        (codex / "config.toml").write_text('model="gpt-5.6-luna"\nmodel_provider="opencode_go"\n[model_providers.opencode_go]\nbase_url="https://opencode.ai/zen/go/v1"\nwire_api="responses"\napi_key="CATALOG_SECRET"\n', encoding="utf-8")
+        class Response:
+            def read(self, size=-1):
+                return b'{"data":[{"id":"gpt-5.6-luna","object":"model","owned_by":"opencode"}]}'
+            def close(self):
+                pass
+        from lemmings.profiles import build_profile_proposal
+        routes = {"worker": [{"hostId": "opencode-go", "providerId": "opencode-go", "modelId": "gpt-5.6-luna"}]}
+        with patch("lemmings.discovery.urllib.request.urlopen", return_value=Response()) as opened:
+            first = build_profile_proposal(self.repo, "go", routes, home=self.home)
+            second = build_profile_proposal(self.repo, "go", routes, home=self.home)
+        self.assertEqual(first["inventoryDigest"], second["inventoryDigest"])
+        headers = {key.casefold(): value for key, value in opened.call_args.args[0].header_items()}
+        self.assertEqual("Bearer CATALOG_SECRET", headers["authorization"])
+        self.assertNotIn("CATALOG_SECRET", json.dumps(first))
 
 if __name__ == "__main__":
     unittest.main()

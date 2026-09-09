@@ -210,6 +210,12 @@ def _canonical_bound_routes(value: Any, inventory: Mapping[str, Any]) -> dict[st
             compatible = [item for item in matches if item.get("compatible") is True]
             if not compatible:
                 raise ValueError(f"profile route is incompatible with bound inventory: {role}")
+            if "profileName" not in raw:
+                unprofiled = [item for item in compatible if not item.get("profileName")]
+                if unprofiled:
+                    compatible = unprofiled
+                elif len({item.get("profileName") for item in compatible}) > 1:
+                    raise ValueError(f"profile route needs an explicit profileName: {role}")
             output[role].append(normalize_route(compatible[0]))
     return output
 

@@ -18,14 +18,15 @@ SCHEMA_VERSION = 4
 PROTOCOLS = {"responses", "chat-completions", "messages", "unknown"}
 EXECUTORS = {"native", "codex", "opencode"}
 ROUTE_KEYS = ("hostId", "providerId", "modelId", "variantId", "executor", "profileName", "protocol", "configured", "catalogued", "compatible", "authConfigured", "probed", "quotaGroup", "source")
-SAFE_SOURCES = {"codex-config", "codex-profile", "codex-auth", "opencode-config", "opencode-auth", "host-catalog", "state-inventory", "manual", "project-manual", "personal-manual", "generated", "unknown"}
+SAFE_SOURCES = {"codex-config", "codex-profile", "codex-auth", "codex-cache", "opencode-config", "opencode-auth", "host-catalog", "state-inventory", "manual", "project-manual", "personal-manual", "generated", "unknown"}
 SECRET_KEYS = {"access", "access_token", "api_key", "apikey", "auth", "authorization", "client_secret", "credential", "credentials", "key", "password", "private_key", "refresh", "refresh_token", "secret", "token"}
 
 # https://opencode.ai/docs/go/ documents these endpoint protocols by exact
 # model ID. The public /zen/go/v1/models response intentionally carries only
 # inventory metadata, so a model-name family or provider-level setting is not
 # evidence of a protocol. Verified 2026-09-10.
-GO_CATALOG_URL = "https://opencode.ai/zen/go/v1/models"
+GO_ENDPOINT = "https://opencode.ai/zen/go/v1"
+GO_CATALOG_URL = f"{GO_ENDPOINT}/models"
 _GO_PROVIDER_ALIASES = {"opencode", "opencode-go", "go"}
 _GO_HOST_ALIASES = {"opencode", "opencode-go", "go", "open-code"}
 _GO_CATALOG_HOSTS = {"opencode-go", "go"}
@@ -206,12 +207,16 @@ def _unique(paths: Iterable[Path]) -> list[Path]:
 def _paths(repo: Path | None, home: Path) -> dict[str, list[Path]]:
     repo_codex = [] if repo is None else [repo / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc")]
     repo_opencode = [] if repo is None else [repo / name for name in ("opencode.json", "opencode.jsonc")] + [repo / ".opencode" / name for name in ("opencode.json", "opencode.jsonc")]
+    codex_profiles = sorted((home / ".codex").glob("*.config.toml"))[:128]
+    if repo is not None:
+        codex_profiles = sorted((repo / ".codex").glob("*.config.toml"))[:128] + codex_profiles
     repo_codex_auth = [] if repo is None else [repo / ".codex" / "auth.json"]
     repo_opencode_auth = [] if repo is None else [repo / ".opencode" / "auth.json"]
     return {
-        "codex": _unique(repo_codex + [home / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc", "profiles.toml", "profiles.json", "profiles.jsonc")]),
+        "codex": _unique(repo_codex + [home / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc", "profiles.toml", "profiles.json", "profiles.jsonc")] + codex_profiles),
         "opencode": _unique(repo_opencode + [home / ".config" / "opencode" / name for name in ("opencode.json", "opencode.jsonc")] + [home / ".opencode" / name for name in ("opencode.json", "opencode.jsonc", "config.json", "config.jsonc")]),
         "codex-auth": _unique(repo_codex_auth + [home / ".codex" / "auth.json"]),
+        "codex-cache": _unique([home / ".codex" / "models_cache.json"]),
         "opencode-auth": _unique(repo_opencode_auth + [home / ".config" / "opencode" / "auth.json", home / ".local" / "share" / "opencode" / "auth.json", home / ".opencode" / "auth.json"]),
         "opencode-cache": _unique([home / ".cache" / "opencode" / "models.json"]),
     }
@@ -233,15 +238,29 @@ def _route_name(value: Any) -> str:
 
 def _is_go_identity(host: Any, provider: Any) -> bool:
     host_name, provider_name = _route_name(host), _route_name(provider)
-    return host_name in _GO_CATALOG_HOSTS or (
-        host_name in _GO_HOST_ALIASES and provider_name in _GO_PROVIDER_ALIASES
-    )
+    return host_name in _GO_HOST_ALIASES and provider_name in _GO_PROVIDER_ALIASES
 
 
-def _route_protocol(host: Any, provider: Any, model: Any, value: Any) -> str:
-    if _is_go_identity(host, provider):
+def _is_documented_go_endpoint(endpoint: Any) -> bool:
+    value = _text(endpoint)
+    if not value:
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        return parsed.scheme == "https" and parsed.hostname == "opencode.ai" and parsed.port in (None, 443) and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment and parsed.path.rstrip("/") == "/zen/go/v1"
+    except ValueError:
+        return False
+
+
+def _route_protocol(host: Any, provider: Any, model: Any, value: Any, *, documented_go: bool = False, catalog_go: bool = False) -> str:
+    if catalog_go or documented_go:
         return _GO_PROTOCOLS.get(_text(model) or "", "unknown")
     return _protocol(value)
+
+
+def _config_protocol(host: Any, provider: Any, model: Any, metadata: Mapping[str, Any]) -> str:
+    raw = metadata.get("protocol", metadata.get("api", metadata.get("wireApi", "unknown")))
+    return _route_protocol(host, provider, model, raw, documented_go=_is_documented_go_endpoint(_section_endpoint(metadata)))
 
 def _split_model(value: Any, provider: Any = None) -> tuple[str | None, str | None]:
     model, provider = _identifier(value), _identifier(provider)
@@ -286,8 +305,8 @@ def normalize_route(value: Mapping[str, Any], *, defaults: Mapping[str, Any] | N
             result[key] = optional
     return result
 
-def _route_key(route: Mapping[str, Any]) -> tuple[str, str, str, str]:
-    return tuple(str(route.get(key, "")) for key in ("hostId", "providerId", "modelId", "variantId"))  # type: ignore[return-value]
+def _route_key(route: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
+    return tuple(str(route.get(key, "")) for key in ("hostId", "providerId", "modelId", "variantId", "profileName"))  # type: ignore[return-value]
 
 def _auth_present(value: Any) -> set[str]:
     found: set[str] = set()
@@ -336,7 +355,7 @@ def _models(value: Any) -> list[tuple[str, Mapping[str, Any] | None]]:
         return result
     return []
 
-def _add(routes: dict[tuple[str, str, str, str], dict[str, Any]], value: Mapping[str, Any]) -> None:
+def _add(routes: dict[tuple[str, str, str, str, str], dict[str, Any]], value: Mapping[str, Any]) -> None:
     try:
         route = normalize_route(value)
     except ValueError:
@@ -357,7 +376,7 @@ def _add(routes: dict[tuple[str, str, str, str], dict[str, Any]], value: Mapping
         previous["source"] = route.get("source", previous["source"])
     previous["compatible"] = _compatible(str(previous["executor"]), str(previous["protocol"]))
 
-def _codex(data: Mapping[str, Any], source: str, routes: dict[tuple[str, str, str, str], dict[str, Any]], diagnostics: list[dict[str, str]]) -> None:
+def _codex(data: Mapping[str, Any], source: str, routes: dict[tuple[str, str, str, str, str], dict[str, Any]], diagnostics: list[dict[str, str]]) -> None:
     providers = data.get("model_providers") or data.get("modelProviders") or {}
     providers = providers if isinstance(providers, Mapping) else {}
     default_provider = data.get("model_provider") or data.get("modelProvider") or data.get("providerId")
@@ -368,8 +387,10 @@ def _codex(data: Mapping[str, Any], source: str, routes: dict[tuple[str, str, st
             if model is not None:
                 diagnostics.append(_diag("route-missing-provider", "configured model has no explicit provider", source))
             return
-        metadata = metadata or {}
-        _add(routes, {"hostId": "codex", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": metadata.get("wire_api", metadata.get("wireApi", metadata.get("protocol", protocol))), "executor": "codex", "configured": True, "authConfigured": _provider_auth(metadata), "source": source, "quotaGroup": metadata.get("quotaGroup")})
+        metadata = {**(dict(providers.get(provider_id)) if isinstance(providers.get(provider_id), Mapping) else {}), **dict(metadata or {})}
+        wire = metadata.get("wire_api", metadata.get("wireApi", metadata.get("protocol", protocol)))
+        wire = _route_protocol("codex", provider_id, model_id, wire, documented_go=_is_documented_go_endpoint(_section_endpoint(metadata)))
+        _add(routes, {"hostId": "codex", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": wire, "executor": "codex", "configured": True, "authConfigured": _provider_auth(metadata), "source": source, "quotaGroup": metadata.get("quotaGroup")})
     add(data.get("model") or data.get("modelId"), default_provider)
     for provider, config in providers.items():
         if not isinstance(config, Mapping):
@@ -382,7 +403,34 @@ def _codex(data: Mapping[str, Any], source: str, routes: dict[tuple[str, str, st
             if isinstance(profile, Mapping):
                 add(profile.get("model") or profile.get("modelId"), profile.get("model_provider") or profile.get("modelProvider") or profile.get("providerId") or default_provider, profile, str(name))
 
-def _opencode(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str], dict[str, Any]]) -> None:
+
+def _codex_cache(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str, str], dict[str, Any]], diagnostics: list[dict[str, str]]) -> None:
+    models = data.get("models")
+    if not isinstance(models, list):
+        return
+    for metadata in models:
+        if not isinstance(metadata, Mapping):
+            continue
+        slug = _identifier(metadata.get("slug"))
+        visibility = metadata.get("visibility")
+        visible = visibility == "list" or (isinstance(visibility, list) and "list" in visibility)
+        if not slug or not visible:
+            diagnostics.append(_diag("codex-cache-unavailable", "Codex cache model is not available for selection", "codex-cache"))
+            continue
+        levels = metadata.get("supported_reasoning_levels")
+        variants = [_identifier(item.get("effort") or item.get("reasoning_effort") or item.get("level")) if isinstance(item, Mapping) else _identifier(item) for item in levels] if isinstance(levels, list) else []
+        for variant in [None, *(item for item in variants if item)]:
+            route: dict[str, Any] = {
+                "hostId": "codex", "providerId": "openai", "modelId": slug,
+                "executor": "codex", "protocol": "responses", "configured": False,
+                "catalogued": True, "compatible": True, "authConfigured": False,
+                "probed": False, "source": "codex-cache",
+            }
+            if variant:
+                route["variantId"] = variant
+            _add(routes, route)
+
+def _opencode(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str, str], dict[str, Any]]) -> None:
     providers = data.get("provider") or data.get("providers") or {}
     providers = providers if isinstance(providers, Mapping) else {}
     def add(provider: Any, model: Any, metadata: Mapping[str, Any] | None = None, profile: str | None = None) -> None:
@@ -390,7 +438,7 @@ def _opencode(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str], d
         if not provider_id or not model_id:
             return
         metadata = metadata or {}
-        _add(routes, {"hostId": "opencode", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": _route_protocol("opencode", provider_id, model_id, metadata.get("protocol", metadata.get("api", metadata.get("wireApi", "unknown")))), "executor": "opencode", "configured": True, "authConfigured": _provider_auth(metadata), "source": "opencode-config", "quotaGroup": metadata.get("quotaGroup")})
+        _add(routes, {"hostId": "opencode", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": _config_protocol("opencode", provider_id, model_id, metadata), "executor": "opencode", "configured": True, "authConfigured": _provider_auth(metadata), "source": "opencode-config", "quotaGroup": metadata.get("quotaGroup")})
     top_provider, top_model = _split_model(data.get("model") or data.get("modelId"))
     if top_provider and top_model:
         config = providers.get(top_provider)
@@ -445,7 +493,7 @@ def _catalog_items(value: Any) -> list[tuple[str | None, Mapping[str, Any]]]:
             continue
         if isinstance(item, Mapping):
             if "models" in item or "data" in item:
-                result.extend(_catalog_records(str(host), item.get("models") if "models" in item else item.get("data")))
+                result.extend((parent, {**model, "_catalogEndpoint": item.get("api")}) for parent, model in _catalog_records(str(host), item.get("models") if "models" in item else item.get("data")))
             elif item.get("id") or item.get("model") or item.get("modelId"):
                 result.append((str(host), item))
         elif isinstance(item, list):
@@ -453,7 +501,7 @@ def _catalog_items(value: Any) -> list[tuple[str | None, Mapping[str, Any]]]:
     return result
 
 
-def _catalog(value: Any, diagnostics: list[dict[str, str]]) -> tuple[list[dict[str, Any]], set[str]]:
+def _catalog(value: Any, diagnostics: list[dict[str, str]], *, go_catalog: str | None = None) -> tuple[list[dict[str, Any]], set[str]]:
     result = []
     hosts: set[str] = set()
     for parent, item in _catalog_items(value):
@@ -468,7 +516,8 @@ def _catalog(value: Any, diagnostics: list[dict[str, str]]) -> tuple[list[dict[s
             provider = "opencode-go"
         if not provider or not model:
             continue
-        protocol = _route_protocol(host, provider, model, item.get("protocol", item.get("wireApi", item.get("api"))))
+        catalog_go = go_catalog == "public" or (go_catalog == "cache" and _route_name(host) in _GO_CATALOG_HOSTS and _is_documented_go_endpoint(item.get("_catalogEndpoint")))
+        protocol = _route_protocol(host, provider, model, item.get("protocol", item.get("wireApi", item.get("api"))), catalog_go=catalog_go)
         executor = "opencode" if _is_go_identity(host, provider) else _executor(host, protocol, item.get("executor"))
         variants = item.get("variants") if isinstance(item.get("variants"), list) else [item.get("variantId")]
         for variant in variants or [None]:
@@ -510,18 +559,34 @@ def _alias(routes: Iterable[Mapping[str, Any]], known: Iterable[str]) -> list[di
                 result.append(_diag("provider-alias-mismatch", f"provider alias {value} differs from {dashed}; edit the source explicitly"))
     return result
 
-def _go_configured(routes: Iterable[Mapping[str, Any]]) -> bool:
-    for route in routes:
-        if _is_go_identity(route.get("hostId"), route.get("providerId")):
-            return True
-    return False
+def _documented_go_configs(paths: Mapping[str, list[Path]]):
+    for host, key, sections in (("codex", "codex", ("model_providers", "modelProviders")), ("opencode", "opencode", ("provider", "providers"))):
+        for candidate in paths[key]:
+            value = _read_safe(candidate)
+            if not isinstance(value, Mapping):
+                continue
+            for section in sections:
+                providers = value.get(section)
+                if not isinstance(providers, Mapping):
+                    continue
+                for provider, config in providers.items():
+                    if isinstance(config, Mapping) and _is_documented_go_endpoint(_section_endpoint(config)):
+                        yield host, str(provider), config
 
 
-def _fetch_go_catalog(diagnostics: list[dict[str, str]]) -> Any | None:
+def _configured_documented_go(paths: Mapping[str, list[Path]]) -> bool:
+    return next(_documented_go_configs(paths), None) is not None
+
+
+def _fetch_go_catalog(repo: Path | None, home: Path, diagnostics: list[dict[str, str]]) -> Any | None:
+    headers = {"Accept": "application/json", "User-Agent": "lemmings-discovery/4", "x-opencode-session": digest({"schemaVersion": SCHEMA_VERSION, "purpose": "go-catalog"})}
+    secret = _go_catalog_secret(repo, home)
+    if secret:
+        headers["Authorization"] = f"Bearer {secret}"
     request = urllib.request.Request(
         GO_CATALOG_URL,
         method="GET",
-        headers={"Accept": "application/json", "User-Agent": "lemmings-discovery/4"},
+        headers=headers,
     )
     try:
         response = urllib.request.urlopen(request, timeout=3)
@@ -555,20 +620,39 @@ def _scan_providers(repo: Path | str | None, *, offline: bool = False, home: Pat
     repo_path, home_path = (_repo(repo) if repo is not None else None), _home(home)
     paths = _paths(repo_path, home_path)
     diagnostics: list[dict[str, str]] = []
-    routes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    routes: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     providers: dict[str, dict[str, Any]] = {}
     auth_ids: set[str] = set()
     for candidate in paths["codex-auth"] + paths["opencode-auth"]:
         value = _read_safe(candidate, diagnostics)
         if value is not None:
-            auth_ids.update(_auth_present(value))
+            if candidate in paths["codex-auth"] and isinstance(value, Mapping) and (value.get("OPENAI_API_KEY") or isinstance(value.get("tokens"), Mapping) and value["tokens"].get("access_token")):
+                auth_ids.add("openai")
+            else:
+                auth_ids.update(_auth_present(value))
+    codex_definitions = {}
+    for candidate in reversed(paths["codex"]):
+        value = _read_safe(candidate, diagnostics)
+        if isinstance(value, Mapping) and not candidate.name.endswith(".config.toml"):
+            definitions = value.get("model_providers") or value.get("modelProviders") or {}
+            if isinstance(definitions, Mapping):
+                codex_definitions.update(definitions)
     for candidate in paths["codex"]:
         value = _read_safe(candidate, diagnostics)
         if isinstance(value, Mapping):
-            _codex(value, "codex-profile" if "profile" in candidate.name.lower() else "codex-config", routes, diagnostics)
+            if candidate.name.endswith(".config.toml"):
+                name = candidate.name[:-len(".config.toml")]
+                definitions = {**codex_definitions, **(value.get("model_providers") or value.get("modelProviders") or {})}
+                _codex({"model_providers": definitions, "profiles": {name: value}}, "codex-profile", routes, diagnostics)
+            else:
+                _codex(value, "codex-profile" if "profile" in candidate.name.lower() else "codex-config", routes, diagnostics)
             provider = _identifier(value.get("model_provider") or value.get("modelProvider") or value.get("providerId"))
             if provider and _provider_auth(value):
                 auth_ids.add(provider)
+    for candidate in paths["codex-cache"]:
+        value = _read_safe(candidate, diagnostics)
+        if isinstance(value, Mapping):
+            _codex_cache(value, routes, diagnostics)
     for candidate in paths["opencode"]:
         value = _read_safe(candidate, diagnostics)
         if isinstance(value, Mapping):
@@ -588,19 +672,24 @@ def _scan_providers(repo: Path | str | None, *, offline: bool = False, home: Pat
     for candidate in paths["opencode-cache"]:
         cached = _read_safe(candidate, diagnostics)
         if cached is not None:
-            local_routes, local_hosts = _catalog(cached, diagnostics)
+            local_routes, local_hosts = _catalog(cached, diagnostics, go_catalog="cache")
             catalog_routes.extend(local_routes)
             catalog_hosts.update(local_hosts)
             catalog_loaded = catalog_loaded or bool(local_routes)
-    go_attempted = not offline and host_catalog is None and _go_configured(routes.values())
+    go_attempted = not offline and host_catalog is None and _configured_documented_go(paths)
     if go_attempted:
-        fetched = _fetch_go_catalog(diagnostics)
+        fetched = _fetch_go_catalog(repo_path, home_path, diagnostics)
         if fetched is not None:
-            public_routes, public_hosts = _catalog(fetched, diagnostics)
+            public_routes, public_hosts = _catalog(fetched, diagnostics, go_catalog="public")
             catalog_routes.extend(public_routes)
             catalog_hosts.update(public_hosts)
             catalog_loaded = catalog_loaded or bool(public_routes)
     for route in catalog_routes:
+        if _is_go_identity(route.get("hostId"), route.get("providerId")):
+            bundle = _configured_bundle(repo_path, home_path, route)
+            if bundle is not None and not _is_documented_go_endpoint(bundle[0]):
+                route = {**route, "protocol": "unknown", "compatible": False}
+                diagnostics.append(_diag("provider-endpoint-override", "configured endpoint overrides the documented Go service; catalog route is not selectable"))
         _add(routes, route)
     with state_lock(home_path):
         inventory = _state_inventory(home_path)
@@ -617,16 +706,16 @@ def _scan_providers(repo: Path | str | None, *, offline: bool = False, home: Pat
             stale_added = True
     if stale_added:
         diagnostics.append(_diag("catalog-stale", "using the previous sanitized inventory after catalog unavailability", "state-inventory"))
-    current_catalog = catalog_loaded
+    current_catalog = catalog_loaded or any(item.get("source") == "codex-cache" for item in routes.values())
     for route in routes.values():
         provider = str(route["providerId"])
         route["authConfigured"] = bool(route.get("authConfigured")) or provider in auth_ids
         route["compatible"] = _compatible(str(route["executor"]), str(route["protocol"]))
-        status = "current" if current_catalog else ("stale" if stale_providers else "unavailable")
+        status = "current" if current_catalog else ("stale" if route.get("source") == "state-inventory" else "unavailable")
         _merge_provider(providers, provider, str(route.get("source", "unknown")), bool(route.get("authConfigured")), status)
     for item in stale_providers:
         provider = _identifier(item.get("providerId"))
-        if provider:
+        if provider and provider not in providers:
             _merge_provider(providers, provider, "state-inventory", bool(item.get("authConfigured")), "stale")
     for provider in sorted(auth_ids):
         _merge_provider(providers, provider, "opencode-auth", True, "current" if current_catalog else "unavailable")
@@ -655,7 +744,10 @@ def _sections(value: Any, route: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     profiles = value.get("profiles")
     profile_name = route.get("profileName")
     if isinstance(profiles, Mapping) and isinstance(profile_name, str) and isinstance(profiles.get(profile_name), Mapping):
-        result.append(profiles[profile_name])
+        selected_profile = profiles[profile_name]
+        selected_provider = selected_profile.get("model_provider") or value.get("model_provider")
+        if _same_provider(selected_provider, provider):
+            result.append(selected_profile)
     for key in ("model_providers", "modelProviders", "provider", "providers"):
         providers = value.get(key)
         if not isinstance(providers, Mapping):
@@ -686,6 +778,9 @@ def _env_secret(value: Any) -> str | None:
 
 
 def _section_secret(section: Mapping[str, Any]) -> str | None:
+    environment_key = section.get("env_key") or section.get("envKey")
+    if isinstance(environment_key, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", environment_key):
+        return os.environ.get(environment_key)
     compact = {item.replace("_", "") for item in SECRET_KEYS}
     for key, value in section.items():
         name = str(key).lower().replace("-", "_")
@@ -710,18 +805,11 @@ def _section_secret(section: Mapping[str, Any]) -> str | None:
 
 
 def _config_paths(paths: Mapping[str, list[Path]], route: Mapping[str, Any]) -> list[Path]:
-    return paths["codex"] if _route_name(route.get("hostId")) == "codex" else paths["opencode"]
-
-
-def _auth_secret(repo: Path | None, home: Path, route: Mapping[str, Any]) -> str | None:
-    paths = _paths(repo, home)
-    for candidate in paths["codex-auth"] + paths["opencode-auth"] + _config_paths(paths, route):
-        value = _read_safe(candidate)
-        for section in _sections(value, route):
-            secret = _section_secret(section)
-            if secret:
-                return secret
-    return None
+    if _route_name(route.get("hostId")) != "codex":
+        return paths["opencode"]
+    name = route.get("profileName")
+    selected = [path for path in paths["codex"] if name and path.name == f"{name}.config.toml"]
+    return selected + [path for path in paths["codex"] if not path.name.endswith(".config.toml")]
 
 
 def _section_endpoint(section: Mapping[str, Any]) -> str | None:
@@ -734,16 +822,20 @@ def _section_endpoint(section: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _trusted_endpoint(repo: Path | None, home: Path, route: Mapping[str, Any]) -> str | None:
+def _configured_bundle(repo: Path | None, home: Path, route: Mapping[str, Any]) -> tuple[str, str | None] | None:
     paths = _paths(repo, home)
     for candidate in _config_paths(paths, route):
         value = _read_safe(candidate)
         for section in _sections(value, route):
             endpoint = _section_endpoint(section)
             if endpoint:
-                return endpoint
+                return endpoint, _section_secret(section)
+    return None
+
+
+def _documented_endpoint(route: Mapping[str, Any]) -> str | None:
     if _is_go_identity(route.get("hostId"), route.get("providerId")):
-        return "https://opencode.ai/zen/go/v1"
+        return GO_ENDPOINT
     if _route_name(route.get("providerId")) == "openai":
         return "https://api.openai.com/v1"
     if _route_name(route.get("providerId")) == "anthropic" and route.get("protocol") == "messages":
@@ -751,9 +843,55 @@ def _trusted_endpoint(repo: Path | None, home: Path, route: Mapping[str, Any]) -
     return None
 
 
+def _documented_auth_secret(repo: Path | None, home: Path, route: Mapping[str, Any]) -> str | None:
+    paths = _paths(repo, home)
+    for candidate in paths["codex-auth"] + paths["opencode-auth"] + _config_paths(paths, route):
+        value = _read_safe(candidate)
+        for section in _sections(value, route):
+            endpoint = _section_endpoint(section)
+            if endpoint and not _is_documented_endpoint(route, endpoint):
+                continue
+            secret = _section_secret(section)
+            if secret:
+                return secret
+    return None
+
+
+def _is_documented_endpoint(route: Mapping[str, Any], endpoint: str) -> bool:
+    if _is_go_identity(route.get("hostId"), route.get("providerId")):
+        return _is_documented_go_endpoint(endpoint)
+    documented = _documented_endpoint(route)
+    return documented is not None and endpoint.rstrip("/") == documented.rstrip("/")
+
+
+def _trusted_bundle(repo: Path | None, home: Path, route: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    configured = _configured_bundle(repo, home, route)
+    if configured is not None:
+        endpoint, secret = configured
+        # A custom endpoint can only use a credential explicitly co-located in
+        # its configured section. Do not pair it with another provider source.
+        if secret is None and _is_documented_endpoint(route, endpoint):
+            secret = _documented_auth_secret(repo, home, route)
+        return endpoint, secret
+    endpoint = _documented_endpoint(route)
+    return endpoint, _documented_auth_secret(repo, home, route) if endpoint else None
+
+
+def _go_catalog_secret(repo: Path | None, home: Path) -> str | None:
+    for host, provider, config in _documented_go_configs(_paths(repo, home)):
+        secret = _section_secret(config)
+        if secret:
+            return secret
+        route = {"hostId": host, "providerId": provider, "modelId": "go-catalog", "protocol": "responses"}
+        secret = _documented_auth_secret(repo, home, route)
+        if secret:
+            return secret
+    return None
+
+
 def _probe_url(endpoint: str, protocol: str) -> str | None:
     parsed = urllib.parse.urlsplit(endpoint)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
         return None
     suffix = {"responses": "/responses", "chat-completions": "/chat/completions", "messages": "/messages"}.get(protocol)
     if suffix is None:
@@ -798,8 +936,7 @@ def probe_route(route: Mapping[str, Any], *, repo: Path | str | None = None, hom
     selected = dict(scanned)
     selected["probed"] = False
     protocol = selected["protocol"]
-    endpoint = _trusted_endpoint(repo_path, _home(home), selected)
-    secret = _auth_secret(repo_path, _home(home), selected)
+    endpoint, secret = _trusted_bundle(repo_path, _home(home), selected)
     selected["authConfigured"] = bool(secret)
     target = _probe_url(endpoint, protocol) if endpoint else None
     if not target:
@@ -809,16 +946,16 @@ def probe_route(route: Mapping[str, Any], *, repo: Path | str | None = None, hom
         diagnostics.append(_diag("probe-auth-required", "targeted probe requires configured authentication"))
         return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
     if protocol == "responses":
-        payload = {"model": selected["modelId"], "input": []}
+        payload = {"model": selected["modelId"], "input": "Reply OK.", "max_output_tokens": 16}
     elif protocol == "chat-completions":
-        payload = {"model": selected["modelId"], "messages": []}
+        payload = {"model": selected["modelId"], "messages": [{"role": "user", "content": "Reply OK."}], "max_tokens": 16}
     else:
-        payload = {"model": selected["modelId"], "max_tokens": 1, "messages": []}
+        payload = {"model": selected["modelId"], "max_tokens": 16, "messages": [{"role": "user", "content": "Reply OK."}]}
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
-    if _is_go_identity(selected["hostId"], selected["providerId"]):
-        headers["User-Agent"] = "opencode/1.0 (lemmings-probe)"
+    if _is_go_identity(selected["hostId"], selected["providerId"]) and _is_documented_go_endpoint(endpoint):
+        headers["User-Agent"] = "lemmings-probe/4"
         headers["x-opencode-session"] = digest({key: selected.get(key) for key in ("hostId", "providerId", "modelId", "protocol")})
-    if selected["providerId"].lower().startswith("anthropic"):
+    if protocol == "messages":
         headers["x-api-key"] = secret
         headers["anthropic-version"] = "2023-06-01"
     else:

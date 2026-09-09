@@ -128,6 +128,18 @@ bad = {}
         with self.assertRaisesRegex(ValueError, "execution fields differ"):
             apply_profile_proposal(self.repo, tampered, tampered["proposalDigest"], home=self.home)
 
+    def test_unchanged_inventory_digest_survives_saved_inventory(self) -> None:
+        routes = {
+            "worker": [{"hostId": "codex", "providerId": "generated", "modelId": "worker"}],
+            "reviewer": [], "explorer": [],
+        }
+        first = build_profile_proposal(self.repo, "stable", routes, home=self.home)
+        apply_profile_proposal(self.repo, first, first["proposalDigest"], home=self.home)
+        second = build_profile_proposal(self.repo, "stable", routes, home=self.home)
+        third = build_profile_proposal(self.repo, "stable", routes, home=self.home)
+        self.assertEqual(first["inventoryDigest"], second["inventoryDigest"])
+        self.assertEqual(second["inventoryDigest"], third["inventoryDigest"])
+
     def test_project_active_profile_has_manual_priority(self) -> None:
         project_path = self.repo / ".agents" / "lemmings.json"
         project = json.loads(project_path.read_text(encoding="utf-8"))
