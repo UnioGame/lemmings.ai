@@ -108,25 +108,98 @@ wire_api = "responses"
         self.assertFalse(route["probed"])
         self.assertTrue(any(item["code"] == "catalog-stale" for item in snapshot["diagnostics"]))
 
-    def test_probe_is_explicit_and_does_not_send_a_prompt(self) -> None:
+    def test_online_go_catalog_is_bounded_and_offline_scan_does_not_network(self) -> None:
+        config = self.home / ".config" / "opencode"
+        config.mkdir(parents=True)
+        (config / "opencode.json").write_text(json.dumps({
+            "model": "opencode_go/local",
+            "provider": {"opencode_go": {"protocol": "chat-completions"}},
+        }), encoding="utf-8")
+
+        class Response:
+            status = 200
+            def read(self, size=-1):
+                return json.dumps({"data": [{"id": "openai/gpt-go", "protocol": "chat-completions"}]}).encode()
+            def close(self):
+                pass
+
+        with patch("lemmings.discovery.urllib.request.urlopen", return_value=Response()) as opened:
+            snapshot = scan_providers(self.repo, offline=False, home=self.home)
+        request = opened.call_args.args[0]
+        self.assertEqual("https://opencode.ai/zen/go/v1/models", request.full_url)
+        self.assertEqual("GET", request.method)
+        self.assertTrue(any(item["hostId"] == "opencode-go" and item["modelId"] == "gpt-go" for item in snapshot["routes"]))
+
+        class UnexpectedNetwork:
+            def __call__(self, *args, **kwargs):
+                raise AssertionError("offline scan must not perform network calls")
+        with patch("lemmings.discovery.urllib.request.urlopen", new=UnexpectedNetwork()):
+            offline = scan_providers(self.repo, offline=True, home=self.home)
+        self.assertIsInstance(offline["routes"], list)
+
+    def test_scan_honors_state_lock_before_provider_reads(self) -> None:
+        lock = self.home / ".lemmings" / "state.json.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("busy", encoding="utf-8")
+        try:
+            with self.assertRaisesRegex(ValueError, "locked"):
+                scan_providers(self.repo, offline=True, home=self.home)
+        finally:
+            lock.unlink(missing_ok=True)
+
+    def test_catalog_failure_preserves_stale_inventory(self) -> None:
+        config = self.home / ".config" / "opencode"
+        config.mkdir(parents=True)
+        (config / "opencode.json").write_text(json.dumps({
+            "model": "opencode_go/local",
+            "provider": {"opencode_go": {"protocol": "chat-completions"}},
+        }), encoding="utf-8")
+        state = self.home / ".lemmings"
+        state.mkdir()
+        (state / "state.json").write_text(json.dumps({"inventory": {
+            "providers": [{"providerId": "old", "source": "host-catalog", "authConfigured": True, "catalogStatus": "current"}],
+            "routes": [{"hostId": "opencode-go", "providerId": "old", "modelId": "old-model", "executor": "opencode", "protocol": "chat-completions", "configured": True, "catalogued": True, "compatible": True, "authConfigured": True, "probed": True, "source": "host-catalog"}],
+        }}), encoding="utf-8")
+        with patch("lemmings.discovery.urllib.request.urlopen", side_effect=OSError("network body must stay private")):
+            snapshot = scan_providers(self.repo, offline=False, home=self.home)
+        self.assertTrue(any(item["providerId"] == "old" for item in snapshot["routes"]))
+        self.assertTrue(any(item["code"] == "go-catalog-unavailable" for item in snapshot["diagnostics"]))
+        self.assertNotIn("network body", json.dumps(snapshot))
+
+    def test_targeted_probe_requires_auth_and_confirms_exact_model(self) -> None:
+        unsupported = probe_route({
+            "hostId": "opencode",
+            "providerId": "openai",
+            "modelId": "gpt",
+            "protocol": "responses",
+            "endpoint": "http://127.0.0.1:9/v1/responses",
+        }, home=self.home)
+        self.assertFalse(unsupported["probed"])
+        self.assertEqual("unsupported", unsupported["status"])
+
+        class Response:
+            status = 200
+            def read(self, size=-1):
+                return b'{"model":"gpt"}'
+            def close(self):
+                pass
+
         route = {
             "hostId": "opencode",
             "providerId": "openai",
             "modelId": "gpt",
             "protocol": "responses",
+            "endpoint": "http://127.0.0.1:9/v1/responses",
+            "apiKey": "SECRET_PROBE",
         }
-        result = probe_route(route, home=self.home)
+        with patch("lemmings.discovery.urllib.request.urlopen", return_value=Response()) as opened:
+            result = probe_route(route, home=self.home)
+        request = opened.call_args.args[0]
+        self.assertEqual("POST", request.method)
+        self.assertEqual("http://127.0.0.1:9/v1/responses", request.full_url)
+        self.assertIn(b'"model": "gpt"', request.data)
+        self.assertNotIn("SECRET_PROBE", json.dumps(result))
         self.assertTrue(result["probed"])
-        self.assertEqual("metadata-only", result["status"])
-        self.assertIsNone(result["reachable"])
-
-        class UnexpectedNetwork:
-            def __call__(self, *args, **kwargs):
-                raise AssertionError("scan must not perform implicit network probes")
-
-        with patch("lemmings.discovery.urllib.request.urlopen", new=UnexpectedNetwork()):
-            snapshot = scan_providers(self.repo, offline=False, home=self.home)
-        self.assertIsInstance(snapshot["routes"], list)
 
 
 if __name__ == "__main__":

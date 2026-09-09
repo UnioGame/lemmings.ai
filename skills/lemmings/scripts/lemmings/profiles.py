@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from functools import wraps
 from pathlib import Path
 from typing import Any, Mapping
 
-from .discovery import SCHEMA_VERSION, digest, normalize_route, scan_providers
+from .discovery import SCHEMA_VERSION, digest, normalize_route, scan_providers, state_lock
 
 
 ROLES = ("worker", "reviewer", "explorer")
@@ -46,11 +47,15 @@ def _state_path(home: Path) -> Path:
 
 
 def _load(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
     try:
         value = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, ValueError):
-        return {}
-    return dict(value) if isinstance(value, Mapping) else {}
+    except (OSError, UnicodeError, ValueError) as error:
+        raise ValueError(f"invalid JSON profile source: {path.name}") from error
+    if not isinstance(value, Mapping):
+        raise ValueError(f"profile source must be a JSON object: {path.name}")
+    return dict(value)
 
 
 def _raw_digest(path: Path) -> str:
@@ -125,6 +130,39 @@ def _has_routes(routes: Mapping[str, Any] | None) -> bool:
     return bool(routes and any(isinstance(routes.get(role), list) and routes.get(role) for role in ROLES))
 
 
+def _transactional(function):
+    @wraps(function)
+    def wrapped(repo, *args, home=None, **kwargs):
+        with state_lock(_home(home)):
+            return function(repo, *args, home=home, **kwargs)
+    return wrapped
+
+
+def _active_name(source: Mapping[str, Any], label: str) -> str | None:
+    value = source.get("activeProfile")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip() or value.strip() not in _profile_map(source):
+        raise ValueError(f"{label} activeProfile does not name an available profile")
+    return value.strip()
+
+
+def _route_identity(route: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    return tuple(str(route.get(key, "")) for key in ("hostId", "providerId", "modelId", "variantId"))
+
+
+def _validate_bound_routes(role_routes: Mapping[str, list[Mapping[str, Any]]], inventory: Mapping[str, Any]) -> None:
+    bound = [item for item in inventory.get("routes", []) if isinstance(item, Mapping)]
+    for role in ROLES:
+        for route in role_routes.get(role, []):
+            identity = _route_identity(route)
+            matches = [item for item in bound if _route_identity(item) == identity]
+            if not matches:
+                raise ValueError(f"profile route is absent from bound inventory: {role}")
+            if not any(item.get("compatible") is True for item in matches):
+                raise ValueError(f"profile route is incompatible with bound inventory: {role}")
+
+
 def _project_manual_routes(project: Mapping[str, Any], selected_name: str | None = None) -> tuple[dict[str, list[dict[str, Any]]], str | None]:
     model_routes = project.get("modelRoutes")
     legacy = _role_routes(model_routes) if isinstance(model_routes, Mapping) and model_routes else {role: [] for role in ROLES}
@@ -154,7 +192,7 @@ def _state_profiles(state: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _inventory_for(repo: Path, home: Path, host_catalog: Mapping[str, Any] | list[Any] | None = None) -> dict[str, Any]:
-    snapshot = scan_providers(repo, offline=True, home=home, host_catalog=host_catalog)
+    snapshot = scan_providers(repo, offline=False, home=home, host_catalog=host_catalog)
     return snapshot
 
 
@@ -189,18 +227,11 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
 
 
 def _locked_write(path: Path, value: Mapping[str, Any]) -> None:
-    lock = path.with_suffix(path.suffix + ".lock")
-    try:
-        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as error:
-        raise ValueError("generated profile state is locked") from error
-    try:
-        os.close(descriptor)
+    with state_lock(path.parent.parent):
         _atomic_write(path, value)
-    finally:
-        lock.unlink(missing_ok=True)
 
 
+@_transactional
 def build_profile_proposal(
     repo: Path | str,
     name: str,
@@ -215,6 +246,7 @@ def build_profile_proposal(
     role_routes = _role_routes(routes)
     project, personal, manual_digest = _manual_source(repo_path, home_path)
     inventory = _inventory_for(repo_path, home_path)
+    _validate_bound_routes(role_routes, inventory)
     body = {
         "schemaVersion": SCHEMA_VERSION,
         "name": profile_name,
@@ -228,6 +260,7 @@ def build_profile_proposal(
     return {**body, "proposalDigest": digest(body)}
 
 
+@_transactional
 def apply_profile_proposal(
     repo: Path | str,
     proposal: Mapping[str, Any],
@@ -251,6 +284,7 @@ def apply_profile_proposal(
     if proposal.get("manualDigest") != current_manual_digest:
         raise ValueError("manual profile inputs changed since proposal")
     role_routes = _role_routes(proposal.get("roleRoutes") or {})
+    _validate_bound_routes(role_routes, current_inventory)
     state_path = _state_path(home_path)
     state = _load(state_path)
     profiles = dict(_state_profiles(state))
@@ -271,6 +305,7 @@ def apply_profile_proposal(
     }
 
 
+@_transactional
 def use_profile(
     repo: Path | str,
     name: str,
@@ -298,10 +333,13 @@ def use_profile(
     return {"ok": True, "schemaVersion": SCHEMA_VERSION, "name": profile_name, "selection": profile_name}
 
 
+@_transactional
 def inspect_profiles(repo: Path | str, *, home: Path | str | None = None) -> dict[str, Any]:
     repo_path, home_path = _repo(repo), _home(home)
     project, personal, _ = _manual_source(repo_path, home_path)
     state = _load(_state_path(home_path))
+    project_active = _active_name(project, "project")
+    personal_active = _active_name(personal, "personal")
     origins: dict[str, list[str]] = {}
     for name in _profile_map(project):
         origins.setdefault(str(name), []).append("project-manual")
@@ -312,7 +350,7 @@ def inspect_profiles(repo: Path | str, *, home: Path | str | None = None) -> dic
     selections = state.get("selections") if isinstance(state.get("selections"), Mapping) else {}
     selected = selections.get(_repo_key(repo_path))
     if not isinstance(selected, str) or not selected:
-        selected = personal.get("activeProfile") if isinstance(personal.get("activeProfile"), str) else None
+        selected = project_active or personal_active
     names = sorted(origins)
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -323,6 +361,7 @@ def inspect_profiles(repo: Path | str, *, home: Path | str | None = None) -> dic
     }
 
 
+@_transactional
 def resolve_profile(
     repo: Path | str,
     name: str | None = None,
@@ -335,20 +374,22 @@ def resolve_profile(
     state = _load(_state_path(home_path))
     state_profiles = _state_profiles(state)
     selections = state.get("selections") if isinstance(state.get("selections"), Mapping) else {}
+    project_active = _active_name(project, "project")
+    personal_active = _active_name(personal, "personal")
     selected_name = name.strip() if isinstance(name, str) and name.strip() else None
     if selected_name is None:
         current = selections.get(_repo_key(repo_path))
         if isinstance(current, str) and current.strip():
             selected_name = current.strip()
-        elif isinstance(personal.get("activeProfile"), str) and personal.get("activeProfile", "").strip():
-            selected_name = str(personal["activeProfile"]).strip()
-    project_routes, project_source = _project_manual_routes(project, selected_name)
+        elif project_active:
+            selected_name = project_active
+        elif personal_active:
+            selected_name = personal_active
+    project_routes, project_source = _project_manual_routes(project, project_active or selected_name)
     personal_name = selected_name
     personal_profiles = _profile_map(personal)
     if personal_name not in personal_profiles:
-        active_personal = personal.get("activeProfile")
-        if isinstance(active_personal, str) and active_personal.strip() in personal_profiles:
-            personal_name = active_personal.strip()
+        personal_name = personal_active
     personal_routes, personal_source = _personal_routes(personal, personal_name)
     generated_value = state_profiles.get(selected_name) if selected_name else None
     generated_routes = _role_routes(generated_value) if isinstance(generated_value, Mapping) else {role: [] for role in ROLES}

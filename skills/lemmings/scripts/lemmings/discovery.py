@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import re
+import threading
+from contextlib import contextmanager
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +20,45 @@ EXECUTORS = {"native", "codex", "opencode"}
 ROUTE_KEYS = ("hostId", "providerId", "modelId", "variantId", "executor", "profileName", "protocol", "configured", "catalogued", "compatible", "authConfigured", "probed", "quotaGroup", "source")
 SAFE_SOURCES = {"codex-config", "codex-profile", "codex-auth", "opencode-config", "opencode-auth", "host-catalog", "state-inventory", "manual", "project-manual", "personal-manual", "generated", "unknown"}
 SECRET_KEYS = {"access", "access_token", "api_key", "apikey", "auth", "authorization", "client_secret", "credential", "credentials", "key", "password", "private_key", "refresh", "refresh_token", "secret", "token"}
+
+_STATE_LOCKS: dict[str, tuple[int, int]] = {}
+
+
+@contextmanager
+def state_lock(home: Path | str | None = None):
+    """Acquire the generated-state lock before reading or mutating state."""
+    target = _home(home) / ".lemmings" / "state.json.lock"
+    key = str(target)
+    owner = threading.get_ident()
+    current = _STATE_LOCKS.get(key)
+    if current and current[0] == owner:
+        _STATE_LOCKS[key] = (owner, current[1] + 1)
+        try:
+            yield
+        finally:
+            depth = _STATE_LOCKS.get(key, (owner, 1))[1] - 1
+            if depth:
+                _STATE_LOCKS[key] = (owner, depth)
+            else:
+                _STATE_LOCKS.pop(key, None)
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as error:
+        raise ValueError("generated profile state is locked") from error
+    else:
+        os.close(descriptor)
+    _STATE_LOCKS[key] = (owner, 1)
+    try:
+        yield
+    finally:
+        _STATE_LOCKS.pop(key, None)
+        target.unlink(missing_ok=True)
+
+
+class _TomlUnsupported(RuntimeError):
+    pass
 
 def canonical_json(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -103,34 +144,6 @@ def _jsonc(text: str) -> Any:
             output.append(char)
     return json.loads("".join(output))
 
-def _toml_fallback(text: str) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    current = result
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current = result
-            for part in line[1:-1].split("."):
-                key = part.strip().strip('"')
-                child = current.setdefault(key, {})
-                if not isinstance(child, dict):
-                    child = {}
-                    current[key] = child
-                current = child
-            continue
-        if "=" not in line:
-            continue
-        key, raw_value = line.split("=", 1)
-        value = raw_value.split(" #", 1)[0].strip()
-        try:
-            parsed = _jsonc(value) if value.startswith(('"', "[", "{")) else value
-        except (TypeError, ValueError):
-            parsed = value.strip('"')
-        current[key.strip().strip('"')] = parsed
-    return result
-
 def _read(path: Path) -> Any | None:
     try:
         text = path.read_text(encoding="utf-8-sig")
@@ -141,11 +154,20 @@ def _read(path: Path) -> Any | None:
             return _jsonc(text)
         try:
             import tomllib
-            return tomllib.loads(text)
-        except (ImportError, AttributeError):
-            return _toml_fallback(text)
+        except (ImportError, AttributeError) as error:
+            raise _TomlUnsupported("TOML discovery requires Python 3.11 or tomllib") from error
+        return tomllib.loads(text)
     except (TypeError, ValueError):
         return None
+
+def _read_safe(path: Path, diagnostics: list[dict[str, str]] | None = None) -> Any | None:
+    try:
+        return _read(path)
+    except _TomlUnsupported:
+        if diagnostics is not None:
+            diagnostics.append(_diag("toml-unsupported", "TOML discovery is unavailable on this Python runtime", "codex-config"))
+        return None
+
 
 def _unique(paths: Iterable[Path]) -> list[Path]:
     result: list[Path] = []
@@ -422,51 +444,103 @@ def _alias(routes: Iterable[Mapping[str, Any]], known: Iterable[str]) -> list[di
                 result.append(_diag("provider-alias-mismatch", f"provider alias {value} differs from {dashed}; edit the source explicitly"))
     return result
 
+GO_CATALOG_URL = "https://opencode.ai/zen/go/v1/models"
+_GO_PROVIDER_ALIASES = {"opencode", "opencode-go", "opencode_go", "go"}
+
+
+def _go_configured(routes: Iterable[Mapping[str, Any]]) -> bool:
+    for route in routes:
+        host = str(route.get("hostId", "")).lower().replace("_", "-")
+        provider = str(route.get("providerId", "")).lower().replace("_", "-")
+        if host in {"opencode-go", "go"} or provider in {item.replace("_", "-") for item in _GO_PROVIDER_ALIASES}:
+            return True
+    return False
+
+
+def _fetch_go_catalog(diagnostics: list[dict[str, str]]) -> Any | None:
+    request = urllib.request.Request(
+        GO_CATALOG_URL,
+        method="GET",
+        headers={"Accept": "application/json", "User-Agent": "lemmings-discovery/4"},
+    )
+    try:
+        response = urllib.request.urlopen(request, timeout=3)
+        try:
+            body = response.read(2 * 1024 * 1024 + 1)
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        if len(body) > 2 * 1024 * 1024:
+            diagnostics.append(_diag("go-catalog-too-large", "documented Go catalog exceeded the bounded response limit"))
+            return None
+        payload = json.loads(body.decode("utf-8"))
+        data = payload.get("data") if isinstance(payload, Mapping) else payload
+        if not isinstance(data, (list, Mapping)):
+            diagnostics.append(_diag("go-catalog-invalid", "documented Go catalog returned an unsupported shape"))
+            return None
+        return {"hostId": "opencode-go", "data": data}
+    except (OSError, urllib.error.URLError, ValueError, UnicodeError, TimeoutError):
+        diagnostics.append(_diag("go-catalog-unavailable", "documented Go catalog could not be fetched"))
+        return None
+
+
 def scan_providers(repo: Path | str, *, offline: bool = False, home: Path | str | None = None, host_catalog: Mapping[str, Any] | list[Any] | None = None) -> dict[str, Any]:
+    home_path = _home(home)
+    with state_lock(home_path):
+        return _scan_providers(repo, offline=offline, home=home, host_catalog=host_catalog)
+
+
+def _scan_providers(repo: Path | str, *, offline: bool = False, home: Path | str | None = None, host_catalog: Mapping[str, Any] | list[Any] | None = None) -> dict[str, Any]:
     repo_path, home_path = _repo(repo), _home(home)
     paths = _paths(repo_path, home_path)
-    diagnostics = []
+    diagnostics: list[dict[str, str]] = []
     routes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     providers: dict[str, dict[str, Any]] = {}
     auth_ids: set[str] = set()
-    for path in paths["codex-auth"] + paths["opencode-auth"]:
-        value = _read(path)
+    for candidate in paths["codex-auth"] + paths["opencode-auth"]:
+        value = _read_safe(candidate, diagnostics)
         if value is not None:
             auth_ids.update(_auth_present(value))
-    for path in paths["codex"]:
-        value = _read(path)
+    for candidate in paths["codex"]:
+        value = _read_safe(candidate, diagnostics)
         if isinstance(value, Mapping):
-            _codex(value, "codex-profile" if "profile" in path.name.lower() else "codex-config", routes, diagnostics)
-            if _provider_auth(value):
-                provider = _identifier(value.get("model_provider") or value.get("modelProvider") or value.get("providerId"))
-                if provider:
-                    auth_ids.add(provider)
-    for path in paths["opencode"]:
-        value = _read(path)
+            _codex(value, "codex-profile" if "profile" in candidate.name.lower() else "codex-config", routes, diagnostics)
+            provider = _identifier(value.get("model_provider") or value.get("modelProvider") or value.get("providerId"))
+            if provider and _provider_auth(value):
+                auth_ids.add(provider)
+    for candidate in paths["opencode"]:
+        value = _read_safe(candidate, diagnostics)
         if isinstance(value, Mapping):
             _opencode(value, routes)
             maps = value.get("provider") or value.get("providers") or {}
             if isinstance(maps, Mapping):
                 for provider, config in maps.items():
-                    if isinstance(config, Mapping) and _provider_auth(config) and _identifier(provider):
-                        auth_ids.add(_identifier(provider) or "")
-    catalog_routes, catalog_hosts = ([], set())
+                    provider_id = _identifier(provider)
+                    if provider_id and isinstance(config, Mapping) and _provider_auth(config):
+                        auth_ids.add(provider_id)
+    catalog_routes: list[dict[str, Any]] = []
+    catalog_hosts: set[str] = set()
+    catalog_loaded = host_catalog is not None
     if host_catalog is not None:
         catalog_routes, catalog_hosts = _catalog(host_catalog, diagnostics)
-        for route in catalog_routes:
-            _add(routes, route)
-    inventory = _state_inventory(home_path)
+    go_attempted = not offline and host_catalog is None and _go_configured(routes.values())
+    if go_attempted:
+        fetched = _fetch_go_catalog(diagnostics)
+        if fetched is not None:
+            catalog_loaded = True
+            catalog_routes, catalog_hosts = _catalog(fetched, diagnostics)
+    for route in catalog_routes:
+        _add(routes, route)
+    with state_lock(home_path):
+        inventory = _state_inventory(home_path)
     stale_providers = [item for item in (inventory or {}).get("providers", []) if isinstance(item, Mapping)]
     stale_routes = [item for item in (inventory or {}).get("routes", []) if isinstance(item, Mapping)]
-    if offline and not catalog_routes:
+    if not catalog_loaded and stale_routes and (offline or go_attempted):
         for item in stale_routes:
-            try:
-                _add(routes, {**dict(item), "source": "state-inventory", "probed": False})
-            except (TypeError, ValueError):
-                pass
-        if stale_routes:
-            diagnostics.append(_diag("catalog-stale", "using the previous sanitized inventory in offline mode", "state-inventory"))
-    current_catalog = host_catalog is not None
+            _add(routes, {**dict(item), "source": "state-inventory", "probed": False})
+        diagnostics.append(_diag("catalog-stale", "using the previous sanitized inventory after catalog unavailability", "state-inventory"))
+    current_catalog = catalog_loaded
     for route in routes.values():
         provider = str(route["providerId"])
         route["authConfigured"] = bool(route.get("authConfigured")) or provider in auth_ids
@@ -484,37 +558,121 @@ def scan_providers(repo: Path | str, *, offline: bool = False, home: Path | str 
     if not routes and not providers:
         diagnostics.append(_diag("no-providers", "no supported provider metadata was found"))
     diagnostics.extend(_alias(routes.values(), [*providers, *catalog_hosts]))
-    return {"schemaVersion": SCHEMA_VERSION, "scannedAt": _now(), "providers": sorted(providers.values(), key=lambda item: item["providerId"]), "routes": sorted(routes.values(), key=_route_key), "diagnostics": sorted(diagnostics, key=lambda item: (item.get("code", ""), item.get("source", ""), item.get("message", "")))}
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "scannedAt": _now(),
+        "providers": sorted(providers.values(), key=lambda item: item["providerId"]),
+        "routes": sorted(routes.values(), key=_route_key),
+        "diagnostics": sorted(diagnostics, key=lambda item: (item.get("code", ""), item.get("source", ""), item.get("message", ""))),
+    }
+
+def _auth_secret(home: Path, provider: str) -> str | None:
+    compact = {item.replace("_", "") for item in SECRET_KEYS}
+    target = provider.lower().replace("-", "_")
+
+    def find(node: Any, provider_hint: str | None = None) -> str | None:
+        if isinstance(node, Mapping):
+            for key, value in node.items():
+                lowered = str(key).lower().replace("-", "_")
+                if provider_hint == target and (lowered in SECRET_KEYS or lowered.replace("_", "") in compact) and isinstance(value, str) and value:
+                    return value
+                if isinstance(value, Mapping):
+                    result = find(value, target if lowered == target else provider_hint)
+                    if result:
+                        return result
+                elif isinstance(value, list):
+                    result = find(value, provider_hint)
+                    if result:
+                        return result
+        elif isinstance(node, list):
+            for value in node:
+                result = find(value, provider_hint)
+                if result:
+                    return result
+        return None
+
+    for candidate in _paths(home, home)["codex-auth"] + _paths(home, home)["opencode-auth"] + _paths(home, home)["codex"] + _paths(home, home)["opencode"]:
+        value = _read_safe(candidate)
+        if value is not None:
+            secret = find(value)
+            if secret:
+                return secret
+    return None
+
+
+def _probe_url(endpoint: str, protocol: str) -> str | None:
+    parsed = urllib.parse.urlsplit(endpoint)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+        return None
+    suffix = {"responses": "/responses", "chat-completions": "/chat/completions", "messages": "/messages"}.get(protocol)
+    if suffix is None:
+        return None
+    path = parsed.path.rstrip("/")
+    if not path.endswith(suffix):
+        if path.endswith("/v1") or path.endswith("/api"):
+            path += suffix
+        else:
+            return None
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
 
 def probe_route(route: Mapping[str, Any], *, home: Path | str | None = None) -> dict[str, Any]:
     if not isinstance(route, Mapping):
         raise ValueError("route must be an object")
     selected = normalize_route(route)
-    auth_ids: set[str] = set()
-    paths = _paths(_home(home), _home(home))
-    for path in paths["codex-auth"] + paths["opencode-auth"]:
-        value = _read(path)
-        if value is not None:
-            auth_ids.update(_auth_present(value))
-    selected["authConfigured"] = bool(selected.get("authConfigured")) or selected["providerId"] in auth_ids
+    selected["probed"] = False
+    diagnostics: list[dict[str, str]] = []
+    protocol = selected["protocol"]
+    endpoint = _text(route.get("endpoint"))
+    secret = _text(route.get("apiKey") or route.get("authToken") or route.get("token"))
+    if not secret:
+        secret = _auth_secret(_home(home), selected["providerId"])
+    selected["authConfigured"] = bool(secret) or bool(selected.get("authConfigured"))
+    target = _probe_url(endpoint, protocol) if endpoint else None
+    if not target:
+        diagnostics.append(_diag("probe-unsupported", "route lacks a supported exact protocol endpoint"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
+    if not secret:
+        diagnostics.append(_diag("probe-auth-required", "targeted probe requires configured authentication"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
+    if protocol == "responses":
+        payload = {"model": selected["modelId"], "input": []}
+    elif protocol == "chat-completions":
+        payload = {"model": selected["modelId"], "messages": []}
+    else:
+        payload = {"model": selected["modelId"], "max_tokens": 1, "messages": []}
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if selected["providerId"].lower().startswith("anthropic"):
+        headers["x-api-key"] = secret
+        headers["anthropic-version"] = "2023-06-01"
+    else:
+        headers["Authorization"] = f"Bearer {secret}"
+    request = urllib.request.Request(target, data=json.dumps(payload).encode("utf-8"), method="POST", headers=headers)
+    try:
+        response = urllib.request.urlopen(request, timeout=3)
+        try:
+            status_code = int(getattr(response, "status", 200))
+            body = response.read(64 * 1024)
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+    except (OSError, urllib.error.URLError, ValueError, TimeoutError):
+        diagnostics.append(_diag("probe-unavailable", "targeted route probe did not complete"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unavailable", "reachable": False, "diagnostics": diagnostics}
+    if not 200 <= status_code < 300:
+        diagnostics.append(_diag("probe-rejected", "targeted route probe was rejected"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "rejected", "reachable": False, "diagnostics": diagnostics}
+    try:
+        response_value = json.loads(body.decode("utf-8"))
+    except (TypeError, ValueError, UnicodeError):
+        response_value = None
+    observed = response_value.get("model") if isinstance(response_value, Mapping) else None
+    if not isinstance(observed, str) or not (observed == selected["modelId"] or observed.endswith("/" + selected["modelId"])):
+        diagnostics.append(_diag("probe-model-mismatch", "targeted response did not confirm the requested model"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": True, "diagnostics": diagnostics}
     selected["probed"] = True
-    status, reachable, diagnostics = "metadata-only", None, []
-    endpoint = _text(route.get("probeUrl")) or _text(route.get("endpoint"))
-    if endpoint:
-        parsed = urllib.parse.urlsplit(endpoint)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
-            status = "invalid-endpoint"
-            diagnostics.append(_diag("probe-endpoint-invalid", "explicit probe endpoint is not a safe HTTP URL"))
-        else:
-            safe_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", "", ""))
-            try:
-                request = urllib.request.Request(safe_url, method="HEAD", headers={"User-Agent": "lemmings-discovery/4"})
-                with urllib.request.urlopen(request, timeout=2) as response:
-                    reachable = 200 <= int(getattr(response, "status", 200)) < 400
-                    status = "reachable" if reachable else "unavailable"
-            except (OSError, urllib.error.URLError, ValueError, TimeoutError):
-                status = "unavailable"
-                diagnostics.append(_diag("probe-unavailable", "explicit route probe did not complete"))
-    return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": True, "status": status, "reachable": reachable, "diagnostics": diagnostics}
+    return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": True, "status": "probed", "reachable": True, "diagnostics": diagnostics}
 
-__all__ = ["SCHEMA_VERSION", "canonical_json", "digest", "normalize_route", "probe_route", "scan_providers"]
+
+__all__ = ["SCHEMA_VERSION", "canonical_json", "digest", "normalize_route", "probe_route", "scan_providers", "state_lock"]
