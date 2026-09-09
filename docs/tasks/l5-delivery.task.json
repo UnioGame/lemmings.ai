@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 15,
+  "revision": 16,
   "taskId": "L5-DELIVERY",
   "goal": "Deliver zero-config Lemmings with provider discovery, named presets, execution adapters, safe workspaces and seven technology rule packs.",
   "acceptance": [
@@ -31,7 +31,7 @@
   "parallelReason": "independent_paths",
   "reviewRequired": true,
   "planReviewRequired": true,
-  "planReviewRef": "docs/tasks/reviews/l5-plan-final.json",
+  "planReviewRef": "docs/tasks/reviews/l5-plan-final.schema4.json",
   "reviewPolicy": null,
   "specialization": null,
   "state": "Accepted",
