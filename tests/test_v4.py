@@ -60,6 +60,12 @@ class WaveTests(unittest.TestCase):
             checked = validate_batch(Path.cwd(), tasks, phase, [value["taskId"] for value in tasks], self.profile, available_slots=size + 1)
             self.assertTrue(checked.ok, checked.as_dict())
 
+    def test_parallel_wave_cannot_mix_primary_and_isolated_writer(self) -> None:
+        tasks, phase = self.wave(2)
+        tasks[0]["workspace"].update(backend="current", workspaceId=None)
+        checked = validate_batch(Path.cwd(), tasks, phase, ["T0", "T1"], self.profile)
+        self.assertIn("workspace.parallel", {item.code for item in checked.findings})
+
     def test_conflicts_duplicates_dependencies_and_capacity_are_rejected(self) -> None:
         tasks, phase = self.wave(4)
         tasks[1]["ownership"]["owned"] = tasks[0]["ownership"]["owned"]
@@ -100,7 +106,7 @@ class EvidenceTests(unittest.TestCase):
             value.update({"planReviewRequired": True, "planReviewRef": "reviews/plan.json"})
             review = {
                 "schemaVersion": 4, "revision": 0, "reviewId": "PLAN-1", "status": "Accepted",
-                "hostId": "codex", "reviewerModel": "openai/gpt-5.6-sol:high", "cycle": 1,
+                "hostId": "native", "reviewerModel": "openai/gpt-5.6-sol:high", "cycle": 1,
                 "subject": {"kind": "plan", "ownerKind": "task", "ownerId": value["taskId"], "planDigest": plan_digest(value)},
                 "findings": [], "validation": [],
             }

@@ -408,7 +408,8 @@ def _validate_v4_profile(profile: Mapping[str, Any]) -> ValidationResult:
     mode = str(profile.get("mode", "auto")).lower()
     if mode not in MODES:
         result.error("profile.mode", f"mode must be one of {sorted(MODES)}")
-    result.extend(validate_model_routes(profile.get("modelRoutes")))
+    if profile.get("modelRoutes") != {}:
+        result.extend(validate_model_routes(profile.get("modelRoutes")))
     context_policy = profile.get("contextPolicy")
     if not isinstance(context_policy, Mapping):
         result.error("profile.context_policy", "contextPolicy is required")
@@ -557,7 +558,12 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
     role = str(task.get("role", "worker"))
     if role not in TASK_ROLES:
         result.error("task.role", f"unsupported task role: {role}")
-    profile = profile or {}
+    from .effective import effective_profile
+    try:
+        profile = effective_profile(task, profile or {})
+    except ValueError as error:
+        result.error("task.effective_config", str(error))
+        return result
     if role == "manager":
         return result
     host_id = models.get("hostId")
@@ -570,7 +576,9 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
     allowed = [item for item in allowed if item]
     recovery_route = current_recovery_route(task, role)
     recovery_override = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == assigned)
-    if assigned not in allowed and not recovery_override:
+    native_default = not profile.get("modelRoutes") and assigned == "current-host/default" and host_id == "native"
+    explicit_pin = bool(requested and requested == assigned)
+    if assigned not in allowed and not recovery_override and not native_default and not explicit_pin:
         result.error("model.assignment", f"models.assigned is not an approved {host_id}/{role} route")
     if requested and requested != assigned and not recovery_override:
         result.error("model.pin", "models.requested must take priority over assignment")
@@ -1054,6 +1062,10 @@ def plan_digest(value: Mapping[str, Any]) -> str:
     else:
         names = ("phaseId", "baselineSha", "contractsFrozen", "contracts", "taskDag", "leases")
     body = {name: value.get(name) for name in names}
+    if value.get("effectiveConfig"):
+        body["effectiveConfig"] = value["effectiveConfig"]
+    if value.get("ruleSelection"):
+        body["ruleSelection"] = value["ruleSelection"]
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -1077,12 +1089,15 @@ def validate_review(
     if not review.get("reviewerModel") or not review.get("hostId"):
         result.error("review.model", "v4 Review requires hostId and actual reviewerModel")
     elif profile:
+        from .effective import effective_profile
+        profile = effective_profile(task or {}, profile)
         host_id = review.get("hostId")
         choices = (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or [])
         allowed = [route_name(item) for item in choices if isinstance(item, Mapping)]
         recovery_route = current_recovery_route(task or {}, "reviewer")
         recovery_allowed = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == review.get("reviewerModel"))
-        if review.get("reviewerModel") not in allowed and not recovery_allowed:
+        native_review = not profile.get("modelRoutes") and host_id == "native"
+        if review.get("reviewerModel") not in allowed and not recovery_allowed and not native_review:
             result.error("review.model", "reviewerModel is not an approved host reviewer route")
     if not isinstance(review.get("findings"), list):
         result.error("review.findings", "review findings must be an array")
@@ -1384,7 +1399,7 @@ def validate_batch(
             if normalized in workspaces:
                 result.error("worktree.duplicate", f"duplicate workspace: {identity}")
             workspaces.add(normalized)
-    if len(current) > 1:
+    if len(chosen) > 1 and current:
         result.error("workspace.parallel", f"parallel writers cannot share current checkout: {', '.join(current)}")
     for index, task in enumerate(chosen):
         left = [*as_list((task.get("ownership") or {}).get("owned")), *as_list((task.get("ownership") or {}).get("shared"))]

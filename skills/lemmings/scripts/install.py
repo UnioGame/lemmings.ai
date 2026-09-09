@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import filecmp
 import json
 import os
@@ -81,7 +82,7 @@ def installation_busy(common: Path) -> str | None:
         except (OSError, ValueError, json.JSONDecodeError):
             return f"unreadable workspace registry: {registry}"
         for entry in entries:
-            if isinstance(entry, dict) and (entry.get("state") == "active" or entry.get("leases") or entry.get("processes") or entry.get("invocationId")):
+            if isinstance(entry, dict) and (entry.get("state") == "active" or entry.get("leases") or entry.get("processes") or entry.get("activeInvocationId") or entry.get("invocationId")):
                 return f"busy Lemmings workspace {entry.get('workspaceId') or '<unknown>'}"
     return None
 
@@ -120,18 +121,13 @@ def install(args: argparse.Namespace) -> int:
         repo = outermost_superproject(package_root)
     if not repo:
         raise ValueError("cannot infer the consumer Git repository; pass --repo PATH")
-    project = (repo / args.project).resolve() if args.project else None
-    if project is None:
-        projects = find_unity_projects(repo)
-        if len(projects) != 1:
-            raise ValueError("expected one Unity project; pass --project PATH")
-        project = projects[0]
-    if not is_unity_project(project):
-        raise ValueError(f"not a Unity project: {project}")
+    project = (repo / args.project).resolve() if args.project else repo
+    if not project.is_dir():
+        raise ValueError("project directory does not exist")
     try:
         project_relative = relative(project, repo)
     except ValueError as error:
-        raise ValueError("Unity project must be inside the consumer repository") from error
+        raise ValueError("project must be inside the consumer repository") from error
     common = git_common_dir(repo)
     busy = installation_busy(common)
     if busy:
@@ -139,7 +135,15 @@ def install(args: argparse.Namespace) -> int:
 
     profile = load_json(skill_source / "defaults.json")
     profile["game"]["projectPath"] = project_relative
+    profile["game"]["engine"] = "unity" if is_unity_project(project) else "auto"
     profile["game"]["workspace"]["validationPath"] = f"../{repo.name}.lemmings.validation"
+    existing_profile = repo / ".agents/lemmings.json"
+    if existing_profile.is_file():
+        existing = load_json(existing_profile)
+        if existing.get("schemaVersion") != 4:
+            raise ValueError("unsupported profile schema; replace the legacy bundle explicitly")
+        profile = merge_settings(profile, existing)
+    profile["distributionVersion"] = VERSION
     try:
         profile["tooling"] = {"root": relative(package_root, repo)}
         package_inside_repo = True
@@ -168,6 +172,13 @@ def install(args: argparse.Namespace) -> int:
         (stage / "agents").mkdir(parents=True)
         for name in OWNED_AGENTS[:3]:
             shutil.copy2(agents_source / name, stage / "agents" / name)
+            previous = agents_target / name
+            if previous.is_file():
+                overrides = [line for line in previous.read_text(encoding="utf-8-sig").splitlines()
+                             if line.partition("=")[0].strip() in {"model", "model_reasoning_effort"}]
+                if overrides:
+                    target = stage / "agents" / name
+                    target.write_text(target.read_text(encoding="utf-8") + "\n" + "\n".join(overrides) + "\n", encoding="utf-8")
         move_if_present(skill_target, backup / "skill", moved)
         move_if_present(profile_target, backup / "lemmings.json", moved)
         for name in OWNED_AGENTS:
@@ -211,6 +222,14 @@ def install(args: argparse.Namespace) -> int:
         shutil.rmtree(transaction, ignore_errors=True)
     print(f"Lemmings {VERSION} installed and verified; runtime is inactive.")
     return 0
+
+
+def merge_settings(defaults: dict, existing: dict) -> dict:
+    """Fill missing values while preserving existing v4 settings."""
+    result = copy.deepcopy(defaults)
+    for key, value in existing.items():
+        result[key] = merge_settings(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else copy.deepcopy(value)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

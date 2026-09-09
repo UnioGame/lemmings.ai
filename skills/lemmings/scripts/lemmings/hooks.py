@@ -17,13 +17,15 @@ if __package__ in (None, ""):
     from lemmings.models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from lemmings.telemetry import contains_sensitive_text, looks_absolute_path
     from lemmings.workspace import load_registry
-    from lemmings.invocations import build_invocation, find_invocation, profile_digest, result_findings
+    from lemmings.invocations import build_invocation, find_invocation, profile_digest, result_findings, invocation_digest
+    from lemmings.effective import effective_profile, checked_effective
 else:
     from .contracts import SCHEMA_VERSION, CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, as_list, candidate_head, current_recovery_route, path_matches, plan_digest, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_models, validate_profile, validate_task
     from .models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from .telemetry import contains_sensitive_text, looks_absolute_path
     from .workspace import load_registry
-    from .invocations import build_invocation, find_invocation, profile_digest, result_findings
+    from .invocations import build_invocation, find_invocation, profile_digest, result_findings, invocation_digest
+    from .effective import effective_profile, checked_effective
 
 READ_ONLY_COMMANDS = {
     "rg", "grep", "ls", "dir", "pwd", "type", "cat", "head", "tail",
@@ -415,12 +417,20 @@ def stored_invocation(task: Mapping[str, Any], payload: Mapping[str, Any], role:
 def context_warnings(packet: Mapping[str, Any], task: Mapping[str, Any], profile: Mapping[str, Any], payload: Mapping[str, Any]) -> list[str]:
     policy = profile.get("contextPolicy") if isinstance(profile.get("contextPolicy"), Mapping) else DEFAULT_CONTEXT_POLICY
     warnings: list[str] = []
-    if packet.get("profileDigest") != profile_digest(profile):
+    frozen = task.get("effectiveConfig")
+    if frozen:
+        try:
+            checked_effective(frozen)
+        except ValueError as error:
+            warnings.append(str(error))
+    if packet.get("contextDigest") != invocation_digest(packet):
+        warnings.append("stored invocation content changed after dispatch")
+    if packet.get("profileDigest") != ((frozen or {}).get("digest") or profile_digest(profile)):
         warnings.append("profile changed after invocation dispatch")
     if packet.get("taskDigest") != plan_digest(task):
         warnings.append("task content changed after invocation dispatch")
     size = len(json.dumps(packet, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    working_count = len(task.get("workingSet") or [])
+    working_count = len(packet.get("contextRefs") or [])
     expansions = int(payload.get("expansionsUsed", 0) or 0) + (1 if payload.get("contextExpansion") else 0)
     if size > int(policy.get("maxPacketBytes", 16384)):
         warnings.append(f"context packet is {size} bytes (limit {policy.get('maxPacketBytes', 16384)})")
@@ -475,6 +485,10 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             stale = context_warnings(invocation, task, profile, payload)
             if stale:
                 return decision("block", "; ".join(stale))
+            try:
+                profile = effective_profile(task, profile)
+            except ValueError as error:
+                return decision("block", str(error))
             requested = requested_model(payload)
             assigned = (task.get("models") or {}).get("assigned")
             writer = role == "worker"
@@ -486,10 +500,11 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 elif task.get("state") != "Candidate":
                     return decision("block", "candidate reviewer requires a Candidate task")
                 recovery_route = current_recovery_route(task, "reviewer")
-                host_id = requested_host(payload) or (recovery_route or {}).get("hostId") or (task.get("models") or {}).get("hostId")
+                host_id = requested_host(payload) or (recovery_route or {}).get("hostId") or invocation.get("assignedHost") or (task.get("models") or {}).get("hostId")
                 allowed = [route_name(item) for item in (((profile.get("modelRoutes") or {}).get(host_id) or {}).get("reviewer") or []) if isinstance(item, Mapping)]
                 recovery_allowed = bool(recovery_route and recovery_route.get("hostId") == host_id and route_name(recovery_route) == requested)
-                if requested not in allowed and not recovery_allowed:
+                native_default = not profile.get("modelRoutes") and host_id == "native" and requested in {None, "", "current-host/default"}
+                if requested not in allowed and not recovery_allowed and not native_default:
                     return decision("block", "reviewer model must be an approved per-host or task-local recovery route")
                 head = candidate_head(task)
                 review_head = (tool_input.get("head") if isinstance(tool_input, dict) else None) or payload.get("reviewHead")
@@ -526,7 +541,8 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             model_result = validate_models(task, profile)
             if not model_result.ok:
                 return decision("block", model_result.findings[0].message)
-            if requested != assigned:
+            native_default = assigned == "current-host/default" and (task.get("models") or {}).get("hostId") == "native" and requested in {None, "", "current-host/default"}
+            if requested != assigned and not native_default:
                 return decision("block", "writer spawn model must be explicit and equal models.assigned")
             requested_host_id = requested_host(payload)
             if requested_host_id and requested_host_id != (task.get("models") or {}).get("hostId"):

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-A2",
+  "taskId": "L5-A2",
+  "taskRevision": 1,
+  "invocationId": "218f90b805ca2597f962c8fd",
+  "attempt": 1,
+  "role": "reviewer",
+  "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
+  "contextDigest": "118bc548b6e739798580ee5abb6b7634ae5f91e275a35bf26139b29bcb03e13e",
+  "objective": "Review new bounded workspace completion plan only against previous two P1 findings. No repeated tests or code review. Return AgentResult v4 verdict and material plan gaps.",
+  "acceptanceCriteria": [
+    "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
+  ],
+  "ownedPaths": [],
+  "forbiddenPaths": [
+    "skills/lemmings/scripts/lemmings/cli.py",
+    "skills/lemmings/scripts/lemmings/contracts.py",
+    "docs/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Unchanged public contract",
+      "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+    },
+    {
+      "ref": "docs/context/l5-workspace-replan.md",
+      "purpose": "Bounded replacement plan",
+      "contentHash": "1d7f900bce6e9eb1bac1dcfafe6bf491ab244a1ef85d8d49ca8dd52130e2ff77"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+      "purpose": "Current safety implementation",
+      "contentHash": "e43d69d16cde980a66560f1ba711207c99b0cc3b27592e63be21bcd89f1d1387"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+    "git diff --check"
+  ],
+  "candidateHead": null,
+  "limits": {
+    "maxTurns": 8,
+    "maxToolCalls": 16,
+    "deadlineSeconds": 1200
+  },
+  "outputSchemaVersion": 4
+}

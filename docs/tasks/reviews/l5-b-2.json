@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 4,
+  "revision": 0,
+  "reviewId": "L5-B-2",
+  "subject": {
+    "kind": "candidate",
+    "taskId": "L5-B",
+    "baseSha": "13f5216f0f2e866956b958e8954860632f2a7b86",
+    "headSha": "e109f815c15944e8a38d8900cd7474c84b28196c"
+  },
+  "status": "ChangesRequested",
+  "hostId": "codex",
+  "reviewerModel": "openai/gpt-5.6-sol:high",
+  "cycle": 2,
+  "findings": [
+    {
+      "severity": "P1",
+      "code": "go-catalog-protocol-unproven",
+      "requiredChange": "Real catalog has id-only metadata. Resolve protocols from documented Go endpoint table; preserve unknown. Use configured auth and coding-client headers where available."
+    },
+    {
+      "severity": "P1",
+      "code": "discovered-route-cannot-be-probed",
+      "requiredChange": "Resolve endpoint/auth internally from exact scanned route; test scan result to targeted probe without synthetic endpoint fields."
+    },
+    {
+      "severity": "P1",
+      "code": "proposal-route-match-incomplete",
+      "requiredChange": "Canonicalize proposal execution fields from bound inventory or reject all altered fields."
+    }
+  ],
+  "validation": [
+    "Immutable range diff check passed; reported 7 discovery and 6 profile tests reused."
+  ]
+}

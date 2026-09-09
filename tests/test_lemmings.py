@@ -42,6 +42,7 @@ def task(*, mode: str = "standard", state: str = "Ready", task_id: str = "T-1") 
     value = json.loads((ROOT / "skills" / "lemmings" / "templates" / "task.json").read_text(encoding="utf-8"))
     value.update({"taskId": task_id, "requestedMode": mode, "resolvedMode": mode, "modeFloor": mode, "state": state})
     value["modeReasons"] = ["explicit-mode-pin"]
+    value["models"].update(hostId="codex", assigned="openai/gpt-5.6-luna:max")
     value["riskClass"] = "low" if mode == "simple" else "medium"
     value["workerRequired"] = mode != "simple"
     return value

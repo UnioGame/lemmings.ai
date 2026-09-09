@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-B2",
+  "taskId": "L5-B2",
+  "taskRevision": 4,
+  "invocationId": "0ef504303ce0cbcff89dcbdb",
+  "attempt": 2,
+  "role": "reviewer",
+  "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
+  "contextDigest": "a0a47bc7f15e91e62a29c7fc138341098296a96c81c8af1c5eb4c9845e00050c",
+  "objective": "Plan refinement review only: optional canonical repo parameter resolves repo-local probe context, CLI passes repo, exact route matched to fresh local scan and trusted config; two-repo collision test. Check preceding single P1 is resolved. No implementation/tests reread. Return AgentResult v4 verdict.",
+  "acceptanceCriteria": [
+    "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
+  ],
+  "ownedPaths": [],
+  "forbiddenPaths": [
+    "skills/lemmings/scripts/lemmings/cli.py",
+    "skills/lemmings/scripts/lemmings/contracts.py",
+    "docs/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Original public contract",
+      "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+    },
+    {
+      "ref": "docs/context/l5-provider-replan.md",
+      "purpose": "Replacement plan and verified metadata",
+      "contentHash": "2e11989983b4d711db9da05659daddd58075a3e73664c35e20e1085f08b6d48f"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+      "purpose": "Current discovery",
+      "contentHash": "0db45e377e62e8acbda5340da40b73a6736921c0474e81519ec3f3477f35d3bd"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+      "purpose": "Current profiles",
+      "contentHash": "9c3e21a6ab88dd0de422dab7a97fd651d2e1db6a1906a35739da393a4b7f81c2"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests -p test_discovery.py",
+    "python -B -m unittest discover -s tests -p test_profiles.py",
+    "git diff --check"
+  ],
+  "candidateHead": null,
+  "limits": {
+    "maxTurns": 8,
+    "maxToolCalls": 16,
+    "deadlineSeconds": 1200
+  },
+  "outputSchemaVersion": 4
+}

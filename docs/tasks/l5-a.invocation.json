@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-A",
+  "taskId": "L5-A",
+  "taskRevision": 2,
+  "invocationId": "af2daa3baf23f2dd024f782d",
+  "attempt": 1,
+  "role": "worker",
+  "baseSha": "13f5216f0f2e866956b958e8954860632f2a7b86",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "c1292e87d75b20998f83bb94813a4e73f1e9a1f4d6fd2693ed5aae90c5773149",
+  "contextDigest": "a5f9d4e4688940b309fccff0c0c1ea37e3576815ce5bf843eb946908f628e7a6",
+  "objective": "Implement canonical workspace provisioning and lifecycle safety",
+  "acceptanceCriteria": [
+    "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
+  ],
+  "ownedPaths": [
+    "skills/lemmings/scripts/lemmings/workspace.py",
+    "tests/test_workspace_safety.py"
+  ],
+  "forbiddenPaths": [
+    "skills/lemmings/scripts/lemmings/cli.py",
+    "skills/lemmings/scripts/lemmings/contracts.py",
+    "docs/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Frozen APIs, ownership, topology, lifecycle and validation contract",
+      "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+      "purpose": "Existing API and compatibility conventions",
+      "contentHash": "4be68ce6380f328a8a79ec3d80cfcf978c911ec9b43141cf625eafd488db2244"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+    "git diff --check"
+  ],
+  "candidateHead": null,
+  "limits": {
+    "maxTurns": 12,
+    "maxToolCalls": 24,
+    "deadlineSeconds": 2700
+  },
+  "outputSchemaVersion": 4
+}

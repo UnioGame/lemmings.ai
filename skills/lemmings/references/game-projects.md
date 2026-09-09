@@ -1,6 +1,6 @@
 # Workspace lifecycle
 
-The manager chooses `current`, `code-worktree`, `package-worktree`, task-specific `unity-clone`, persistent validation clone, or a user workspace. Tooling may execute explicit register/claim/release/remove decisions atomically. Never use force, reset-hard, automatic git clean, background cleanup, or SessionStart deletion/prune.
+The manager chooses `current`, `code-worktree`, `package-worktree`, task-specific `unity-clone`, persistent validation clone, or a user workspace. Tooling may execute explicit prepare/register/claim/release/remove decisions atomically. Never use force, reset-hard, automatic git clean, background cleanup, or SessionStart deletion/prune.
 
 Registry: `<git-common-dir>/lemmings/workspaces-v4.json`. It owns absolute paths, common-dir identity, backend, manager, lifetime, active/idle/quarantined/retiring state, task/phase, branch/head/base, estimate/approval, timestamps, leases/processes, and quarantine reason. Task stores only `workspaceId`, backend, policy, estimate, lifecycle, and final disposition. Claim/release requires the expected registry revision, so only one manager can win.
 
@@ -12,4 +12,12 @@ Cross-task reuse requires Lemmings ownership, compatible backend/common dir/pack
 
 Persistent validation clones are project lifetime, never assigned to writers, retain Unity Library, and are never automatically cleaned or removed. Dirty state blocks only validation and needs manual resolution.
 
-Safe automatic removal applies only to an exact registered non-primary Lemmings worktree, or a standalone task-specific Unity clone whose Git top-level exactly equals its registry path, after its lifetime ends or it is evicted, with Integrated evidence (or if never Active), clean status/submodules, no Git operation, invocation/process/lease, and no other owner. Use ordinary `git worktree remove` for linked worktrees; delete only the verified standalone clone root for a task clone. Never auto-remove dirty/untracked, unmerged, Blocked/Replan/started-Cancelled, user, unknown, locked, primary, or validation workspaces. Failure quarantines the entry and never reopens Integrated.
+Safe automatic removal applies only to an exact registered non-primary Lemmings worktree, or a standalone task-specific Unity clone whose Git top-level exactly equals its registry path, after its lifetime ends or it is evicted, with Integrated evidence , clean status/submodules, no Git operation, invocation/process/lease, and no other owner. Use ordinary `git worktree remove` for linked worktrees; delete only the verified standalone clone root for a task clone. Never auto-remove dirty/untracked, unmerged, Blocked/Replan/started-Cancelled, user, unknown, locked, primary, or validation workspaces. Failure quarantines the entry and never reopens Integrated.
+
+## Provisioning and canonical evidence
+
+Record the intended repository, backend, exact base SHA, branch, destination, estimate and approval in the Task before `workspace prepare`. Use `codex/` branches unless explicitly overridden. Package worktrees operate on the package's own Git root; estimate a full repository when that is what Git will check out. Submodule gitlinks, authored asset metadata and uncommitted primary changes must remain intact. Never mistake a package directory inside a superproject for a separate Git repository.
+
+Prepare reserves atomically, runs ordinary Git worktree creation and quarantines failure. Claim's first-use path has the same primary/dirty/process/lease checks as reuse. Resolve Git operation paths against their workspace directory. Cleanup requires the canonical Task and revision, matching workspace/task identity, actual integrated candidate/merge commits and passing checks at that merge SHA. A boolean --integration-evidence is legacy syntax, not authority. Missing/stale evidence or unverifiable process identity blocks removal. Preserve cancelled and failed work for inspection.
+
+Do not share mutable engine caches between writer directories. A Unity Editor lock is local to one project directory, not a global editor count. Other engine imports, dev-server ports, browser profiles and generated output paths are independent per worker. Keep a stable validation workspace for expensive engine checks when appropriate; validation assets and editor sessions have explicit owners.

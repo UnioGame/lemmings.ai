@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 4,
+  "revision": 8,
+  "taskId": "L5-B2",
+  "goal": "Complete production-shaped discovery, exact-route probing and trusted profile routes",
+  "acceptance": [
+    "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
+  ],
+  "dependencies": [],
+  "requestedMode": "auto",
+  "resolvedMode": "strict",
+  "modeFloor": "strict",
+  "riskClass": "high",
+  "modeReasons": [
+    "parallelWriters",
+    "sharedContracts"
+  ],
+  "capabilityDegradations": [],
+  "writerCount": 1,
+  "ownershipDomainCount": 1,
+  "workerRequired": true,
+  "parallelReason": "independent_paths",
+  "reviewRequired": true,
+  "planReviewRequired": true,
+  "planReviewRef": "docs/tasks/reviews/l5-b2-plan.json",
+  "reviewPolicy": null,
+  "specialization": null,
+  "state": "Active",
+  "previousState": "Ready",
+  "role": "worker",
+  "risks": [],
+  "telemetryCohort": null,
+  "ownership": {
+    "owned": [
+      "skills/lemmings/scripts/lemmings/discovery.py",
+      "skills/lemmings/scripts/lemmings/profiles.py",
+      "tests/test_discovery.py",
+      "tests/test_profiles.py"
+    ],
+    "shared": [],
+    "forbidden": [
+      "skills/lemmings/scripts/lemmings/cli.py",
+      "skills/lemmings/scripts/lemmings/contracts.py",
+      "docs/**"
+    ]
+  },
+  "resources": {
+    "exclusive": []
+  },
+  "workingSet": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Original public contract",
+      "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+    },
+    {
+      "ref": "docs/context/l5-provider-replan.md",
+      "purpose": "Replacement plan and verified metadata",
+      "contentHash": "2e11989983b4d711db9da05659daddd58075a3e73664c35e20e1085f08b6d48f"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+      "purpose": "Current discovery",
+      "contentHash": "0db45e377e62e8acbda5340da40b73a6736921c0474e81519ec3f3477f35d3bd"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+      "purpose": "Current profiles",
+      "contentHash": "9c3e21a6ab88dd0de422dab7a97fd651d2e1db6a1906a35739da393a4b7f81c2"
+    }
+  ],
+  "models": {
+    "hostId": "codex",
+    "requested": null,
+    "assigned": "openai/gpt-5.6-terra:max",
+    "actual": null,
+    "fallbackReason": null
+  },
+  "routingRecovery": null,
+  "workspace": {
+    "policy": "auto",
+    "backend": "package-worktree",
+    "workspaceId": "l5-b2",
+    "managedBy": "lemmings",
+    "lifetime": "task",
+    "estimatedGiB": 0.002,
+    "approval": "not-required",
+    "reason": "Independent package worktree; one worker owns one branch",
+    "repoRoot": "D:\\Dev\\kontora\\merge\\mtt.client\\.lemmings-worktrees\\l5-manager",
+    "destination": "D:\\Dev\\kontora\\merge\\mtt.client\\.lemmings-worktrees\\l5-b2",
+    "branch": "codex/lemmings-providers-v2",
+    "packagePath": "."
+  },
+  "execution": {
+    "interfaces": [],
+    "tests": [],
+    "dependencyHandoffs": [],
+    "validationEvidence": [],
+    "attempts": [],
+    "invocations": [
+      {
+        "schemaVersion": 4,
+        "runId": "L5-B2",
+        "taskId": "L5-B2",
+        "taskRevision": 1,
+        "invocationId": "fc1306d1cc36c9730c355aef",
+        "attempt": 1,
+        "role": "reviewer",
+        "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "4b042a9ff2bf130eae6ed461c22f8bcddb3144f08bcddcd21f949daf1c8d719d",
+        "contextDigest": "7c2ed0cc8f530a18ae2249cb16fbcb2c8edbd65df381680c419e8b876e2bed9f",
+        "objective": "Review bounded B2 plan and source evidence only. Check unchanged contract, protocol provenance, scan-to-probe identity/auth, proposal canonicalization, focused tests. Return AgentResult v4 and Accepted/ChangesRequested. No repeated tests.",
+        "acceptanceCriteria": [
+          "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Original public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-provider-replan.md",
+            "purpose": "Replacement plan and verified metadata",
+            "contentHash": "865ca5a289d5cb0d9f7a79e7371bb4d21c52d2cb5009bfe42b212f2d1ae3b6e6"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+            "purpose": "Current discovery",
+            "contentHash": "0db45e377e62e8acbda5340da40b73a6736921c0474e81519ec3f3477f35d3bd"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+            "purpose": "Current profiles",
+            "contentHash": "9c3e21a6ab88dd0de422dab7a97fd651d2e1db6a1906a35739da393a4b7f81c2"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_discovery.py",
+          "python -B -m unittest discover -s tests -p test_profiles.py",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-B2",
+        "taskId": "L5-B2",
+        "taskRevision": 4,
+        "invocationId": "0ef504303ce0cbcff89dcbdb",
+        "attempt": 2,
+        "role": "reviewer",
+        "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
+        "contextDigest": "a0a47bc7f15e91e62a29c7fc138341098296a96c81c8af1c5eb4c9845e00050c",
+        "objective": "Plan refinement review only: optional canonical repo parameter resolves repo-local probe context, CLI passes repo, exact route matched to fresh local scan and trusted config; two-repo collision test. Check preceding single P1 is resolved. No implementation/tests reread. Return AgentResult v4 verdict.",
+        "acceptanceCriteria": [
+          "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Original public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-provider-replan.md",
+            "purpose": "Replacement plan and verified metadata",
+            "contentHash": "2e11989983b4d711db9da05659daddd58075a3e73664c35e20e1085f08b6d48f"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+            "purpose": "Current discovery",
+            "contentHash": "0db45e377e62e8acbda5340da40b73a6736921c0474e81519ec3f3477f35d3bd"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+            "purpose": "Current profiles",
+            "contentHash": "9c3e21a6ab88dd0de422dab7a97fd651d2e1db6a1906a35739da393a4b7f81c2"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_discovery.py",
+          "python -B -m unittest discover -s tests -p test_profiles.py",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-B2",
+        "taskId": "L5-B2",
+        "taskRevision": 8,
+        "invocationId": "16f7cb329604ced57938cdb6",
+        "attempt": 1,
+        "role": "worker",
+        "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
+        "contextDigest": "f3a56d8f2d8d72da6cd69e49856a6927f1acb9f91f580c2519c71b1f4c37bed1",
+        "objective": "Implement the reviewed bounded provider completion plan. Own only discovery.py, profiles.py and their two tests. Use real catalog/cache shapes and dated exact Go metadata; optional repo seam for actual scanned route probe, canonical proposal execution fields. Preserve prior manual/state safety. Run declared focused tests, commit exact owned paths, return AgentResult v4. No live paid probes, no personal config changes.",
+        "acceptanceCriteria": [
+          "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
+        ],
+        "ownedPaths": [
+          "skills/lemmings/scripts/lemmings/discovery.py",
+          "skills/lemmings/scripts/lemmings/profiles.py",
+          "tests/test_discovery.py",
+          "tests/test_profiles.py"
+        ],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Original public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-provider-replan.md",
+            "purpose": "Replacement plan and verified metadata",
+            "contentHash": "2e11989983b4d711db9da05659daddd58075a3e73664c35e20e1085f08b6d48f"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+            "purpose": "Current discovery",
+            "contentHash": "0db45e377e62e8acbda5340da40b73a6736921c0474e81519ec3f3477f35d3bd"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+            "purpose": "Current profiles",
+            "contentHash": "9c3e21a6ab88dd0de422dab7a97fd651d2e1db6a1906a35739da393a4b7f81c2"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_discovery.py",
+          "python -B -m unittest discover -s tests -p test_profiles.py",
+          "git diff --check"
+        ],
+        "candidateHead": null,
+        "limits": {
+          "maxTurns": 12,
+          "maxToolCalls": 24,
+          "deadlineSeconds": 2700
+        },
+        "outputSchemaVersion": 4
+      }
+    ],
+    "agentResults": [
+      {
+        "schemaVersion": 4,
+        "invocationId": "fc1306d1cc36c9730c355aef",
+        "attempt": 1,
+        "status": "succeeded",
+        "changedPaths": [],
+        "acceptanceEvidence": [
+          "Metadata and canonicalization plan verified."
+        ],
+        "validationEvidence": [
+          "Plan-only review."
+        ],
+        "findings": [
+          {
+            "severity": "P1",
+            "code": "probe-context-unresolvable",
+            "requiredChange": "Pass canonical repo to probe; never resolve repo-local endpoint from route identity alone."
+          }
+        ],
+        "blockers": [
+          "probe-context-unresolvable"
+        ],
+        "remainingRisks": [],
+        "verdict": "ChangesRequested"
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "0ef504303ce0cbcff89dcbdb",
+        "attempt": 2,
+        "status": "succeeded",
+        "changedPaths": [],
+        "acceptanceEvidence": [
+          "Canonical repo seam, exact offline route match, credential-safe resolution and collision fixtures accepted."
+        ],
+        "validationEvidence": [
+          "Focused plan refinement review."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": [
+          "Live provider requests unvalidated."
+        ],
+        "verdict": "Accepted"
+      }
+    ],
+    "handoff": null
+  },
+  "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
+  "commits": {
+    "candidate": null,
+    "fix": []
+  },
+  "validation": {
+    "riskToTest": [],
+    "commands": [
+      "python -B -m unittest discover -s tests -p test_discovery.py",
+      "python -B -m unittest discover -s tests -p test_profiles.py",
+      "git diff --check"
+    ],
+    "allowedOutputs": [],
+    "debt": []
+  },
+  "reviewRef": null,
+  "crossReviewRefs": [],
+  "reviewHistory": [],
+  "close": {
+    "mergeCommit": null,
+    "integrationEvidence": [],
+    "workspaceDisposition": null
+  }
+}

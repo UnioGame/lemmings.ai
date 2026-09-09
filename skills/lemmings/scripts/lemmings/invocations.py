@@ -9,15 +9,19 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from .effective import capture_effective, checked_effective
+
 from .contracts import (
     DEFAULT_INVOCATION_LIMITS,
     SCHEMA_VERSION,
     as_list,
     candidate_head,
+    current_recovery_route,
     git,
     path_matches,
     plan_digest,
     read_object,
+    route_name,
     validate_agent_result,
     validate_invocation,
     write_object,
@@ -66,6 +70,14 @@ def build_invocation(
         for entry in as_list(task.get("workingSet"))
         if isinstance(entry, Mapping)
     ]
+    frozen = task.get("effectiveConfig")
+    if frozen:
+        checked_effective(frozen)
+        for rule in frozen["rules"].get("ruleRefs", []):
+            if reference_hash(repo, rule) != rule["contentHash"]:
+                raise ValueError("selected rules changed after Task configuration was frozen")
+            if rule["ref"] not in {r["ref"] for r in references}:
+                references.append(dict(rule))
     ownership = task.get("ownership") if isinstance(task.get("ownership"), Mapping) else {}
     validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
     seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
@@ -78,7 +90,7 @@ def build_invocation(
         "attempt": attempt,
         "role": role,
         "baseSha": task.get("baseSha") or "uncommitted",
-        "profileDigest": profile_digest(profile),
+        "profileDigest": frozen["digest"] if frozen else profile_digest(profile),
         "taskDigest": plan_digest(task),
         "contextDigest": "",
         "objective": objective or task.get("goal"),
@@ -91,11 +103,44 @@ def build_invocation(
         "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
         "outputSchemaVersion": SCHEMA_VERSION,
     }
+    if frozen:
+        invocation["effectiveConfigDigest"] = frozen["digest"]
+        invocation["roleRoutes"] = frozen["profile"].get("roleRoutes", {}).get(role, [])
+        chain = invocation["roleRoutes"]
+        invocation["assignedModel"] = ((task.get("models") or {}).get("assigned") if role == task.get("role") else route_name(chain[0]) if chain else "current-host/default")
+        invocation["assignedHost"] = ((task.get("models") or {}).get("hostId") if role == task.get("role") else chain[0]["hostId"] if chain else "native")
+        recovered = current_recovery_route(task, role)
+        if recovered:
+            invocation["roleRoutes"] = task["routingRecovery"]["roleRoutes"][role]
+            invocation["assignedModel"] = route_name(recovered)
+            invocation["assignedHost"] = recovered["hostId"]
     invocation["contextDigest"] = invocation_digest(invocation)
     checked = validate_invocation(invocation)
     if not checked.ok:
         raise ValueError(checked.findings[0].message)
     return invocation
+
+
+def validate_dispatch(repo: Path, task: Mapping[str, Any], profile: Mapping[str, Any], invocation: Mapping[str, Any]) -> None:
+    checked = validate_invocation(invocation)
+    if not checked.ok:
+        raise ValueError(checked.findings[0].message)
+    states = {"worker":{"Ready","Active","Repair"}, "reviewer":{"Draft","Ready","Candidate"}, "explorer":{"Draft","Ready","Active","Candidate","Blocked"}}
+    if task.get("state") not in states[invocation["role"]]:
+        raise ValueError("Task lifecycle does not allow this role to start")
+    if (task.get("routingRecovery") or {}).get("status") in {"pending-confirmation", "paused"}:
+        raise ValueError("routing recovery requires a new approved selection before dispatch")
+    frozen = task.get("effectiveConfig")
+    if frozen:
+        checked_effective(frozen)
+    expected_profile = frozen["digest"] if frozen else profile_digest(profile)
+    if invocation.get("taskRevision") != task.get("revision") or invocation.get("baseSha") != task.get("baseSha"):
+        raise ValueError("saved invocation revision/base is stale")
+    if invocation.get("taskDigest") != plan_digest(task) or invocation.get("contextDigest") != invocation_digest(invocation) or invocation.get("profileDigest") != expected_profile:
+        raise ValueError("saved invocation plan/context/profile is stale")
+    for ref in invocation.get("contextRefs", []):
+        if reference_hash(repo, ref) != ref.get("contentHash"):
+            raise ValueError("saved invocation context file changed; create a fresh invocation")
 
 
 def find_invocation(task: Mapping[str, Any], invocation_id: str) -> Mapping[str, Any] | None:
@@ -128,11 +173,20 @@ def record_invocation(
     attempt: int,
     expected_revision: int,
     objective: str | None = None,
+    *, preset: str | None = None, freeze: bool = False,
 ) -> dict[str, Any]:
     with task_lock(task_path):
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        if freeze or task.get("effectiveConfig"):
+            selected = capture_effective(repo, task, profile, preset=preset)
+            models = task.get("models") or {}
+            chain = selected["profile"].get("roleRoutes", {}).get(role, [])
+            if models.get("assigned") == "current-host/default" and not models.get("requested") and chain and role == task.get("role"):
+                # Execute the first already-ordered user selection; never rank alternatives.
+                models.update(assigned=route_name(chain[0]), hostId=chain[0]["hostId"])
+                task["models"] = models
         task["revision"] = expected_revision + 1
         invocation = build_invocation(repo, task, profile, role, attempt=attempt, objective=objective)
         task.setdefault("execution", {}).setdefault("invocations", []).append(invocation)
@@ -144,11 +198,16 @@ def result_findings(repo: Path, task: Mapping[str, Any], profile: Mapping[str, A
     invocation = find_invocation(task, str(result_value.get("invocationId") or ""))
     if invocation is None:
         raise ValueError("AgentResult has no unique stored invocation")
+    if task.get("effectiveConfig"):
+        checked_effective(task["effectiveConfig"])
+        for rule in task["effectiveConfig"]["rules"].get("ruleRefs", []):
+            if reference_hash(repo, rule) != rule["contentHash"]:
+                raise ValueError("selected rules changed after dispatch")
     checked = validate_agent_result(
         result_value,
         invocation,
         task,
-        current_profile_digest=profile_digest(profile),
+        current_profile_digest=(task.get("effectiveConfig") or {}).get("digest") or profile_digest(profile),
         current_context_digest=invocation_digest(invocation),
         current_task_digest=plan_digest(task),
     )
@@ -170,7 +229,7 @@ def result_findings(repo: Path, task: Mapping[str, Any], profile: Mapping[str, A
             task_refs = {(str(item.get("ref")), str(item.get("purpose"))): item for item in as_list(task.get("workingSet")) if isinstance(item, Mapping)}
             for saved in as_list(invocation.get("contextRefs")):
                 key = (str(saved.get("ref")), str(saved.get("purpose")))
-                current = task_refs.get(key)
+                current = task_refs.get(key) or next((r for r in (task.get("effectiveConfig") or {}).get("rules", {}).get("ruleRefs", []) if (r.get("ref"),r.get("purpose")) == key), None)
                 if current is None:
                     checked.error("result.context", "working set changed after dispatch")
                     break

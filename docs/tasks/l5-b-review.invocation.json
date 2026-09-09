@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-B",
+  "taskId": "L5-B",
+  "taskRevision": 4,
+  "invocationId": "332cb21e68cb6575cfcf9ed2",
+  "attempt": 1,
+  "role": "reviewer",
+  "baseSha": "13f5216f0f2e866956b958e8954860632f2a7b86",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "04c000bf5886d2552b40d20cd1b9a4acdb0064d4075f5e4a8f51d723149fb49a",
+  "contextDigest": "090fb8b693c8cb4c362a7bee1fbaf1953e8a7b4f6425b7ac434fd2f1a9f2cbaf",
+  "objective": "Review only B immutable candidate base..head against discovery/profile section of frozen contract. Inspect true endpoint catalog retrieval/probe behavior, no inference during scan, secret safety, active personal/project precedence, stale-safe state writes, proposal validation against inventory. No repeated full test suite. Return compact AgentResult v4 plus Accepted/ChangesRequested, material findings only.",
+  "acceptanceCriteria": [
+    "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
+  ],
+  "ownedPaths": [],
+  "forbiddenPaths": [
+    "skills/lemmings/scripts/lemmings/cli.py",
+    "skills/lemmings/scripts/lemmings/contracts.py",
+    "docs/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Frozen discovery/profile contract",
+      "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+      "purpose": "Candidate scan and probe",
+      "contentHash": "8130ccba7dafd677e8ac8f10b8f96cb741140c2a5a6a8b9b8859ccd8ab3539cc"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+      "purpose": "Candidate profile precedence and transactions",
+      "contentHash": "13b9e47a37812fbb342791b48eae96e98eea8a51e9aa2b2a606d60c56925e7fd"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests -p test_discovery.py",
+    "python -B -m unittest discover -s tests -p test_profiles.py",
+    "git diff --check"
+  ],
+  "candidateHead": "232ecf5663d8f6c801febbd97897e2fe07ad92c2",
+  "limits": {
+    "maxTurns": 8,
+    "maxToolCalls": 16,
+    "deadlineSeconds": 1200
+  },
+  "outputSchemaVersion": 4
+}

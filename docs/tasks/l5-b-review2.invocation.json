@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 4,
+  "runId": "L5-B",
+  "taskId": "L5-B",
+  "taskRevision": 8,
+  "invocationId": "fea7375ac02791439c35466c",
+  "attempt": 2,
+  "role": "reviewer",
+  "baseSha": "13f5216f0f2e866956b958e8954860632f2a7b86",
+  "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+  "taskDigest": "828da5c4674df96a21c1c943411299ecc143b5f43f5c31401e370a93bede2c32",
+  "contextDigest": "b90b66da928c06c182d861499677c776ba9efb8519bf89b8ad90552d45d5213b",
+  "objective": "Review immutable repaired B head against previous four P1 findings. Check new real Go catalog response parsing/protocol evidence; probe exact returned model/auth and unsupported cases; shared state transaction locks and digest stability across repeat scans; manual active precedence and inventory matching. Reuse reported7+6tests, no broad suite. Return AgentResult v4 plus Accepted/ChangesRequested.",
+  "acceptanceCriteria": [
+    "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
+  ],
+  "ownedPaths": [],
+  "forbiddenPaths": [
+    "skills/lemmings/scripts/lemmings/cli.py",
+    "skills/lemmings/scripts/lemmings/contracts.py",
+    "docs/**"
+  ],
+  "contextRefs": [
+    {
+      "ref": "docs/context/l5-contracts.md",
+      "purpose": "Frozen discovery/profile contract",
+      "contentHash": "83540bb6d64254e850c91cdc9221d2df8e88057425c2045db5cfe3c2c458fef3"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+      "purpose": "Candidate scan and probe",
+      "contentHash": "0db45e377e62e8acbda5340da40b73a6736921c0474e81519ec3f3477f35d3bd"
+    },
+    {
+      "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+      "purpose": "Candidate profile precedence and transactions",
+      "contentHash": "9c3e21a6ab88dd0de422dab7a97fd651d2e1db6a1906a35739da393a4b7f81c2"
+    }
+  ],
+  "validationCommands": [
+    "python -B -m unittest discover -s tests -p test_discovery.py",
+    "python -B -m unittest discover -s tests -p test_profiles.py",
+    "git diff --check"
+  ],
+  "candidateHead": "e109f815c15944e8a38d8900cd7474c84b28196c",
+  "limits": {
+    "maxTurns": 8,
+    "maxToolCalls": 16,
+    "deadlineSeconds": 1200
+  },
+  "outputSchemaVersion": 4
+}

@@ -1,14 +1,14 @@
 {
   "schemaVersion": 4,
-  "revision": 0,
+  "revision": 2,
   "taskId": "L5-D",
   "goal": "Implement native and external role-restricted execution adapters",
   "acceptance": [
     "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
   ],
   "dependencies": [
-    "L5-A",
-    "L5-B"
+    "L5-A2",
+    "L5-B2"
   ],
   "requestedMode": "auto",
   "resolvedMode": "strict",

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 4,
+  "revision": 0,
+  "reviewId": "L5-B-1",
+  "subject": {
+    "kind": "candidate",
+    "taskId": "L5-B",
+    "baseSha": "13f5216f0f2e866956b958e8954860632f2a7b86",
+    "headSha": "232ecf5663d8f6c801febbd97897e2fe07ad92c2"
+  },
+  "status": "ChangesRequested",
+  "hostId": "codex",
+  "reviewerModel": "openai/gpt-5.6-sol:high",
+  "cycle": 1,
+  "findings": [
+    {
+      "severity": "P1",
+      "code": "catalog-not-fetched",
+      "requiredChange": "Fetch documented Go/provider metadata online; bounded timeout and stale fallback; scan never infers."
+    },
+    {
+      "severity": "P1",
+      "code": "probe-not-targeted",
+      "requiredChange": "Probe exact selected model with proper protocol/auth; unsupported without access; never probed=true without successful actual request."
+    },
+    {
+      "severity": "P1",
+      "code": "proposal-allows-unavailable-routes",
+      "requiredChange": "Validate each proposed route identity and compatible executor against bound inventory on build/apply."
+    },
+    {
+      "severity": "P1",
+      "code": "profile-write-race",
+      "requiredChange": "Lock before re-reading state and validating digests; read-modify-write under single shared lock; reject input drift."
+    }
+  ],
+  "validation": [
+    "range diff check passed; reported 4+3 tests reused"
+  ]
+}

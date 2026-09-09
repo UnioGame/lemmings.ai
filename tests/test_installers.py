@@ -89,14 +89,14 @@ class InstallerTests(unittest.TestCase):
                 (agents / "lemmings-orchestrator.toml").write_text("obsolete\n", encoding="utf-8")
                 profile = repo / ".agents/lemmings.json"
                 profile.parent.mkdir(parents=True)
-                profile.write_text('{"schemaVersion": 3, "mode": "strict"}\n', encoding="utf-8")
+                profile.write_text('{"schemaVersion": 4, "mode": "strict"}\n', encoding="utf-8")
 
                 completed = self.run_launcher(kind, executable, repo, "GameClient", check=False)
                 self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
                 self.assertIn("installed and verified", completed.stdout)
                 installed = json.loads(profile.read_text(encoding="utf-8"))
                 self.assertEqual(4, installed["schemaVersion"])
-                self.assertEqual("auto", installed["mode"])
+                self.assertEqual("strict", installed["mode"])
                 self.assertEqual(2, installed["orchestration"]["maxConcurrentWriters"])
                 self.assertTrue((repo / ".agents/skills/lemmings/scripts/lemmings/invocations.py").is_file())
                 self.assertFalse((agents / "lemmings-orchestrator.toml").exists())
@@ -125,20 +125,20 @@ class InstallerTests(unittest.TestCase):
         self.assertNotEqual(0, broken.returncode)
         self.assertIn("invalid Lemmings hook input", broken.stdout)
 
-    def test_reinstall_resets_settings_and_rolls_back_every_replacement_stage(self) -> None:
+    def test_reinstall_preserves_settings_and_rolls_back_every_replacement_stage(self) -> None:
         repo = self.make_repo("rollback")
         self.run_python(repo)
         profile = repo / ".agents/lemmings.json"
-        profile.write_text('{"custom": true}\n', encoding="utf-8")
+        profile.write_text('{"schemaVersion":4,"custom": true}\n', encoding="utf-8")
         self.run_python(repo)
-        self.assertNotIn("custom", json.loads(profile.read_text(encoding="utf-8")))
+        self.assertIn("custom", json.loads(profile.read_text(encoding="utf-8")))
 
         skill = repo / ".agents/skills/lemmings/SKILL.md"
         agent = repo / ".codex/agents/lemmings-worker.toml"
         for stage in ("skill", "agents", "config"):
             skill.write_text(f"old skill {stage}\n", encoding="utf-8")
             agent.write_text(f"old agent {stage}\n", encoding="utf-8")
-            profile.write_text(json.dumps({"old": stage}), encoding="utf-8")
+            profile.write_text(json.dumps({"schemaVersion":4,"old": stage}), encoding="utf-8")
             before = (skill.read_bytes(), agent.read_bytes(), profile.read_bytes())
             failed = self.run_python(repo, stage=stage, check=False)
             self.assertNotEqual(0, failed.returncode)
@@ -159,8 +159,6 @@ class InstallerTests(unittest.TestCase):
 
     def test_dry_run_and_explicit_project_resolve_ambiguity(self) -> None:
         repo = self.make_repo("nested", ("GameOne", "GameTwo"))
-        failed = self.run_python(repo, check=False)
-        self.assertNotEqual(0, failed.returncode)
         process = subprocess.run(
             [sys.executable, str(self.tool / "skills/lemmings/scripts/install.py"), "--repo", str(repo), "--project", "GameTwo", "--dry-run"],
             cwd=repo / "GameOne", capture_output=True, text=True, check=False,

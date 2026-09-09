@@ -62,6 +62,7 @@ def profile() -> dict:
 def task(task_id: str = "TASK-1") -> dict:
     value = json.loads((ROOT / "skills/lemmings/templates/task.json").read_text(encoding="utf-8"))
     value["taskId"] = task_id
+    value["models"].update(hostId="codex", assigned="openai/gpt-5.6-luna:max")
     return value
 
 
@@ -318,6 +319,19 @@ class ModelsAndUsageV4Tests(unittest.TestCase):
 
 
 class WorkspacePoolV4Tests(unittest.TestCase):
+    def release(self, repo, *, workspace_id, task_state, integration_evidence, **kwargs):
+        entry = next(item for item in load_registry(repo)["entries"] if item["workspaceId"] == workspace_id)
+        head = git(repo, "rev-parse", "HEAD")
+        task_path = repo / "docs/tasks" / (workspace_id + ".json")
+        task_path.parent.mkdir(parents=True, exist_ok=True)
+        task = {"schemaVersion": 4, "revision": 0, "taskId": entry.get("taskId"), "state": task_state,
+                "workspace": {"workspaceId": workspace_id}, "baseSha": head,
+                "commits": {"candidate": head, "fix": []}, "validation": {"commands": ["git diff --check"]},
+                "close": {"mergeCommit": head, "integrationEvidence": [{"headSha": head, "command": "git diff --check", "passed": True, "exitCode": 0}] if integration_evidence else []}}
+        task_path.write_text(json.dumps(task), encoding="utf-8")
+        return release_workspace(repo, workspace_id=workspace_id, task_state=task_state,
+                                 task_path=task_path, task_revision=0, **kwargs)
+
     def add_workspace(self, repo: Path, root: Path, name: str) -> Path:
         path = root / name
         git(repo, "worktree", "add", "-b", name, str(path), "HEAD")
@@ -329,7 +343,7 @@ class WorkspacePoolV4Tests(unittest.TestCase):
             worktree = self.add_workspace(repo, root, "task-one")
             register_workspace(repo, workspace_id="ws", path=worktree, backend="code-worktree", managed_by="lemmings", lifetime="task", expected_revision=0, task_id="T1")
             claim_workspace(repo, workspace_id="ws", task_id="T1", base_sha=head, integration_head=head, branch="task-one", expected_revision=1)
-            released = release_workspace(repo, workspace_id="ws", expected_revision=2, task_state="Integrated", integration_evidence=True)
+            released = self.release(repo, workspace_id="ws", expected_revision=2, task_state="Integrated", integration_evidence=True)
             self.assertEqual("released-to-pool", released["action"])
             claimed = claim_workspace(repo, workspace_id="ws", task_id="T2", base_sha=head, integration_head=head, branch="task-two", expected_revision=3)
             self.assertEqual("T2", claimed["entry"]["taskId"])
@@ -346,28 +360,28 @@ class WorkspacePoolV4Tests(unittest.TestCase):
                 revision += 1
                 claim_workspace(repo, workspace_id=f"ws-{index}", task_id=f"T{index}", base_sha=head, integration_head=head, branch=name, expected_revision=revision)
                 revision += 1
-                release_workspace(repo, workspace_id=f"ws-{index}", expected_revision=revision, task_state="Integrated", integration_evidence=True)
+                self.release(repo, workspace_id=f"ws-{index}", expected_revision=revision, task_state="Integrated", integration_evidence=True)
                 revision += 1
             registry = load_registry(repo)
             self.assertEqual({"ws-1", "ws-2"}, {entry["workspaceId"] for entry in registry["entries"]})
             self.assertFalse((root / "task-0").exists())
 
-    def test_dirty_failure_is_quarantined_and_never_active_is_removed(self):
+    def test_dirty_failure_and_unactivated_workspace_are_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); repo = root / "repo"; repo.mkdir(); head = init_repo(repo)
             dirty = self.add_workspace(repo, root, "dirty")
             register_workspace(repo, workspace_id="dirty", path=dirty, backend="code-worktree", managed_by="lemmings", lifetime="task", expected_revision=0, task_id="T")
             claim_workspace(repo, workspace_id="dirty", task_id="T", base_sha=head, integration_head=head, branch="dirty", expected_revision=1)
             (dirty / "untracked.txt").write_text("dirty", encoding="utf-8")
-            result = release_workspace(repo, workspace_id="dirty", expected_revision=2, task_state="Integrated", integration_evidence=True)
+            result = self.release(repo, workspace_id="dirty", expected_revision=2, task_state="Integrated", integration_evidence=True)
             self.assertEqual("retained", result["action"])
             self.assertEqual("quarantined", load_registry(repo)["entries"][0]["state"])
 
             clean = self.add_workspace(repo, root, "never-active")
             register_workspace(repo, workspace_id="fresh", path=clean, backend="code-worktree", managed_by="lemmings", lifetime="task", expected_revision=3)
-            removed = release_workspace(repo, workspace_id="fresh", expected_revision=4, task_state="Cancelled", integration_evidence=False)
-            self.assertEqual("removed", removed["action"])
-            self.assertFalse(clean.exists())
+            removed = self.release(repo, workspace_id="fresh", expected_revision=4, task_state="Cancelled", integration_evidence=False)
+            self.assertEqual("retained", removed["action"])
+            self.assertTrue(clean.exists())
 
     def test_user_validation_workspace_and_crash_recovery_are_retained(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -377,19 +391,19 @@ class WorkspacePoolV4Tests(unittest.TestCase):
             snapshot = inspect_registry(repo)
             self.assertTrue(worktree.exists())
             self.assertEqual(1, len(snapshot["entries"]))
-            result = release_workspace(repo, workspace_id="validation", expected_revision=1, task_state="Integrated", integration_evidence=True, action="remove")
+            result = self.release(repo, workspace_id="validation", expected_revision=1, task_state="Integrated", integration_evidence=True, action="remove")
             self.assertEqual("retained", result["action"])
             self.assertTrue(worktree.exists())
 
-    def test_never_active_standalone_unity_clone_is_safely_removed(self):
+    def test_unactivated_standalone_clone_requires_canonical_lifecycle(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); repo = root / "repo"; repo.mkdir(); init_repo(repo)
             clone = root / "unity-clone"
             subprocess.run(["git", "clone", str(repo), str(clone)], capture_output=True, text=True, check=True)
             register_workspace(repo, workspace_id="clone", path=clone, backend="unity-clone", managed_by="lemmings", lifetime="phase", expected_revision=0)
-            result = release_workspace(repo, workspace_id="clone", expected_revision=1, task_state="Cancelled", integration_evidence=False)
-            self.assertEqual("removed", result["action"], result)
-            self.assertFalse(clone.exists())
+            result = self.release(repo, workspace_id="clone", expected_revision=1, task_state="Cancelled", integration_evidence=False)
+            self.assertEqual("retained", result["action"], result)
+            self.assertTrue(clone.exists())
 
     def test_claim_requires_current_registry_revision_and_integration_head(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -415,14 +429,14 @@ class WorkspacePoolV4Tests(unittest.TestCase):
             repair = self.add_workspace(repo, root, "repair")
             register_workspace(repo, workspace_id="repair", path=repair, backend="code-worktree", managed_by="lemmings", lifetime="task", expected_revision=0, task_id="T1")
             claim_workspace(repo, workspace_id="repair", task_id="T1", base_sha=head, integration_head=head, branch="repair", expected_revision=1)
-            retained = release_workspace(repo, workspace_id="repair", expected_revision=2, task_state="Repair", integration_evidence=False)
+            retained = self.release(repo, workspace_id="repair", expected_revision=2, task_state="Repair", integration_evidence=False)
             self.assertEqual("retained", retained["action"])
             self.assertEqual("active", load_registry(repo)["entries"][0]["state"])
 
             oversized = self.add_workspace(repo, root, "oversized")
             register_workspace(repo, workspace_id="oversized", path=oversized, backend="code-worktree", managed_by="lemmings", lifetime="task", expected_revision=3, task_id="T2", estimated_gib=11)
             claim_workspace(repo, workspace_id="oversized", task_id="T2", base_sha=head, integration_head=head, branch="oversized", expected_revision=4)
-            removed = release_workspace(repo, workspace_id="oversized", expected_revision=5, task_state="Integrated", integration_evidence=True)
+            removed = self.release(repo, workspace_id="oversized", expected_revision=5, task_state="Integrated", integration_evidence=True)
             self.assertEqual("removed", removed["action"])
 
             locked = self.add_workspace(repo, root, "locked")
@@ -434,7 +448,7 @@ class WorkspacePoolV4Tests(unittest.TestCase):
                     return subprocess.CompletedProcess([], 1, "", "file is locked")
                 return real_git(at, *args)
             with patch.object(workspace_module, "git", side_effect=fail_remove):
-                failed = release_workspace(repo, workspace_id="locked", expected_revision=8, task_state="Integrated", integration_evidence=True, action="remove")
+                failed = self.release(repo, workspace_id="locked", expected_revision=8, task_state="Integrated", integration_evidence=True, action="remove")
             self.assertEqual("retained", failed["action"])
             entry = next(item for item in load_registry(repo)["entries"] if item["workspaceId"] == "locked")
             self.assertEqual("quarantined", entry["state"])
@@ -446,7 +460,7 @@ class WorkspacePoolV4Tests(unittest.TestCase):
             operation = Path(git(unfinished, "rev-parse", "--git-path", "MERGE_HEAD"))
             operation.parent.mkdir(parents=True, exist_ok=True)
             operation.write_text(head + "\n", encoding="utf-8")
-            blocked = release_workspace(repo, workspace_id="unfinished", expected_revision=11, task_state="Integrated", integration_evidence=True)
+            blocked = self.release(repo, workspace_id="unfinished", expected_revision=11, task_state="Integrated", integration_evidence=True)
             self.assertEqual("retained", blocked["action"])
             unfinished_entry = next(item for item in load_registry(repo)["entries"] if item["workspaceId"] == "unfinished")
             self.assertIn("unfinished-git-operation", unfinished_entry["quarantineReason"])

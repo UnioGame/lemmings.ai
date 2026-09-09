@@ -35,6 +35,7 @@ from .contracts import (
     write_object,
 )
 from .invocations import accept_result, record_invocation, task_lock
+from .bundle import skill_root
 from .models import (
     advance_recovery_route,
     apply_proposal,
@@ -75,7 +76,7 @@ PROFILE_PATH = ".agents/lemmings.json"
 def load_profile(repo: Path, value: str | None = None) -> dict[str, Any] | None:
     if value:
         return load_optional(repo, value)
-    return load_optional(repo, None, PROFILE_PATH)
+    return load_optional(repo, None, PROFILE_PATH) or read_object(skill_root(repo) / "defaults.json")
 
 
 def emit(value: Any) -> None:
@@ -163,7 +164,9 @@ def distribution_findings(repo: Path, profile: dict[str, Any] | None) -> Validat
     installed_agents = repo / ".codex" / "agents"
     expected = {path.name: path.read_bytes() for path in source_agents.glob("lemmings-*.toml")}
     actual = {name: (installed_agents / name).read_bytes() for name in expected if (installed_agents / name).is_file()}
-    if expected != actual:
+    def instructions_only(data: bytes) -> list[str]:
+        return [line for line in data.decode("utf-8-sig").splitlines() if line.strip() and line.partition("=")[0].strip() not in {"model", "model_reasoning_effort"}]
+    if set(expected) != set(actual) or any(instructions_only(expected[name]) != instructions_only(actual[name]) for name in actual):
         result.error("distribution.agents", "installed Lemmings agent profiles differ from package")
     obsolete = [name for name in ("lemmings-orchestrator.toml", "lemmings-validator.toml", "lemmings-summarizer.toml") if (installed_agents / name).is_file()]
     if obsolete:
@@ -317,6 +320,9 @@ def command_workspace(args: argparse.Namespace) -> int:
     profile = load_profile(repo, args.profile)
     if args.workspace_command == "estimate":
         emit({"ok": True, **estimate_workspace(repo, profile, args.backend, args.package)})
+    elif args.workspace_command == "prepare":
+        from .workspace import prepare_workspace
+        emit(prepare_workspace(repo, task_path=resolve_path(repo, args.task), destination=resolve_path(repo, args.destination), branch=args.branch, expected_revision=args.expected_revision, approval=args.approval))
     elif args.workspace_command == "inspect":
         emit(inspect_workspaces(repo, profile))
     elif args.workspace_command == "register":
@@ -327,14 +333,54 @@ def command_workspace(args: argparse.Namespace) -> int:
     elif args.workspace_command == "claim":
         emit(claim_workspace(repo, workspace_id=args.workspace_id, task_id=args.task_id, base_sha=args.base_sha, integration_head=args.integration_head, branch=args.branch, expected_revision=args.expected_revision, phase_id=args.phase_id))
     elif args.workspace_command == "release":
-        emit(release_workspace(repo, workspace_id=args.workspace_id, expected_revision=args.expected_revision, task_state=args.task_state, integration_evidence=args.integration_evidence, action=args.action, retention_approved=args.retention_approved, profile=profile))
+        emit(release_workspace(repo, workspace_id=args.workspace_id, expected_revision=args.expected_revision, task_state=args.task_state, integration_evidence=args.integration_evidence, action=args.action, retention_approved=args.retention_approved, profile=profile, task_path=resolve_path(repo, args.task), task_revision=args.task_revision))
     elif args.workspace_command == "remove":
-        emit(remove_workspace(repo, workspace_id=args.workspace_id, expected_revision=args.expected_revision))
+        emit(remove_workspace(repo, workspace_id=args.workspace_id, expected_revision=args.expected_revision, task_path=resolve_path(repo, args.task), task_revision=args.task_revision))
     return 0
 
 
 def command_models(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
+    if args.models_command in {"scan", "probe"}:
+        from .discovery import scan_providers, probe_route
+        if args.models_command == "scan":
+            catalog = load_optional(repo, args.host_catalog)
+            value = scan_providers(repo, offline=args.offline, host_catalog=catalog)
+            if args.output:
+                write_object(resolve_path(repo, args.output), value)
+            if not args.details:
+                value = {"schemaVersion":4, "scannedAt":value.get("scannedAt"), "providerCount":len(value.get("providers",[])),
+                         "providers":value.get("providers",[])[:12], "routeCount":len(value.get("routes",[])),
+                         "diagnostics":value.get("diagnostics",[])[:12], "diagnosticCount":len(value.get("diagnostics",[])),
+                         "inventory":"~/.lemmings/state.json", "next":"models inspect --inventory --provider ID"}
+        else:
+            value = probe_route(read_object(resolve_path(repo, args.route)), repo=repo)
+        emit(value)
+        return 0
+    if args.models_command == "inspect" and args.inventory:
+        state_path = Path.home() / ".lemmings/state.json"
+        state = read_object(state_path) if state_path.is_file() else {}
+        inventory = state.get("inventory") or {}
+        routes = inventory.get("routes", [])
+        if args.provider:
+            routes = [r for r in routes if r.get("providerId") == args.provider]
+        limit = min(100, max(1, args.limit))
+        emit({"routes":routes[:limit], "total":len(routes), "omitted":max(0,len(routes)-limit), "inventory":"~/.lemmings/state.json"})
+        return 0
+    if getattr(args, "name", None) or getattr(args, "proposal", None):
+        from .profiles import build_profile_proposal, apply_profile_proposal
+        if args.models_command == "propose":
+            if not args.routes:
+                raise ValueError("named proposal requires --routes JSON")
+            value = build_profile_proposal(repo, args.name, read_object(resolve_path(repo, args.routes)))
+        else:
+            if not args.proposal:
+                raise ValueError("named apply requires --proposal JSON")
+            value = apply_profile_proposal(repo, read_object(resolve_path(repo, args.proposal)), args.confirm)
+        if args.output:
+            write_object(resolve_path(repo, args.output), value)
+        emit(value)
+        return 0
     config_path = resolve_path(repo, args.profile or PROFILE_PATH)
     if not config_path or not config_path.is_file():
         raise ValueError(f"model configuration does not exist: {args.profile or PROFILE_PATH}")
@@ -377,6 +423,8 @@ def command_models(args: argparse.Namespace) -> int:
         else:
             emit(apply_recovery_proposal(task_path, config, catalogs, failure, plan, args.option, args.confirm))
         return 0
+    if not args.catalog or not args.routes:
+        raise ValueError("legacy model routing requires --catalog and --routes; named profiles use --name/--proposal")
     catalog = read_object(resolve_path(repo, args.catalog))
     routes = read_object(resolve_path(repo, args.routes))
     if args.models_command == "propose":
@@ -384,6 +432,58 @@ def command_models(args: argparse.Namespace) -> int:
     else:
         emit(apply_proposal(config_path, catalog, routes, args.confirm))
     return 0
+
+
+def command_profiles(args: argparse.Namespace) -> int:
+    from .profiles import inspect_profiles, use_profile, resolve_profile
+    repo = Path(args.repo).resolve()
+    if args.profiles_command == "list":
+        value = inspect_profiles(repo)
+    elif args.profiles_command == "use":
+        value = use_profile(repo, args.name)
+    else:
+        value = resolve_profile(repo, args.name)
+    emit(value)
+    return 0
+
+
+def command_rules(args: argparse.Namespace) -> int:
+    from .rules import resolve_rules
+    emit(resolve_rules(Path(args.repo).resolve(), paths=args.path, technologies=args.technology, platforms=args.platform))
+    return 0
+
+
+def command_run(args: argparse.Namespace) -> int:
+    from .runners import build_launch, run_invocation
+    from .invocations import find_invocation, validate_dispatch
+    repo = Path(args.repo).resolve()
+    task = read_object(resolve_path(repo, args.task))
+    invocation = find_invocation(task, args.invocation_id)
+    if not invocation or invocation.get("taskRevision") != task.get("revision"):
+        raise ValueError("run requires a current saved invocation")
+    validate_dispatch(repo, task, load_profile(repo, args.profile), invocation)
+    route = read_object(resolve_path(repo, args.route))
+    choices = invocation.get("roleRoutes", [])
+    from .contracts import route_name, current_recovery_route
+    recovery = current_recovery_route(task, invocation["role"])
+    assigned = invocation.get("assignedModel") or (task.get("models") or {}).get("assigned")
+    assigned_host = invocation.get("assignedHost") or (task.get("models") or {}).get("hostId")
+    native = route.get("executor") == "native" and assigned == "current-host/default"
+    if not native and (route_name(route) != assigned or route.get("hostId") != assigned_host):
+        raise ValueError("run route differs from the manager-assigned model")
+    explicit_pin = invocation["role"] == task.get("role") and (task.get("models") or {}).get("requested") == assigned and route_name(route) == assigned
+    def matches(candidate):
+        return candidate and route_name(candidate) == route_name(route) and candidate.get("hostId") == route.get("hostId") and all(not candidate.get(k) or candidate[k] == route.get(k) for k in ("executor", "profileName", "protocol"))
+    if choices and not any(matches(c) for c in choices) and not matches(recovery) and not explicit_pin:
+        raise ValueError("run route is outside the frozen approved chain")
+    value = build_launch(repo, invocation, route) if args.dry_run else run_invocation(repo, invocation, route)
+    # Launch env may contain local credentials; never emit it, even in dry-run.
+    if args.dry_run:
+        value = {k:v for k,v in value.items() if k not in {"env", "stdin"}}
+    if args.output:
+        write_object(resolve_path(repo, args.output), value)
+    emit(value)
+    return 0 if value.get("status", "succeeded") == "succeeded" else 1
 
 
 def _task_arg(repo: Path, value: str | None) -> tuple[str | None, dict[str, Any] | None, str | None]:
@@ -523,7 +623,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     else:
         result.extend(validate_profile(profile))
     runtime = Path(__file__).resolve().parent
-    skill = runtime.parents[1]
+    skill = skill_root(repo)
     required = [
         *(runtime / name for name in ("contracts.py", "hooks.py", "invocations.py", "workspace.py")),
         skill / "SKILL.md", skill / "defaults.json", skill / "scripts/run.py",
@@ -531,7 +631,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     ]
     if any(not path.is_file() for path in required):
         result.error("doctor.bundle", "installed runtime or templates are incomplete")
-    if profile is not None:
+    if profile is not None and (profile.get("game") or {}).get("engine") == "unity":
         project = repo / str((profile.get("game") or {}).get("projectPath") or "")
         if not (project / "Assets").is_dir() or not (project / "Packages/manifest.json").is_file() or not (project / "ProjectSettings/ProjectVersion.txt").is_file():
             result.error("doctor.project", "configured game.projectPath is not a Unity project")
@@ -546,13 +646,32 @@ def command_invocation(args: argparse.Namespace) -> int:
     if profile is None or task_path is None or not task_path.is_file():
         raise ValueError("invocation requires an existing profile and Task")
     if args.invocation_command == "create":
-        emit(record_invocation(repo, task_path, profile, args.role, args.attempt, args.expected_revision, args.objective))
+        emit(record_invocation(repo, task_path, profile, args.role, args.attempt, args.expected_revision, args.objective, preset=args.preset, freeze=True))
     else:
         result_path = resolve_path(repo, args.result)
         if result_path is None or not result_path.is_file():
             raise ValueError("invocation accept requires an existing AgentResult")
         emit(accept_result(repo, task_path, profile, read_object(result_path), args.expected_revision))
     return 0
+
+
+def _integration_tree_findings(repo: Path, task_path: Path, task: Mapping[str, Any], head: str) -> list[str]:
+    from .contracts import path_matches
+    current = git(repo, "rev-parse", "HEAD")
+    if current.returncode or current.stdout.strip() != head:
+        return ["HEAD changed during integration validation"]
+    tracked = git(repo, "diff", "--name-only", "HEAD", "--")
+    untracked = git(repo, "ls-files", "--others", "--exclude-standard")
+    if tracked.returncode or untracked.returncode:
+        return ["cannot verify integration tree"]
+    try:
+        task_ref = task_path.resolve().relative_to(repo).as_posix()
+    except ValueError:
+        task_ref = None
+    allowed = (task.get("validation") or {}).get("allowedOutputs") or []
+    paths = set(tracked.stdout.splitlines() + untracked.stdout.splitlines())
+    dirty = [path for path in sorted(paths) if path not in {task_ref, task_ref + ".lock" if task_ref else None} and not any(path_matches(path, str(rule)) for rule in allowed)]
+    return ["integration tree has changes outside canonical Task/allowed outputs: " + ", ".join(dirty[:8])] if dirty else []
 
 
 def command_integration(args: argparse.Namespace) -> int:
@@ -572,10 +691,28 @@ def command_integration(args: argparse.Namespace) -> int:
         commands = [str(value).strip() for value in as_list((task.get("validation") or {}).get("commands")) if str(value).strip()]
         if not commands:
             raise ValueError("integration validation requires declared validation.commands")
+        tree_findings = _integration_tree_findings(repo, task_path, task, head)
+        if tree_findings:
+            raise ValueError(tree_findings[0])
         evidence = []
         for command in commands:
-            process = subprocess.run(command, cwd=repo, shell=True, capture_output=True, text=True, check=False)
-            evidence.append({"headSha": head, "command": command, "passed": process.returncode == 0, "exitCode": process.returncode})
+            common_value = git(repo, "rev-parse", "--git-common-dir").stdout.strip()
+            common = Path(common_value) if Path(common_value).is_absolute() else repo / common_value
+            artifact = common.resolve() / "lemmings" / "validation" / (head + "-" + hashlib.sha256(command.encode()).hexdigest()[:12] + ".log")
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            with artifact.open("wb") as output:
+                process = subprocess.run(command, cwd=repo, shell=True, stdout=output, stderr=subprocess.STDOUT, check=False)
+            size = artifact.stat().st_size
+            with artifact.open("rb") as output:
+                output.seek(max(0, size - 4096))
+                excerpt = output.read(4096).decode("utf-8", errors="replace")
+            evidence.append({"headSha": head, "command": command, "passed": process.returncode == 0, "exitCode": process.returncode,
+                             "diagnostics": {"tail": excerpt, "totalBytes": size, "omittedBytes": max(0, size - 4096), "artifact": "git-common-dir:lemmings/validation/" + artifact.name}})
+        tree_findings = _integration_tree_findings(repo, task_path, task, head)
+        if tree_findings:
+            for item in evidence:
+                item["passed"] = False
+                item["treeFindings"] = tree_findings
         close["integrationEvidence"] = evidence
         task["close"] = close
         task["revision"] = args.expected_revision + 1
@@ -587,7 +724,7 @@ def command_integration(args: argparse.Namespace) -> int:
 
 def add_common(parser: argparse.ArgumentParser, artifacts: bool = False) -> None:
     parser.add_argument("--repo", default=".")
-    parser.add_argument("--profile")
+    parser.add_argument("--profile", help="existing JSON configuration path")
     if artifacts:
         parser.add_argument("--task")
         parser.add_argument("--phase")
@@ -600,7 +737,7 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check", help="validate lifecycle contracts once per artifact"); add_common(check); check.add_argument("--task", action="append"); check.add_argument("--phase"); check.add_argument("--review"); check.add_argument("--all", action="store_true"); check.add_argument("--distribution", action="store_true", help="also compare the installed bundle with the package"); check.add_argument("--dispatchable", action="store_true"); check.add_argument("--batch", action="append"); check.add_argument("--available-slots", type=int); check.add_argument("--active-writers", type=int, default=0); check.add_argument("--active-readers", type=int, default=0); check.set_defaults(run=command_check)
     doctor = sub.add_parser("doctor", help="verify the installed self-contained runtime"); doctor.add_argument("--repo", default="."); doctor.set_defaults(run=command_doctor)
     invocation = sub.add_parser("invocation", help="persist dispatch and accept matching AgentResult"); invocation_sub = invocation.add_subparsers(dest="invocation_command", required=True)
-    invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.set_defaults(run=command_invocation)
+    invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.add_argument("--preset", help="named role preset for this new Task"); invocation_create.set_defaults(run=command_invocation)
     invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--expected-revision", type=int, required=True); invocation_accept.set_defaults(run=command_invocation)
     integration = sub.add_parser("integration", help="run declared checks on the exact merged tree"); integration_sub = integration.add_subparsers(dest="integration_command", required=True)
     integration_validate = integration_sub.add_parser("validate"); integration_validate.add_argument("--repo", default="."); integration_validate.add_argument("--task", required=True); integration_validate.add_argument("--expected-revision", type=int, required=True); integration_validate.set_defaults(run=command_integration)
@@ -611,17 +748,28 @@ def build_parser() -> argparse.ArgumentParser:
         item = runtime_sub.add_parser(name); item.add_argument("--repo", default="."); item.set_defaults(run=command_runtime)
     workspace = sub.add_parser("workspace", help="estimate or inspect workspaces"); workspace_sub = workspace.add_subparsers(dest="workspace_command", required=True)
     estimate = workspace_sub.add_parser("estimate"); add_common(estimate); estimate.add_argument("--backend", default="auto", choices=["auto", "current", "code-worktree", "package-worktree", "unity-clone"]); estimate.add_argument("--package", help="repo-relative target package path for package-worktree sizing"); estimate.set_defaults(run=command_workspace)
+    prepare = workspace_sub.add_parser("prepare"); add_common(prepare); prepare.add_argument("--task", required=True); prepare.add_argument("--destination", required=True); prepare.add_argument("--branch", required=True); prepare.add_argument("--expected-revision", type=int, required=True); prepare.add_argument("--approval", default="not-required"); prepare.set_defaults(run=command_workspace)
     inspect = workspace_sub.add_parser("inspect"); add_common(inspect); inspect.set_defaults(run=command_workspace)
     register = workspace_sub.add_parser("register"); add_common(register); register.add_argument("--workspace-id", required=True); register.add_argument("--path", required=True); register.add_argument("--backend", required=True, choices=["code-worktree", "package-worktree", "unity-clone"]); register.add_argument("--managed-by", default="lemmings", choices=["lemmings", "user"]); register.add_argument("--lifetime", default="task", choices=["task", "phase", "project"]); register.add_argument("--expected-revision", type=int, required=True); register.add_argument("--task-id"); register.add_argument("--phase-id"); register.add_argument("--estimated-gib", type=float, default=0); register.add_argument("--approval", default="not-required"); register.add_argument("--kind", default="writer", choices=["writer", "validation"]); register.add_argument("--allowed-cache", action="append", default=[]); register.set_defaults(run=command_workspace)
     claim = workspace_sub.add_parser("claim"); add_common(claim); claim.add_argument("--workspace-id", required=True); claim.add_argument("--task-id", required=True); claim.add_argument("--base-sha", required=True); claim.add_argument("--integration-head", required=True); claim.add_argument("--branch", required=True); claim.add_argument("--expected-revision", type=int, required=True); claim.add_argument("--phase-id"); claim.set_defaults(run=command_workspace)
-    release = workspace_sub.add_parser("release"); add_common(release); release.add_argument("--workspace-id", required=True); release.add_argument("--expected-revision", type=int, required=True); release.add_argument("--task-state", required=True); release.add_argument("--integration-evidence", action="store_true"); release.add_argument("--action", default="pool", choices=["pool", "remove", "retain"]); release.add_argument("--retention-approved", action="store_true"); release.set_defaults(run=command_workspace)
-    remove = workspace_sub.add_parser("remove"); add_common(remove); remove.add_argument("--workspace-id", required=True); remove.add_argument("--expected-revision", type=int, required=True); remove.set_defaults(run=command_workspace)
+    release = workspace_sub.add_parser("release"); add_common(release); release.add_argument("--workspace-id", required=True); release.add_argument("--expected-revision", type=int, required=True); release.add_argument("--task-state", help="legacy hint; canonical Task evidence is required"); release.add_argument("--task", required=True); release.add_argument("--task-revision", type=int, required=True); release.add_argument("--integration-evidence", action="store_true"); release.add_argument("--action", default="pool", choices=["pool", "remove", "retain"]); release.add_argument("--retention-approved", action="store_true"); release.set_defaults(run=command_workspace)
+    remove = workspace_sub.add_parser("remove"); add_common(remove); remove.add_argument("--workspace-id", required=True); remove.add_argument("--expected-revision", type=int, required=True); remove.add_argument("--task", required=True); remove.add_argument("--task-revision", type=int, required=True); remove.set_defaults(run=command_workspace)
     models = sub.add_parser("models", help="inspect or confirmation-gate per-host model routes"); models_sub = models.add_subparsers(dest="models_command", required=True)
-    models_inspect = models_sub.add_parser("inspect"); add_common(models_inspect); models_inspect.set_defaults(run=command_models)
+    models_inspect = models_sub.add_parser("inspect"); add_common(models_inspect); models_inspect.add_argument("--inventory", action="store_true"); models_inspect.add_argument("--provider"); models_inspect.add_argument("--limit", type=int, default=20); models_inspect.set_defaults(run=command_models)
     for name in ("propose", "apply"):
-        item = models_sub.add_parser(name); add_common(item); item.add_argument("--catalog", required=True); item.add_argument("--routes", required=True)
+        item = models_sub.add_parser(name); add_common(item); item.add_argument("--catalog"); item.add_argument("--routes"); item.add_argument("--name"); item.add_argument("--proposal"); item.add_argument("--output")
         if name == "apply": item.add_argument("--confirm", required=True)
         item.set_defaults(run=command_models)
+    scan = models_sub.add_parser("scan", help="discover providers without inference"); add_common(scan); scan.add_argument("--offline", action="store_true"); scan.add_argument("--host-catalog"); scan.add_argument("--output"); scan.add_argument("--details", action="store_true", help="emit the complete sanitized inventory"); scan.set_defaults(run=command_models)
+    probe = models_sub.add_parser("probe", help="explicit targeted inference/access probe"); add_common(probe); probe.add_argument("--route", required=True); probe.set_defaults(run=command_models)
+    profiles = sub.add_parser("profiles", help="list, explain and select named role profiles"); profiles_sub = profiles.add_subparsers(dest="profiles_command", required=True)
+    for name in ("list", "inspect", "use"):
+        item = profiles_sub.add_parser(name); add_common(item)
+        if name != "list": item.add_argument("name")
+        item.set_defaults(run=command_profiles)
+    rules = sub.add_parser("rules", help="explain task-scoped optional rule selection"); rules_sub = rules.add_subparsers(dest="rules_command", required=True)
+    explain = rules_sub.add_parser("explain"); add_common(explain); explain.add_argument("--path", action="append"); explain.add_argument("--technology", action="append"); explain.add_argument("--platform", action="append"); explain.set_defaults(run=command_rules)
+    run = sub.add_parser("run", help="execute one manager-assigned saved invocation"); add_common(run); run.add_argument("--task", required=True); run.add_argument("--invocation-id", required=True); run.add_argument("--route", required=True); run.add_argument("--dry-run", action="store_true"); run.add_argument("--output"); run.set_defaults(run=command_run)
     recover = models_sub.add_parser("recover", help="confirmation-gate a task-local route plan"); recover_sub = recover.add_subparsers(dest="recover_command", required=True)
     for name in ("propose", "apply"):
         item = recover_sub.add_parser(name); add_common(item); item.add_argument("--task", required=True); item.add_argument("--failure", required=True); item.add_argument("--plan", required=True); item.add_argument("--catalog", action="append", required=True)
