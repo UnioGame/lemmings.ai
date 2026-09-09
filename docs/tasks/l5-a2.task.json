@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 18,
+  "revision": 21,
   "taskId": "L5-A2",
   "goal": "Complete immutable claim identity and pooled cleanup lifecycle binding",
   "acceptance": [
@@ -25,8 +25,8 @@
   "planReviewRef": "docs/tasks/reviews/l5-a2-plan.json",
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Accepted",
-  "previousState": "Candidate",
+  "state": "Integrated",
+  "previousState": "Accepted",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -555,8 +555,33 @@
     "docs/tasks/reviews/l5-a2-2.json"
   ],
   "close": {
-    "mergeCommit": null,
-    "integrationEvidence": [],
-    "workspaceDisposition": null
+    "mergeCommit": "0f47ded0492445c21211a318c86cf0fc6e5cf2ae",
+    "integrationEvidence": [
+      {
+        "headSha": "0f47ded0492445c21211a318c86cf0fc6e5cf2ae",
+        "command": "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": "Switched to a new branch 'codex/task'\n...Switched to a new branch 'codex/task'\n....Preparing worktree (new branch 'codex/registered')\nHEAD is now at d87641c base\n........Preparing worktree (new branch 'dirty')\nHEAD is now at a87c9ca base\n...Preparing worktree (new branch 'codex/idle')\nHEAD is now at b68be23 base\n....\r\n----------------------------------------------------------------------\r\nRan 22 tests in 33.042s\r\n\r\nOK\r\n",
+          "totalBytes": 423,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/0f47ded0492445c21211a318c86cf0fc6e5cf2ae-83ab59604494.log"
+        }
+      },
+      {
+        "headSha": "0f47ded0492445c21211a318c86cf0fc6e5cf2ae",
+        "command": "git diff --check",
+        "passed": true,
+        "exitCode": 0,
+        "diagnostics": {
+          "tail": "warning: in the working copy of 'docs/tasks/l5-a2.task.json', CRLF will be replaced by LF the next time Git touches it\n",
+          "totalBytes": 119,
+          "omittedBytes": 0,
+          "artifact": "git-common-dir:lemmings/validation/0f47ded0492445c21211a318c86cf0fc6e5cf2ae-466c2f308b48.log"
+        }
+      }
+    ],
+    "workspaceDisposition": "retained-for-final-phase"
   }
 }
