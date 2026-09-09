@@ -23,3 +23,5 @@ New Task invocations freeze `effectiveConfig` with resolved profile, selected ru
 Create the invocation with the target worker repository as `--repo`, so context hashes describe its checkout bytes (including Git line-ending conversion), not the manager checkout. The canonical Task may be supplied separately. Verify the recorded hashes before dispatch; do not silently rewrite a running invocation.
 
 Keep hashed text references byte-stable across worktrees. This distribution pins LF for source, rules and JSON/TOML through `.gitattributes`; project owners can apply an equivalent policy to their own frozen contracts. Hash the target checkout bytes and never silently rewrite a user file to satisfy a digest.
+
+For a plan-reviewed Task, create the first reviewer invocation to freeze effectiveConfig, then bind the Review subject to the saved Task planDigest. Keep Task.workingSet as the accepted plan input; candidate reviewer invocations refresh their own reference hashes from the candidate checkout without rewriting the accepted workingSet hashes.

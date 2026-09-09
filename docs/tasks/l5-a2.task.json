@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 5,
+  "revision": 8,
   "taskId": "L5-A2",
   "goal": "Complete immutable claim identity and pooled cleanup lifecycle binding",
   "acceptance": [
@@ -25,8 +25,8 @@
   "planReviewRef": "docs/tasks/reviews/l5-a2-plan.json",
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Active",
-  "previousState": "Ready",
+  "state": "Candidate",
+  "previousState": "Active",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -66,7 +66,7 @@
     "hostId": "codex",
     "requested": null,
     "assigned": "openai/gpt-5.6-terra:max",
-    "actual": null,
+    "actual": "openai/gpt-5.6-terra:max",
     "fallbackReason": null
   },
   "routingRecovery": null,
@@ -88,7 +88,9 @@
     "interfaces": [],
     "tests": [],
     "dependencyHandoffs": [],
-    "validationEvidence": [],
+    "validationEvidence": [
+      "Focused workspace safety suite and diff check passed."
+    ],
     "attempts": [],
     "invocations": [
       {
@@ -195,6 +197,57 @@
           "deadlineSeconds": 2700
         },
         "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-A2",
+        "taskId": "L5-A2",
+        "taskRevision": 8,
+        "invocationId": "cef1d2342ff539451bd0a9ca",
+        "attempt": 2,
+        "role": "reviewer",
+        "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
+        "contextDigest": "4c5c4145e25b489459f820a5ed967f102a0210ae64f5681e82dd5e8a3b3e4ab7",
+        "objective": "Review immutable A2 range against accepted two-invariant replan: idempotent claim original branch/base and actual managed source identity; complete stored pool Task/path/revision/release evidence before direct remove and eviction, no synthesized authority. Reuse reported expanded focused suite. Inspect inherited range only as needed. Return AgentResult v4 verdict with material findings only; no broad tests.",
+        "acceptanceCriteria": [
+          "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Unchanged public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-workspace-replan.md",
+            "purpose": "Bounded replacement plan",
+            "contentHash": "1d7f900bce6e9eb1bac1dcfafe6bf491ab244a1ef85d8d49ca8dd52130e2ff77"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/workspace.py",
+            "purpose": "Current safety implementation",
+            "contentHash": "ff15be46953f5b237bf4b842ec3ce941840e26a4a4f5acd8844b1d70b3bdde5d"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_workspace_safety.py",
+          "git diff --check"
+        ],
+        "candidateHead": "a5fecd127946d86f9289743979be1572b7fce9c9",
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
       }
     ],
     "agentResults": [
@@ -214,13 +267,33 @@
           "Standalone clone source identity must be concrete."
         ],
         "verdict": "Accepted"
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "c6c2e47b382f8942152f9ee9",
+        "attempt": 1,
+        "status": "succeeded",
+        "candidateHead": "a5fecd127946d86f9289743979be1572b7fce9c9",
+        "changedPaths": [
+          "skills/lemmings/scripts/lemmings/workspace.py",
+          "tests/test_workspace_safety.py"
+        ],
+        "acceptanceEvidence": [
+          "Registry identity and prior pool evidence invariants implemented with corruption matrix; only owned files committed."
+        ],
+        "validationEvidence": [
+          "Focused workspace safety suite and diff check passed."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": []
       }
     ],
     "handoff": null
   },
   "baseSha": "bbb2d65d26e61eab3eb4abed3ddc13999a2e08d5",
   "commits": {
-    "candidate": null,
+    "candidate": "a5fecd127946d86f9289743979be1572b7fce9c9",
     "fix": []
   },
   "validation": {

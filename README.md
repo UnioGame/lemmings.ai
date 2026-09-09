@@ -110,7 +110,7 @@ Precedence, highest first:
 4. Explicitly selected generated preset.
 5. Current host defaults.
 
-Manual named files use a `profiles` map, with each name containing `roleRoutes` for worker/reviewer/explorer; an optional `activeProfile` selects the manual default. Existing project `modelRoutes` remains supported and retains priority. `profiles inspect` explains the effective sources so a manual pin that masks a generated choice is visible.
+Manual named files use a `profiles` map, with each name containing `roleRoutes` for worker/reviewer/explorer; an optional `activeProfile` selects the manual default. Existing project `modelRoutes` remains supported and retains priority. `profiles inspect` explains the effective sources so a manual pin that masks a generated choice is visible. Values installed by an older v4 release are also preserved: the installer cannot reliably distinguish them from your edits. To let a generated preset control a role, explicitly move or remove that role’s old manual assignment after inspecting its source.
 
 A new Task can select a preset when its first invocation is persisted:
 

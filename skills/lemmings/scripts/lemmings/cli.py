@@ -9,7 +9,7 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .contracts import (
     DISTRIBUTION_VERSION,
@@ -462,6 +462,17 @@ def command_run(args: argparse.Namespace) -> int:
     if not invocation or invocation.get("taskRevision") != task.get("revision"):
         raise ValueError("run requires a current saved invocation")
     validate_dispatch(repo, task, load_profile(repo, args.profile), invocation)
+    if invocation["role"] == "worker":
+        workspace = task.get("workspace") or {}
+        if workspace.get("destination") and Path(workspace["destination"]).resolve() != repo:
+            raise ValueError("run repository differs from the recorded worker destination")
+        commits = task.get("commits") or {}
+        fixes = commits.get("fix") or []
+        expected_head = (fixes[-1] if fixes else commits.get("candidate")) if task.get("state") == "Repair" else task.get("baseSha")
+        expected_head = expected_head or task.get("baseSha")
+        head = git(repo, "rev-parse", "HEAD")
+        if head.returncode or head.stdout.strip() != expected_head:
+            raise ValueError("run worker HEAD differs from its recorded base or repair candidate")
     route = read_object(resolve_path(repo, args.route))
     choices = invocation.get("roleRoutes", [])
     from .contracts import route_name, current_recovery_route

@@ -4,9 +4,10 @@ from pathlib import Path
 
 def skill_root(repo: Path | None = None) -> Path:
     source = Path(__file__).resolve().parents[2]
-    candidates = [source]
+    candidates = []
     if repo is not None:
         candidates.append(repo.resolve() / ".agents/skills/lemmings")
+    candidates.append(source)
     for candidate in candidates:
         if (candidate / "defaults.json").is_file() and (candidate / "SKILL.md").is_file():
             return candidate

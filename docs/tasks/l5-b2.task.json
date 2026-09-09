@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "revision": 8,
+  "revision": 11,
   "taskId": "L5-B2",
   "goal": "Complete production-shaped discovery, exact-route probing and trusted profile routes",
   "acceptance": [
@@ -25,8 +25,8 @@
   "planReviewRef": "docs/tasks/reviews/l5-b2-plan.json",
   "reviewPolicy": null,
   "specialization": null,
-  "state": "Active",
-  "previousState": "Ready",
+  "state": "Candidate",
+  "previousState": "Active",
   "role": "worker",
   "risks": [],
   "telemetryCohort": null,
@@ -73,7 +73,7 @@
     "hostId": "codex",
     "requested": null,
     "assigned": "openai/gpt-5.6-terra:max",
-    "actual": null,
+    "actual": "openai/gpt-5.6-terra:max",
     "fallbackReason": null
   },
   "routingRecovery": null,
@@ -95,7 +95,9 @@
     "interfaces": [],
     "tests": [],
     "dependencyHandoffs": [],
-    "validationEvidence": [],
+    "validationEvidence": [
+      "8 discovery and 8 profile tests passed; diff check passed."
+    ],
     "attempts": [],
     "invocations": [
       {
@@ -273,6 +275,63 @@
           "deadlineSeconds": 2700
         },
         "outputSchemaVersion": 4
+      },
+      {
+        "schemaVersion": 4,
+        "runId": "L5-B2",
+        "taskId": "L5-B2",
+        "taskRevision": 11,
+        "invocationId": "604a3458e6a4028405c24b24",
+        "attempt": 3,
+        "role": "reviewer",
+        "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
+        "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
+        "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
+        "contextDigest": "e25b13f4136dee34165c130f688064197a93b496c1f4d9931a5b9b1207f1853c",
+        "objective": "Immutable B2 review: production id-only Go/public + local cache, exact source-scoped protocol proof, scan route to trusted repo-bound probe with auth and no caller endpoint, inventory canonical proposal route fields, read-only inspect. Review base e109..candidate plus inherited original B changes as needed for integration. Reuse reported8+8tests unless a concrete gap. Return AgentResult v4 Accepted/ChangesRequested with material findings only.",
+        "acceptanceCriteria": [
+          "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
+        ],
+        "ownedPaths": [],
+        "forbiddenPaths": [
+          "skills/lemmings/scripts/lemmings/cli.py",
+          "skills/lemmings/scripts/lemmings/contracts.py",
+          "docs/**"
+        ],
+        "contextRefs": [
+          {
+            "ref": "docs/context/l5-contracts.md",
+            "purpose": "Original public contract",
+            "contentHash": "63521b8ddb7ff4b1ea1e463569975bee343b783cf3db154b84d5fa67141b952a"
+          },
+          {
+            "ref": "docs/context/l5-provider-replan.md",
+            "purpose": "Replacement plan and verified metadata",
+            "contentHash": "2e11989983b4d711db9da05659daddd58075a3e73664c35e20e1085f08b6d48f"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/discovery.py",
+            "purpose": "Current discovery",
+            "contentHash": "ff04a54b0d26428fbfafa1f8d2e617eec262d19e802f3fb319590ebdd8931984"
+          },
+          {
+            "ref": "skills/lemmings/scripts/lemmings/profiles.py",
+            "purpose": "Current profiles",
+            "contentHash": "abffc8f2f12262e8c5c3a7d50951f3386566c29f9812e5f71cb2379d80ed4276"
+          }
+        ],
+        "validationCommands": [
+          "python -B -m unittest discover -s tests -p test_discovery.py",
+          "python -B -m unittest discover -s tests -p test_profiles.py",
+          "git diff --check"
+        ],
+        "candidateHead": "4df85ffeeffa835aa8921d1520aa94483625a9f6",
+        "limits": {
+          "maxTurns": 8,
+          "maxToolCalls": 16,
+          "deadlineSeconds": 1200
+        },
+        "outputSchemaVersion": 4
       }
     ],
     "agentResults": [
@@ -319,13 +378,37 @@
           "Live provider requests unvalidated."
         ],
         "verdict": "Accepted"
+      },
+      {
+        "schemaVersion": 4,
+        "invocationId": "16f7cb329604ced57938cdb6",
+        "attempt": 1,
+        "status": "succeeded",
+        "candidateHead": "4df85ffeeffa835aa8921d1520aa94483625a9f6",
+        "changedPaths": [
+          "skills/lemmings/scripts/lemmings/discovery.py",
+          "skills/lemmings/scripts/lemmings/profiles.py",
+          "tests/test_discovery.py",
+          "tests/test_profiles.py"
+        ],
+        "acceptanceEvidence": [
+          "Dated exact Go protocol evidence/public and local catalogs; repo-bound trusted exact-route probe; canonical proposal routes; read-only inspect creates no state directory."
+        ],
+        "validationEvidence": [
+          "8 discovery and 8 profile tests passed; diff check passed."
+        ],
+        "findings": [],
+        "blockers": [],
+        "remainingRisks": [
+          "No live paid probe; offline requests only."
+        ]
       }
     ],
     "handoff": null
   },
   "baseSha": "e109f815c15944e8a38d8900cd7474c84b28196c",
   "commits": {
-    "candidate": null,
+    "candidate": "4df85ffeeffa835aa8921d1520aa94483625a9f6",
     "fix": []
   },
   "validation": {

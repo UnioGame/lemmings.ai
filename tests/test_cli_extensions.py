@@ -1,5 +1,6 @@
 import json
 import subprocess
+import types
 from unittest.mock import patch
 import sys
 import tempfile
@@ -7,7 +8,7 @@ import unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"skills/lemmings/scripts"))
-from lemmings.cli import build_parser, command_integration
+from lemmings.cli import build_parser, command_integration, command_run
 
 class CliExtensionTests(unittest.TestCase):
     def test_documented_command_syntax(self):
@@ -58,3 +59,25 @@ class CliExtensionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"integration tree has changes"):
                 command_integration(args)
             self.assertEqual(1,json.loads(task.read_text())["revision"])
+
+    def test_worker_run_rejects_wrong_destination_and_head_before_launch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo=Path(temp); subprocess.run(["git","init",str(repo)],check=True,capture_output=True)
+            for key,value in [("user.email","test@example.invalid"),("user.name","Test")]:
+                subprocess.run(["git","-C",str(repo),"config",key,value],check=True,capture_output=True)
+            subprocess.run(["git","-C",str(repo),"commit","--allow-empty","-m","fixture"],check=True,capture_output=True)
+            head=subprocess.run(["git","-C",str(repo),"rev-parse","HEAD"],check=True,capture_output=True,text=True).stdout.strip()
+            task={"revision":1,"state":"Active","baseSha":head,"role":"worker","workspace":{"destination":str(repo/"wrong")},
+                  "models":{"assigned":"current-host/default","hostId":"native"},"execution":{"invocations":[{"invocationId":"i","taskRevision":1,"role":"worker"}]}}
+            path=repo/"task.json"; path.write_text(json.dumps(task))
+            (repo/"route.json").write_text(json.dumps({"executor":"native"}))
+            args=build_parser().parse_args(["run","--repo",str(repo),"--task","task.json","--invocation-id","i","--route","route.json","--dry-run"])
+            launches=[]
+            module=types.SimpleNamespace(build_launch=lambda *a:launches.append(a) or {"executor":"native","env":{"secret":"hidden"},"stdin":"hidden"},run_invocation=lambda *a:None)
+            with patch.dict(sys.modules,{"lemmings.runners":module}),patch("lemmings.invocations.validate_dispatch"),patch("lemmings.cli.emit") as emit:
+                with self.assertRaisesRegex(ValueError,"worker destination"): command_run(args)
+                task["workspace"]={};task["baseSha"]="0"*40;path.write_text(json.dumps(task))
+                with self.assertRaisesRegex(ValueError,"worker HEAD"): command_run(args)
+                self.assertFalse(launches)
+                task["baseSha"]=head;path.write_text(json.dumps(task));self.assertEqual(0,command_run(args))
+                self.assertEqual({"executor":"native"},emit.call_args.args[0])
