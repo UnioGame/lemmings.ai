@@ -1011,6 +1011,22 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
                 if invocation_id in failure_ids:
                     result.error("routing.failure_history", f"duplicate RouteFailure invocationId: {invocation_id}")
                 failure_ids.add(invocation_id)
+    marked_invocations = [
+        item for item in invocations or []
+        if isinstance(item, Mapping) and item.get("budgetPolicyDigest")
+    ] if isinstance(invocations, list) else []
+    if marked_invocations:
+        budget_value = task.get("budget")
+        if not isinstance(budget_value, Mapping) or not isinstance(budget_value.get("policy"), Mapping):
+            result.error("budget.required", "frozen Task budget is required after the first budgeted invocation")
+        else:
+            expected_policy_digest = hashlib.sha256(
+                json.dumps(budget_value["policy"], sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            for index, invocation in enumerate(marked_invocations):
+                if invocation.get("budgetPolicyDigest") != expected_policy_digest:
+                    result.error("budget.policy_drift", f"budget policy changed after invocation {index + 1}")
+
     attempts = execution.get("attempts") if isinstance(execution, Mapping) else None
     if attempts is not None:
         if not isinstance(attempts, list):

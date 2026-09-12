@@ -106,13 +106,19 @@ class InvocationLedgerTests(unittest.TestCase):
     def test_route_failure_settles_reservation_before_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             repo, packet, profile = self.repo_task(Path(temp))
-            first = record_invocation(repo, packet, profile, "worker", 1, 0)
+            profile["modelRoutes"] = {"native": {"worker": [
+                {"providerId": "test", "modelId": "worker"}
+            ]}}
+            first = record_invocation(repo, packet, profile, "worker", 1, 0, freeze=True)
             failure = {
                 "category": "transient_transport",
                 "invocationId": first["invocationId"],
-                "route": {"hostId": "native", "providerId": "test", "modelId": "worker"},
+                "route": {"hostId": "native", "providerId": "wrong", "modelId": "worker"},
                 "resumable": True,
             }
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                record_route_failure(packet, failure_value=failure, expected_revision=1)
+            failure["route"] = {"hostId": "native", "providerId": "test", "modelId": "worker"}
             settled = record_route_failure(
                 packet, failure_value=failure, expected_revision=1,
                 usage={"trusted": True, "toolCalls": 3},
@@ -122,6 +128,22 @@ class InvocationLedgerTests(unittest.TestCase):
             self.assertEqual(21, second["limits"]["maxToolCalls"])
             stored = json.loads(packet.read_text(encoding="utf-8"))
             self.assertEqual(first["invocationId"], stored["execution"]["routeFailures"][0]["invocationId"])
+
+    def test_budget_cannot_be_removed_or_replaced_after_first_invocation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo, packet, profile = self.repo_task(Path(temp))
+            record_invocation(repo, packet, profile, "worker", 1, 0)
+            stored = json.loads(packet.read_text(encoding="utf-8"))
+            frozen = stored["budget"]
+            stored["budget"] = None
+            packet.write_text(json.dumps(stored), encoding="utf-8")
+            self.assertIn("budget.required", {item.code for item in validate_task(stored, profile).findings})
+            with self.assertRaisesRegex(ValueError, "budget is missing"):
+                record_invocation(repo, packet, profile, "worker", 2, 1)
+
+            stored["budget"] = frozen
+            stored["budget"]["policy"]["toolCalls"]["worker"]["initial"] = 1
+            self.assertIn("budget.policy_drift", {item.code for item in validate_task(stored, profile).findings})
 
     def test_trusted_usage_releases_remainder_and_ceiling_is_final(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

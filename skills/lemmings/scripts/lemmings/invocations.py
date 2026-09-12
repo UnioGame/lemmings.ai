@@ -105,7 +105,10 @@ def build_invocation(
         "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
         "outputSchemaVersion": SCHEMA_VERSION,
     }
-    invocation_budget = task.get("budget") if isinstance(task.get("budget"), Mapping) else new_task_budget(profile)
+    task_budget_frozen = isinstance(task.get("budget"), Mapping)
+    invocation_budget = task.get("budget") if task_budget_frozen else new_task_budget(profile)
+    if task_budget_frozen:
+        invocation["budgetPolicyDigest"] = stable_digest(invocation_budget["policy"])
     reservations = [item for item in invocation_budget.get("reservations", []) if item.get("invocationId") == invocation["invocationId"]]
     if len(reservations) > 1:
         raise ValueError("budgeted invocation has duplicate reservations")
@@ -208,6 +211,11 @@ def record_invocation(
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        prior_invocations = as_list((task.get("execution") or {}).get("invocations"))
+        if not isinstance(task.get("budget"), Mapping) and any(
+            isinstance(item, Mapping) and item.get("budgetPolicyDigest") for item in prior_invocations
+        ):
+            raise ValueError("frozen Task budget is missing after the first budgeted invocation")
         if freeze or task.get("effectiveConfig"):
             selected = capture_effective(repo, task, profile, preset=preset)
             models = task.get("models") or {}
@@ -314,8 +322,14 @@ def record_route_failure(
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
         normalized = normalize_route_failure(failure_value)
         invocation_id = normalized["invocationId"]
-        if find_invocation(task, invocation_id) is None:
+        invocation = find_invocation(task, invocation_id)
+        if invocation is None:
             raise ValueError("RouteFailure has no unique stored invocation")
+        if (invocation.get("assignedHost") and invocation.get("assignedModel")
+                and invocation.get("assignedModel") != "current-host/default"):
+            if (normalized["route"].get("hostId") != invocation.get("assignedHost")
+                    or route_name(normalized["route"]) != invocation.get("assignedModel")):
+                raise ValueError("RouteFailure route does not match the stored invocation")
         failures = task.setdefault("execution", {}).setdefault("routeFailures", [])
         if any(isinstance(item, Mapping) and item.get("invocationId") == invocation_id for item in failures):
             raise ValueError("RouteFailure invocationId was already settled")
