@@ -25,6 +25,7 @@ from .contracts import (
     read_object,
     route_name,
     validate_agent_result,
+    validate_budget_ledger,
     validate_invocation,
     write_object,
 )
@@ -183,6 +184,12 @@ def find_invocation(task: Mapping[str, Any], invocation_id: str) -> Mapping[str,
     return matches[0] if len(matches) == 1 else None
 
 
+def assert_budget_ledger(task: Mapping[str, Any]) -> None:
+    checked = validate_budget_ledger(task)
+    if not checked.ok:
+        raise ValueError(checked.findings[0].message)
+
+
 @contextmanager
 def task_lock(task_path: Path) -> Iterator[None]:
     lock = task_path.with_suffix(task_path.suffix + ".lock")
@@ -211,6 +218,7 @@ def record_invocation(
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        assert_budget_ledger(task)
         prior_invocations = as_list((task.get("execution") or {}).get("invocations"))
         if not isinstance(task.get("budget"), Mapping) and any(
             isinstance(item, Mapping) and item.get("budgetPolicyDigest") for item in prior_invocations
@@ -300,6 +308,7 @@ def accept_result(
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        assert_budget_ledger(task)
         checked = result_findings(repo, task, profile, result_value)
         if not checked.ok:
             raise ValueError(checked.findings[0].message)
@@ -320,6 +329,7 @@ def record_route_failure(
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        assert_budget_ledger(task)
         normalized = normalize_route_failure(failure_value)
         invocation_id = normalized["invocationId"]
         invocation = find_invocation(task, invocation_id)
@@ -357,6 +367,7 @@ def record_context_usage(task_path: Path, *, expected_revision: int, amount: int
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        assert_budget_ledger(task)
         if not task.get("budget"):
             raise ValueError("Task budget must be frozen before recording context usage")
         try:
@@ -379,6 +390,7 @@ def extend_task_budget(
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
             raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        assert_budget_ledger(task)
         if not task.get("budget"):
             raise ValueError("Task budget must be frozen by the first invocation before extension")
         entry = extend_budget(task["budget"], kind=kind, amount=amount, unresolved_question=unresolved_question, progress=progress, role=role)

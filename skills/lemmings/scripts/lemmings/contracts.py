@@ -577,6 +577,88 @@ def validate_task_budget(task: Mapping[str, Any]) -> ValidationResult:
                     result.error("budget.over.reservations", f"settled and reserved {role} calls exceed the approved budget")
     return result
 
+def validate_budget_ledger(task: Mapping[str, Any]) -> ValidationResult:
+    """Reconcile new-format invocation grants with reservations and settled usage."""
+    result = ValidationResult()
+    budget = task.get("budget")
+    execution = task.get("execution")
+    if not isinstance(budget, Mapping) or not isinstance(execution, Mapping):
+        return result
+    invocations = [item for item in as_list(execution.get("invocations")) if isinstance(item, Mapping)]
+    marked = [item for item in invocations if item.get("budgetPolicyDigest")]
+    if not marked:
+        return result
+    policy = budget.get("policy")
+    if not isinstance(policy, Mapping):
+        result.error("budget.ledger", "budget policy is missing from a budgeted invocation ledger")
+        return result
+    expected_policy_digest = hashlib.sha256(
+        json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    grants = [item for item in as_list(budget.get("grants")) if isinstance(item, Mapping)]
+    reservations = [item for item in as_list(budget.get("reservations")) if isinstance(item, Mapping)]
+    agent_results = [item for item in as_list(execution.get("agentResults")) if isinstance(item, Mapping)]
+    route_failures = [item for item in as_list(execution.get("routeFailures")) if isinstance(item, Mapping)]
+    marked_ids = {str(item.get("invocationId") or "") for item in marked}
+    if any(str(item.get("invocationId") or "") not in marked_ids for item in grants):
+        result.error("budget.ledger", "budget grant has no matching budgeted invocation")
+    expected_usage = {role: 0 for role in HARD_TOOL_CALL_CEILINGS}
+    expected_locked: set[str] = set()
+    for invocation in marked:
+        invocation_id = str(invocation.get("invocationId") or "")
+        role = str(invocation.get("role") or "")
+        matches = [item for item in grants if item.get("invocationId") == invocation_id]
+        if len(matches) != 1 or role not in HARD_TOOL_CALL_CEILINGS:
+            result.error("budget.ledger", f"invocation {invocation_id} has no unique grant")
+            continue
+        grant = matches[0]
+        amount = grant.get("amount")
+        if (grant.get("role") != role or not isinstance(amount, int) or isinstance(amount, bool)
+                or amount < 1 or ((invocation.get("limits") or {}).get("maxToolCalls") != amount)):
+            result.error("budget.ledger", f"invocation {invocation_id} does not match its grant")
+            continue
+        if invocation.get("budgetPolicyDigest") != expected_policy_digest:
+            result.error("budget.policy_drift", f"budget policy changed after invocation {invocation_id}")
+        results = [item for item in agent_results if item.get("invocationId") == invocation_id]
+        failures = [item for item in route_failures if item.get("invocationId") == invocation_id]
+        reserved = [item for item in reservations if item.get("invocationId") == invocation_id]
+        if len(results) + len(failures) > 1:
+            result.error("budget.ledger", f"invocation {invocation_id} has multiple settlements")
+            continue
+        if not results and not failures:
+            if len(reserved) != 1 or reserved[0].get("role") != role or reserved[0].get("amount") != amount:
+                result.error("budget.ledger", f"invocation {invocation_id} has no matching reservation")
+            continue
+        if reserved:
+            result.error("budget.ledger", f"settled invocation {invocation_id} still has a reservation")
+        if results:
+            usage = results[0].get("usage")
+            trusted = bool(isinstance(usage, Mapping) and usage.get("trusted") is True)
+            consumed = usage.get("toolCalls") if trusted else amount
+            if not trusted:
+                expected_locked.add(role)
+        else:
+            usage = failures[0].get("usage")
+            trusted = bool(isinstance(usage, Mapping) and usage.get("trusted") is True)
+            consumed = usage.get("toolCalls") if isinstance(usage, Mapping) else None
+            if not trusted:
+                expected_locked.add(role)
+        if not isinstance(consumed, int) or isinstance(consumed, bool) or not 0 <= consumed <= amount:
+            result.error("budget.ledger", f"invocation {invocation_id} has invalid settled usage")
+        else:
+            expected_usage[role] += consumed
+    actual_usage = ((budget.get("usage") or {}).get("toolCalls") or {})
+    for role in HARD_TOOL_CALL_CEILINGS:
+        if actual_usage.get(role) != expected_usage[role]:
+            result.error("budget.ledger", f"cumulative {role} usage does not match settled grants")
+        outstanding = sum(item.get("amount", 0) for item in reservations if item.get("role") == role)
+        if expected_usage[role] + outstanding > approved_tool_calls(budget, role):
+            result.error("budget.ledger", f"settled and reserved {role} calls exceed the approved budget")
+    if not expected_locked.issubset(set(as_list(budget.get("lockedRoles")))):
+        result.error("budget.ledger", "untrusted settled roles must remain locked")
+    return result
+
+
 def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
     if not schema_supported(profile):
@@ -1015,17 +1097,9 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         item for item in invocations or []
         if isinstance(item, Mapping) and item.get("budgetPolicyDigest")
     ] if isinstance(invocations, list) else []
-    if marked_invocations:
-        budget_value = task.get("budget")
-        if not isinstance(budget_value, Mapping) or not isinstance(budget_value.get("policy"), Mapping):
-            result.error("budget.required", "frozen Task budget is required after the first budgeted invocation")
-        else:
-            expected_policy_digest = hashlib.sha256(
-                json.dumps(budget_value["policy"], sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()
-            for index, invocation in enumerate(marked_invocations):
-                if invocation.get("budgetPolicyDigest") != expected_policy_digest:
-                    result.error("budget.policy_drift", f"budget policy changed after invocation {index + 1}")
+    if marked_invocations and not isinstance(task.get("budget"), Mapping):
+        result.error("budget.required", "frozen Task budget is required after the first budgeted invocation")
+    result.extend(validate_budget_ledger(task))
 
     attempts = execution.get("attempts") if isinstance(execution, Mapping) else None
     if attempts is not None:

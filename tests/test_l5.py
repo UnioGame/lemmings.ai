@@ -132,14 +132,21 @@ class InvocationLedgerTests(unittest.TestCase):
     def test_budget_cannot_be_removed_or_replaced_after_first_invocation(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             repo, packet, profile = self.repo_task(Path(temp))
-            record_invocation(repo, packet, profile, "worker", 1, 0)
+            first = record_invocation(repo, packet, profile, "worker", 1, 0)
+            accept_result(repo, packet, profile, self.result(first, trusted=True, calls=5), 1)
             stored = json.loads(packet.read_text(encoding="utf-8"))
             frozen = stored["budget"]
             stored["budget"] = None
             packet.write_text(json.dumps(stored), encoding="utf-8")
             self.assertIn("budget.required", {item.code for item in validate_task(stored, profile).findings})
             with self.assertRaisesRegex(ValueError, "budget is missing"):
-                record_invocation(repo, packet, profile, "worker", 2, 1)
+                record_invocation(repo, packet, profile, "worker", 2, 2)
+
+            stored["budget"] = new_task_budget(profile)
+            packet.write_text(json.dumps(stored), encoding="utf-8")
+            self.assertIn("budget.ledger", {item.code for item in validate_task(stored, profile).findings})
+            with self.assertRaisesRegex(ValueError, "grant|usage"):
+                record_invocation(repo, packet, profile, "worker", 2, 2)
 
             stored["budget"] = frozen
             stored["budget"]["policy"]["toolCalls"]["worker"]["initial"] = 1
