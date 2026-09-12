@@ -34,7 +34,7 @@ from .contracts import (
     validate_wave,
     write_object,
 )
-from .invocations import accept_result, record_invocation, task_lock
+from .invocations import accept_result, extend_task_budget, record_context_usage, record_invocation, task_lock
 from .bundle import skill_root
 from .models import (
     advance_recovery_route,
@@ -111,7 +111,7 @@ def load_artifacts(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | Non
 def runtime_findings(repo: Path, marker: dict[str, Any] | None) -> ValidationResult:
     result = ValidationResult()
     if marker and marker.get("schemaVersion") != SCHEMA_VERSION:
-        message = "schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle" if marker.get("schemaVersion") == 2 else f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 4"
+        message = "schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle" if marker.get("schemaVersion") == 2 else f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 4"
         result.error("runtime.schema", message)
     if marker:
         task_paths = as_list(marker.get("taskPaths"))
@@ -331,7 +331,7 @@ def command_workspace(args: argparse.Namespace) -> int:
             raise ValueError("workspace path is required")
         emit(register_workspace(repo, workspace_id=args.workspace_id, path=path, backend=args.backend, managed_by=args.managed_by, lifetime=args.lifetime, expected_revision=args.expected_revision, task_id=args.task_id, phase_id=args.phase_id, estimated_gib=args.estimated_gib, approval=args.approval, kind=args.kind, allowed_caches=args.allowed_cache))
     elif args.workspace_command == "claim":
-        emit(claim_workspace(repo, workspace_id=args.workspace_id, task_id=args.task_id, base_sha=args.base_sha, integration_head=args.integration_head, branch=args.branch, expected_revision=args.expected_revision, phase_id=args.phase_id))
+        emit(claim_workspace(repo, workspace_id=args.workspace_id, task_id=args.task_id, base_sha=args.base_sha, integration_head=args.integration_head, branch=args.branch, expected_revision=args.expected_revision, phase_id=args.phase_id, profile=profile))
     elif args.workspace_command == "release":
         emit(release_workspace(repo, workspace_id=args.workspace_id, expected_revision=args.expected_revision, task_state=args.task_state, integration_evidence=args.integration_evidence, action=args.action, retention_approved=args.retention_approved, profile=profile, task_path=resolve_path(repo, args.task), task_revision=args.task_revision))
     elif args.workspace_command == "remove":
@@ -569,12 +569,12 @@ def command_metrics(args: argparse.Namespace) -> int:
     profile = load_profile(repo, getattr(args, "profile", None)) or {}
     if action == "stage":
         if task and task.get("schemaVersion") != SCHEMA_VERSION:
-            raise ValueError("schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics stage requires a schema-v4 Task")
+            raise ValueError("schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics stage requires a schema-v4 Task")
         event = record_event(repo, "run_started", source="cli", task_id=task_id, phase_id=(phase or {}).get("phaseId"), data={"mode": (task or {}).get("resolvedMode")}) if args.stage == "discover" else None
         emit({"ok": True, "recorded": bool(event), "event": event, "reason": None if event else "only run_started at discover is recorded"})
     elif action == "finish":
         if task and task.get("schemaVersion") != SCHEMA_VERSION:
-            raise ValueError("schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics finish requires a schema-v4 Task")
+            raise ValueError("schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics finish requires a schema-v4 Task")
         integrated = bool(task and task.get("state") == "Integrated" and (task.get("close") or {}).get("integrationEvidence"))
         event = record_event(repo, "task.integrated" if integrated else "run_finished", source="cli", task_id=task_id, data={"outcome": args.outcome, "task": task if integrated else None}, allow_finished_binding=True)
         emit({
@@ -659,6 +659,10 @@ def command_invocation(args: argparse.Namespace) -> int:
         raise ValueError("invocation requires an existing profile and Task")
     if args.invocation_command == "create":
         emit(record_invocation(repo, task_path, profile, args.role, args.attempt, args.expected_revision, args.objective, preset=args.preset, freeze=True))
+    elif args.invocation_command == "extend":
+        emit(extend_task_budget(task_path, expected_revision=args.expected_revision, kind=args.kind, role=args.role, amount=args.amount, unresolved_question=args.unresolved_question, progress=args.progress))
+    elif args.invocation_command == "context-use":
+        emit(record_context_usage(task_path, expected_revision=args.expected_revision, amount=args.amount))
     else:
         result_path = resolve_path(repo, args.result)
         if result_path is None or not result_path.is_file():
@@ -751,6 +755,8 @@ def build_parser() -> argparse.ArgumentParser:
     invocation = sub.add_parser("invocation", help="persist dispatch and accept matching AgentResult"); invocation_sub = invocation.add_subparsers(dest="invocation_command", required=True)
     invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.add_argument("--preset", help="named role preset for this new Task"); invocation_create.set_defaults(run=command_invocation)
     invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--expected-revision", type=int, required=True); invocation_accept.set_defaults(run=command_invocation)
+    invocation_extend = invocation_sub.add_parser("extend"); add_common(invocation_extend); invocation_extend.add_argument("--task", required=True); invocation_extend.add_argument("--kind", required=True, choices=["toolCalls", "maxPacketBytes", "maxWorkingSetItems", "maxExpansions"]); invocation_extend.add_argument("--role", choices=["worker", "reviewer", "explorer"]); invocation_extend.add_argument("--amount", type=int, required=True); invocation_extend.add_argument("--unresolved-question", required=True); invocation_extend.add_argument("--progress", required=True); invocation_extend.add_argument("--expected-revision", type=int, required=True); invocation_extend.set_defaults(run=command_invocation)
+    invocation_context = invocation_sub.add_parser("context-use"); add_common(invocation_context); invocation_context.add_argument("--task", required=True); invocation_context.add_argument("--amount", type=int, default=1); invocation_context.add_argument("--expected-revision", type=int, required=True); invocation_context.set_defaults(run=command_invocation)
     integration = sub.add_parser("integration", help="run declared checks on the exact merged tree"); integration_sub = integration.add_subparsers(dest="integration_command", required=True)
     integration_validate = integration_sub.add_parser("validate"); integration_validate.add_argument("--repo", default="."); integration_validate.add_argument("--task", required=True); integration_validate.add_argument("--expected-revision", type=int, required=True); integration_validate.set_defaults(run=command_integration)
     status = sub.add_parser("status", help="inspect runtime and contract status"); add_common(status, True); status.set_defaults(run=command_status)

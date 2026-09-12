@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from lemmings.budget import HARD_CONTEXT_CEILINGS
     from lemmings.contracts import SCHEMA_VERSION, CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, as_list, candidate_head, current_recovery_route, path_matches, plan_digest, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_models, validate_profile, validate_task
     from lemmings.models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from lemmings.telemetry import contains_sensitive_text, looks_absolute_path
@@ -20,6 +21,7 @@ if __package__ in (None, ""):
     from lemmings.invocations import build_invocation, find_invocation, profile_digest, result_findings, invocation_digest
     from lemmings.effective import effective_profile, checked_effective
 else:
+    from .budget import HARD_CONTEXT_CEILINGS
     from .contracts import SCHEMA_VERSION, CROSS_REVIEW_DEGRADATION, DEFAULT_CONTEXT_POLICY, as_list, candidate_head, current_recovery_route, path_matches, plan_digest, read_object, route_model_identity, route_name, runtime_marker, schema_error, task_worktree, validate_models, validate_profile, validate_task
     from .models import normalize_capacity_probe, normalize_route_failure, route_failure_action
     from .telemetry import contains_sensitive_text, looks_absolute_path
@@ -432,6 +434,14 @@ def context_warnings(packet: Mapping[str, Any], task: Mapping[str, Any], profile
     size = len(json.dumps(packet, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     working_count = len(packet.get("contextRefs") or [])
     expansions = int(payload.get("expansionsUsed", 0) or 0) + (1 if payload.get("contextExpansion") else 0)
+    budget = task.get("budget") if isinstance(task.get("budget"), Mapping) else None
+    if budget:
+        approved = {}
+        for name in HARD_CONTEXT_CEILINGS:
+            configured = budget["policy"]["context"][name]
+            extra = sum(item.get("amount", 0) for item in budget.get("extensions", []) if item.get("kind") == name)
+            approved[name] = min(configured["initial"] + extra, configured["ceiling"])
+        policy = approved
     if size > int(policy.get("maxPacketBytes", 16384)):
         warnings.append(f"context packet is {size} bytes (limit {policy.get('maxPacketBytes', 16384)})")
     if working_count > int(policy.get("maxWorkingSetItems", 12)):

@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 4,
-        "distributionVersion": "4.5.0",
+        "distributionVersion": "5.0.0",
         "mode": "auto",
         "modelRoutes": {
             "codex": {
@@ -53,8 +53,9 @@ def profile() -> dict:
                 "explorer": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "high"}],
             }
         },
-        "contextPolicy": {"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1},
-        "orchestration": {"maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1},
+        "contextPolicy": {"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1, "ceilings": {"maxPacketBytes": 32768, "maxWorkingSetItems": 24, "maxExpansions": 3}},
+        "invocationBudgets": {"explorer": {"initialToolCalls": 12, "maxToolCalls": 24}, "reviewer": {"initialToolCalls": 16, "maxToolCalls": 32}, "worker": {"initialToolCalls": 24, "maxToolCalls": 48}},
+        "orchestration": {"maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 3, "maxTransportRetries": 1},
         "workspacePool": {"enabled": True, "maxIdle": 2, "maxIdleGiB": 10, "eviction": "lru"},
     }
 
@@ -122,7 +123,7 @@ class AutoAndContractV4Tests(unittest.TestCase):
         invocation = derive_context_packet(value, None, "worker", {"profile": profile(), "attempt": 1})
         self.assertTrue(validate_invocation(invocation).ok, validate_invocation(invocation).as_dict())
         too_large = dict(invocation)
-        too_large["contextRefs"] = [{"ref": f"p/{i}", "purpose": "x", "contentHash": "h"} for i in range(13)]
+        too_large["contextRefs"] = [{"ref": f"p/{i}", "purpose": "x", "contentHash": "h"} for i in range(25)]
         self.assertIn("context.entries", {item.code for item in validate_invocation(too_large).findings})
         result = {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": "head", "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
         self.assertTrue(validate_agent_result(result, invocation, value).ok)

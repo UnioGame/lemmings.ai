@@ -1,10 +1,10 @@
 # Dispatch context
 
-`AgentInvocation v4` is a value object created once per invocation. It contains identifiers, Task revision, attempt, role, base SHA, profile, task, and context digests, one objective, acceptance criteria, owned/forbidden paths, up to 12 `{ref,purpose,contentHash}` references, validation commands, role limits, and output schema version. It is at most 16 KiB.
+`AgentInvocation v4` is a value object created once per invocation. It contains identifiers, Task revision, attempt, role, base SHA, profile, task, and context digests, one objective, acceptance criteria, owned/forbidden paths, initially up to 12 `{ref,purpose,contentHash}` references, validation commands, the remaining role grant, and output schema version. A manager-recorded extension may raise this to the frozen ceilings of 24 references and 32 KiB.
 
-Do not embed Task, Phase, Review, AGENTS, role prompt, source content, logs, telemetry, registry data, absolute paths, or the original user transcript. References identify the smallest starting set. A worker may request one expansion naming one unresolved symbol or decision; the manager supplies only that focused result.
+Do not embed Task, Phase, Review, AGENTS, role prompt, source content, logs, telemetry, registry data, absolute paths, or the original user transcript. References identify the smallest starting set. A worker may request a focused expansion naming one unresolved symbol or decision. The manager records the unresolved question and progress before extending the Task budget, and supplies only that focused result. The frozen maximum is three expansions.
 
-Limits are bounded by role: worker 24 tool calls/one expansion; reviewer 16/one; explorer 12/one. Hosts without token accounting use those counts and elapsed time. Deterministic code extracts diagnostics and truncates logs before model input.
+Initial tool-call grants are worker 24, reviewer 16, and explorer 12. Frozen cumulative ceilings are worker 48, reviewer 32, and explorer 24. Each invocation receives only the unspent approved remainder. Trusted host accounting settles actual calls and releases unused reservation; without a trustworthy counter, settle the full grant and do not extend that role automatically. Retry, repair, and model recovery share the same ledger. Deterministic code extracts diagnostics and truncates logs before model input.
 
 `AgentResult v4` returns only invocation id, attempt, status, candidate head when applicable, changed paths, acceptance/validation evidence, findings, blockers, and remaining risks. It never repeats the assignment or returns transcript/reasoning.
 
@@ -18,7 +18,7 @@ Start from owned symbols, callers and the smallest relevant test. Use narrow sea
 
 Deterministic validation stores the complete output outside prompt context and returns exit status, a bounded excerpt, omitted byte count and artifact reference. A truncated log is not a passed check. Expand only the named unresolved diagnostic. Do not rerun successful tests without new changes or unresolved risk. Prefer targeted package/type/file checks; visual behavior requires a matching runtime check, not a claim from compilation.
 
-New Task invocations freeze `effectiveConfig` with resolved profile, selected rule references and hashes. `--preset` names a profile; the existing `--profile` still identifies a settings JSON file. Preference changes affect future Tasks. Selected rule changes or modified frozen contents invalidate the invocation; replan deliberately. Add selected rule refs to the same 12-reference/16-KiB budget rather than expanding the budget.
+New Task invocations freeze `effectiveConfig` with resolved profile, selected rule references and hashes. `--preset` names a profile; the existing `--profile` still identifies a settings JSON file. Preference changes affect future Tasks. Selected rule changes or modified frozen contents invalidate the invocation; replan deliberately. Add selected rule refs to the same initial 12-reference/16-KiB budget. Extend only through the frozen Task policy and never beyond 24 references/32 KiB.
 
 Create the invocation with the target worker repository as `--repo`, so context hashes describe its checkout bytes (including Git line-ending conversion), not the manager checkout. The canonical Task may be supplied separately. Verify the recorded hashes before dispatch; do not silently rewrite a running invocation.
 

@@ -8,5 +8,5 @@ for candidate in python3 python; do
     exec "$candidate" "$installer" "$@"
   fi
 done
-echo 'Lemmings 4.0 requires Python 3.10 or newer.' >&2
+echo 'Lemmings 5.0 requires Python 3.10 or newer.' >&2
 exit 1

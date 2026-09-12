@@ -9,7 +9,7 @@ Act as the sole manager. Tooling validates or atomically executes an already rec
 
 Start with current-host defaults; installation needs only Git and Python. No provider scan, external CLI, engine SDK, preset, or telemetry is required for ordinary work. Shipped roles contain no model pins. Keep existing manual assignments.
 
-Use schema v4 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
+Use schema v4 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
 
 Run `Discover → Plan → Refine → Implement → Verify`. Default `requestedMode` to `auto` and resolve it after Discover:
 
@@ -23,7 +23,7 @@ When asked to discover subscriptions, run `models scan` (`--offline` without net
 
 On a model capacity failure, stop new dispatch and read [model-routing.md](references/model-routing.md). Retry one short rate/transport failure or reduce context once when applicable; otherwise present two to four task-local role plans. Apply nothing before user confirmation. One confirmation permits only the selected ordered route chains for the current Task; keep the workspace, start a fresh invocation without model history, and request new confirmation when the chain is exhausted. Capacity probes and recovery never depend on telemetry.
 
-Use only `manager`, `worker`, `reviewer`, and `explorer`. Delegation depth is one. Reserve the manager slot; run up to four isolated writers, bounded by `maxConcurrentWriters` and two read-only agents. Select each writer wave only from dependency-ready tasks, require explicit independence, and wait for the whole wave before integration. Allow one focused context expansion, one repair, and one transient transport retry.
+Use only `manager`, `worker`, `reviewer`, and `explorer`. Delegation depth is one. Reserve the manager slot; run up to four isolated writers, bounded by `maxConcurrentWriters` and two read-only agents. Select each writer wave only from dependency-ready tasks, require explicit independence, and wait for every writer in the wave before accepting or integrating any result. Use the frozen Task budget: start with the profile grants, extend only for a named unresolved question with recorded progress, never exceed the frozen ceilings, and allow one transient transport retry.
 
 Model routes may declare optional `specializations` tags and Tasks may declare one optional `specialization`. The tag is a manager hint: matching routes get priority, but untagged routes remain valid fallbacks. The assigned route in `models.assigned` is the only execution authority; tools never select or rank models. For high-risk work, the manager may set `reviewPolicy` to `cross`; use two distinct provider/model identities when available, otherwise change the policy to `single` and record `cross-review-unavailable` in `capabilityDegradations`.
 
@@ -31,7 +31,7 @@ Before the first writer for migrations, shared contracts, or non-trivial depende
 
 Resolve optional rules from task paths with `rules explain`; use only the selected [technology packs](rules/manifest.json). Record task `ruleSelection` and freeze effective routing/rule hashes on first invocation. Load only selected packs and role-relevant sections, not every engine. Explicit project rules refine the optional defaults; mandatory core isolation, validation, ownership and permissions remain in force. Shared token rules are in [context-contract.md](references/context-contract.md).
 
-Keep dispatch under 16 KiB and 12 context references. Send references plus hashes and role-unique rules, never Task/Phase copies, transcripts, reasoning, raw logs, telemetry, registry contents, secrets, or absolute paths. Summarize logs deterministically. Read [context-contract.md](references/context-contract.md) before dispatch.
+Start dispatch at 16 KiB and 12 context references; the frozen ceilings are 32 KiB and 24 references. Send references plus hashes and role-unique rules, never Task/Phase copies, transcripts, reasoning, raw logs, telemetry, registry contents, secrets, or absolute paths. Summarize logs deterministically. Read [context-contract.md](references/context-contract.md) before dispatch.
 
 For Standard/Strict, use the v4 templates and explicitly activate runtime for the Task; Simple has no marker. `Draft → Ready → Active → Candidate → Accepted → Integrated`; use `Repair`, `Replan Required`, `Blocked`, or `Cancelled` when applicable. Manager or worker may run an exact declared validation command. Before Candidate/Accepted, compare `AgentResult.changedPaths` with the real `base..head` diff and check that diff against ownership once. A handoff is only an optional dependency note. Review only when mode/risk requires it, and review the immutable candidate range. Run `integration validate` on the exact `close.mergeCommit`; only passing evidence for that SHA permits `Integrated`. Hook success never accepts a result: persist dispatch with `invocation create` and accept it with `invocation accept`.
 
@@ -42,7 +42,12 @@ Read only the reference needed for the current decision:
 - [game-projects.md](references/game-projects.md): workspace registry, pool, reuse, leases, and safe cleanup.
 - [model-routing.md](references/model-routing.md): host capabilities and confirmation-gated routes.
 - [telemetry.md](references/telemetry.md): optional offline usage and benchmark collection.
+- [skill-reuse.md](references/skill-reuse.md): optional installed/official skill check and user-gated creation flow.
+
+## Skill reuse proposals
+
+When repeated work suggests a reusable skill, follow [skill-reuse.md](references/skill-reuse.md). Check local and installed skills first, then official vendor sources. Give the user a short recommended choice and use the existing `skill-creator` only after the user selects creation or modification. Continue the main Task when the check is unavailable.
 
 Run the narrowest falsifying validation, then `python .agents/skills/lemmings/scripts/run.py check --repo <repo>`; add `--all` for a complete Strict Phase and `--distribution` only when checking installed bundle bytes. Keep reusable policy here/references, canonical data only in Task/Phase/Review, and compact evidence in the Task.
 
-Controls: `lemmings doctor`; `lemmings invocation create|accept`; `lemmings integration validate`; `lemmings runtime activate|status|deactivate`; `lemmings models scan|probe|inspect|propose|apply|recover`; `lemmings profiles list|inspect|use`; `lemmings rules explain`; `lemmings run`; `lemmings workspace estimate|prepare|inspect|register|claim|release|remove`; optional `lemmings metrics ...`. Only a manager-directed v4 runtime marker enables hooks. There are no validator, summarizer, or orchestrator invocation roles.
+Controls: `lemmings doctor`; `lemmings invocation create|extend|context-use|accept`; `lemmings integration validate`; `lemmings runtime activate|status|deactivate`; `lemmings models scan|probe|inspect|propose|apply|recover`; `lemmings profiles list|inspect|use`; `lemmings rules explain`; `lemmings run`; `lemmings workspace estimate|prepare|inspect|register|claim|release|remove`; optional `lemmings metrics ...`. Only a manager-directed v4 runtime marker enables hooks. There are no validator, summarizer, or orchestrator invocation roles.

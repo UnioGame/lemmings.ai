@@ -24,15 +24,16 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 4,
-        "distributionVersion": "4.5.0",
+        "distributionVersion": "5.0.0",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
             "reviewer": [{"providerId": "openai", "modelId": "gpt-5.6-sol", "variantId": "high"}],
             "explorer": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "high"}],
         }},
-        "contextPolicy": {"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1},
-        "orchestration": {"maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1},
+        "contextPolicy": {"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1, "ceilings": {"maxPacketBytes": 32768, "maxWorkingSetItems": 24, "maxExpansions": 3}},
+        "invocationBudgets": {"explorer": {"initialToolCalls": 12, "maxToolCalls": 24}, "reviewer": {"initialToolCalls": 16, "maxToolCalls": 32}, "worker": {"initialToolCalls": 24, "maxToolCalls": 48}},
+        "orchestration": {"maxDelegationDepth": 1, "maxConcurrentWriters": 2, "maxConcurrentReaders": 2, "managerSlots": 1, "maxRepairs": 3, "maxTransportRetries": 1},
         "workspacePool": {"enabled": True, "maxIdle": 2, "maxIdleGiB": 10, "eviction": "lru"},
         "taskGlobs": ["docs/tasks/**/*.json"],
     }
@@ -54,7 +55,7 @@ def init_repo(path: Path) -> None:
 
 class SchemaOnlyTests(unittest.TestCase):
     def test_v2_artifacts_have_one_breaking_error(self):
-        expected = "schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle"
+        expected = "schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle"
         for validator, value in ((validate_profile, {"schemaVersion": 2}), (validate_task, {"schemaVersion": 2}), (validate_phase, {"schemaVersion": 2}), (validate_review, {"schemaVersion": 2})):
             with self.subTest(validator=validator.__name__):
                 checked = validator(value)
@@ -64,8 +65,8 @@ class SchemaOnlyTests(unittest.TestCase):
     def test_distribution_versions_are_consistent(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual("4.5.0", package["version"])
-        self.assertEqual("4.5.0", plugin["version"])
+        self.assertEqual("5.0.0", package["version"])
+        self.assertEqual("5.0.0", plugin["version"])
 
     def test_specialization_is_optional_hint_and_cross_review_degrades(self):
         configured = profile()

@@ -89,13 +89,13 @@ CORE contains the common workflow: ownership, permissions, context limits, revie
 
 [Platform rules](skills/lemmings/rules/platforms.md) add relevant web, mobile, desktop or publishing constraints. The build target is separate from the agent's operating system. Detection does not install SDKs, and a compilation check does not prove visual correctness.
 
-Agents work from specific paths and symbols, skip generated files and caches, and return bounded diagnostics. Dispatch is limited to 16 KiB and 12 context references. Checks that already passed are repeated only when changes or unresolved risks justify it. Worktrees isolate writers; shared editor/import state must not defeat that isolation. Cleanup retains dirty, active, unknown or unintegrated work.
+Agents work from specific paths and symbols, skip generated files and caches, and return bounded diagnostics. Dispatch starts at 16 KiB and 12 context references, with frozen ceilings of 32 KiB and 24 references. Checks that already passed are repeated only when changes or unresolved risks justify it. Worktrees isolate writers; shared editor/import state must not defeat that isolation. Cleanup retains dirty, active, unknown or unintegrated work.
 
 ## Version and installed copies
 
-The current declared package version is **4.5.0**. [Unity package metadata](package.json), [Python package metadata](pyproject.toml), [Codex plugin metadata](.codex-plugin/plugin.json), the installer and runtime use the same version. The Task/Phase/Review format is **schema v4**; this is a contract version, not the package release number.
+The current declared package version is **5.0.0**. [Unity package metadata](package.json), [Python package metadata](pyproject.toml), [Codex plugin metadata](.codex-plugin/plugin.json), the installer and runtime use the same version. The Task/Phase/Review format is **schema v4**; this is a contract version, not the package release number.
 
-Version 4.5.0 includes provider discovery and profiles, optional engine/platform rule packs, isolated workspace lifecycle, and managed Codex/OpenCode runners. For exact source identity, use the Git commit as well as the version. A repository installation is a copied bundle: updating this source package does not automatically update an existing `.agents` installation.
+Version 5.0.0 adds frozen cumulative budgets with hard ceilings, progress-based repair decisions, configurable workspace pooling, and optional existing/official skill reuse proposals while preserving schema v4 and complete-wave integration. For exact source identity, use the Git commit as well as the version. A repository installation is a copied bundle: updating this source package does not automatically update an existing `.agents` installation.
 
 > Check the Lemmings source version and Git commit, compare them with this repository's installed bundle, and report whether an update is needed. If no Lemmings work is active, update the bundle while preserving manual settings and verify it.
 
@@ -289,7 +289,7 @@ The pool retains at most two idle worktrees and 10 GiB per Git common directory.
 
 ### Token economy and checks
 
-Dispatch stays under 16 KiB and 12 hashed references. The manager supplies one focused context expansion only when a named decision remains unresolved. Default tool-call limits remain worker 24, reviewer 16, explorer 12. Read exact symbols/assets and targeted diagnostics; do not load complete scene YAML, binaries, generated bundles, dependency caches or full logs into model context.
+Dispatch starts under 16 KiB and 12 hashed references and can expand only to frozen ceilings of 32 KiB, 24 references, and three focused expansions. Initial tool-call grants remain worker 24, reviewer 16, explorer 12; cumulative ceilings are 48, 32, and 24. Read exact symbols/assets and targeted diagnostics; do not load complete scene YAML, binaries, generated bundles, dependency caches or full logs into model context.
 
 Validation returns bounded diagnostics, an omitted-byte count, full-log artifact reference and actual exit status. Truncation never hides failure. Do not repeat passing checks without new changes or unresolved risk. [Context rules](skills/lemmings/references/context-contract.md) and selected packs provide details.
 

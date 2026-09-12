@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from .effective import capture_effective, checked_effective
+from .budget import consume_context_expansions, extend_budget, new_task_budget, reserve_tool_calls, settle_tool_calls
 
 from .contracts import (
     DEFAULT_INVOCATION_LIMITS,
@@ -103,6 +104,14 @@ def build_invocation(
         "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
         "outputSchemaVersion": SCHEMA_VERSION,
     }
+    if task.get("budget"):
+        reservations = [item for item in task["budget"].get("reservations", []) if item.get("invocationId") == invocation["invocationId"]]
+        if len(reservations) > 1:
+            raise ValueError("budgeted invocation has duplicate reservations")
+        invocation["limits"]["maxToolCalls"] = int(
+            reservations[0]["amount"] if reservations
+            else task["budget"]["policy"]["toolCalls"][role]["initial"]
+        )
     if frozen:
         invocation["effectiveConfigDigest"] = frozen["digest"]
         invocation["roleRoutes"] = frozen["profile"].get("roleRoutes", {}).get(role, [])
@@ -115,6 +124,17 @@ def build_invocation(
             invocation["assignedModel"] = route_name(recovered)
             invocation["assignedHost"] = recovered["hostId"]
     invocation["contextDigest"] = invocation_digest(invocation)
+    if task.get("budget"):
+        context_policy = task["budget"]["policy"]["context"]
+        approved = {}
+        for name, configured in context_policy.items():
+            extra = sum(item.get("amount", 0) for item in task["budget"].get("extensions", []) if item.get("kind") == name)
+            approved[name] = min(configured["initial"] + extra, configured["ceiling"])
+        encoded = json.dumps(invocation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(invocation["contextRefs"]) > approved["maxWorkingSetItems"]:
+            raise ValueError(f"AgentInvocation exceeds currently approved {approved['maxWorkingSetItems']} context references")
+        if len(encoded) > approved["maxPacketBytes"]:
+            raise ValueError(f"AgentInvocation exceeds currently approved {approved['maxPacketBytes']} bytes")
     checked = validate_invocation(invocation)
     if not checked.ok:
         raise ValueError(checked.findings[0].message)
@@ -138,6 +158,15 @@ def validate_dispatch(repo: Path, task: Mapping[str, Any], profile: Mapping[str,
         raise ValueError("saved invocation revision/base is stale")
     if invocation.get("taskDigest") != plan_digest(task) or invocation.get("contextDigest") != invocation_digest(invocation) or invocation.get("profileDigest") != expected_profile:
         raise ValueError("saved invocation plan/context/profile is stale")
+    if task.get("budget"):
+        policy = task["budget"]["policy"]["context"]
+        approved = {}
+        for name, configured in policy.items():
+            extra = sum(item.get("amount", 0) for item in task["budget"].get("extensions", []) if item.get("kind") == name)
+            approved[name] = min(configured["initial"] + extra, configured["ceiling"])
+        encoded = json.dumps(invocation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(invocation.get("contextRefs", [])) > approved["maxWorkingSetItems"] or len(encoded) > approved["maxPacketBytes"]:
+            raise ValueError("saved invocation exceeds the currently approved Task context budget")
     for ref in invocation.get("contextRefs", []):
         if reference_hash(repo, ref) != ref.get("contentHash"):
             raise ValueError("saved invocation context file changed; create a fresh invocation")
@@ -188,7 +217,17 @@ def record_invocation(
                 models.update(assigned=route_name(chain[0]), hostId=chain[0]["hostId"])
                 task["models"] = models
         task["revision"] = expected_revision + 1
-        invocation = build_invocation(repo, task, profile, role, attempt=attempt, objective=objective)
+        if not task.get("budget"):
+            selected_profile = ((task.get("effectiveConfig") or {}).get("profile") or profile)
+            task["budget"] = new_task_budget(selected_profile)
+        seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
+        invocation_id = hashlib.sha256(seed.encode()).hexdigest()[:24]
+        grant = reserve_tool_calls(task["budget"], role, invocation_id)
+        if grant < 1:
+            task["budget"]["stop"] = {"reason": "tool-call budget exhausted", "role": role, "invocationId": invocation_id}
+            write_object(task_path, task)
+            raise ValueError("tool-call budget exhausted; Task stop reason was recorded")
+        invocation = build_invocation(repo, task, profile, role, attempt=attempt, objective=objective, invocation_id=invocation_id)
         task.setdefault("execution", {}).setdefault("invocations", []).append(invocation)
         write_object(task_path, task)
         return invocation
@@ -257,7 +296,44 @@ def accept_result(
         checked = result_findings(repo, task, profile, result_value)
         if not checked.ok:
             raise ValueError(checked.findings[0].message)
+        if task.get("budget"):
+            settle_tool_calls(task["budget"], str(result_value.get("invocationId")), result_value.get("usage"))
         task.setdefault("execution", {}).setdefault("agentResults", []).append(dict(result_value))
         task["revision"] = expected_revision + 1
         write_object(task_path, task)
         return {"ok": True, "taskId": task.get("taskId"), "revision": task["revision"], "invocationId": result_value.get("invocationId")}
+
+
+def record_context_usage(task_path: Path, *, expected_revision: int, amount: int = 1) -> dict[str, Any]:
+    with task_lock(task_path):
+        task = read_object(task_path)
+        if task.get("revision") != expected_revision:
+            raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        if not task.get("budget"):
+            raise ValueError("Task budget must be frozen before recording context usage")
+        try:
+            total = consume_context_expansions(task["budget"], amount)
+        except ValueError:
+            task["revision"] = expected_revision + 1
+            task["budget"]["stop"] = {"reason": "context expansion budget exhausted"}
+            write_object(task_path, task)
+            raise
+        task["revision"] = expected_revision + 1
+        write_object(task_path, task)
+        return {"ok": True, "taskId": task.get("taskId"), "revision": task["revision"], "contextExpansions": total}
+
+
+def extend_task_budget(
+    task_path: Path, *, expected_revision: int, kind: str, amount: int,
+    unresolved_question: str, progress: str, role: str | None = None,
+) -> dict[str, Any]:
+    with task_lock(task_path):
+        task = read_object(task_path)
+        if task.get("revision") != expected_revision:
+            raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        if not task.get("budget"):
+            raise ValueError("Task budget must be frozen by the first invocation before extension")
+        entry = extend_budget(task["budget"], kind=kind, amount=amount, unresolved_question=unresolved_question, progress=progress, role=role)
+        task["revision"] = expected_revision + 1
+        write_object(task_path, task)
+        return {"ok": True, "taskId": task.get("taskId"), "revision": task["revision"], "extension": entry}

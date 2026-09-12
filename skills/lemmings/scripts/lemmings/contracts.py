@@ -11,9 +11,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from .budget import (
+    HARD_CONTEXT_CEILINGS, HARD_TOOL_CALL_CEILINGS, approved_tool_calls,
+)
+
 SCHEMA_VERSION = 4
-DISTRIBUTION_VERSION = "4.5.0"
-PLUGIN_VERSION = "4.5.0"
+DISTRIBUTION_VERSION = "5.0.0"
+PLUGIN_VERSION = "5.0.0"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -149,7 +153,7 @@ def schema_supported(value: Mapping[str, Any]) -> bool:
 def schema_error(kind: str, value: Mapping[str, Any]) -> str:
     version = value.get("schemaVersion")
     if version == 2:
-        return "schemaVersion 2 is unsupported by Lemmings 4.0; replace the legacy bundle"
+        return "schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle"
     return f"unsupported schemaVersion: {version!r}; expected 4"
 
 
@@ -414,9 +418,34 @@ def _validate_v4_profile(profile: Mapping[str, Any]) -> ValidationResult:
     if not isinstance(context_policy, Mapping):
         result.error("profile.context_policy", "contextPolicy is required")
     else:
-        for name, expected in DEFAULT_CONTEXT_POLICY.items():
-            if context_policy.get(name) != expected:
-                result.error("profile.context_policy", f"contextPolicy.{name} must be {expected}")
+        ceilings = context_policy.get("ceilings")
+        if not isinstance(ceilings, Mapping):
+            result.error("profile.context_policy", "contextPolicy.ceilings is required")
+            ceilings = {}
+        for name, hard in HARD_CONTEXT_CEILINGS.items():
+            initial, ceiling = context_policy.get(name), ceilings.get(name)
+            if not isinstance(initial, int) or isinstance(initial, bool) or initial < 1:
+                result.error("profile.context_policy", f"contextPolicy.{name} must be a positive integer")
+            if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 1 or ceiling > hard:
+                result.error("profile.context_ceiling", f"contextPolicy.ceilings.{name} must be between 1 and {hard}")
+            elif isinstance(initial, int) and not isinstance(initial, bool) and initial > ceiling:
+                result.error("profile.context_policy", f"contextPolicy.{name} cannot exceed its ceiling")
+    invocation_budgets = profile.get("invocationBudgets")
+    if not isinstance(invocation_budgets, Mapping) or set(invocation_budgets) != set(HARD_TOOL_CALL_CEILINGS):
+        result.error("profile.invocation_budgets", "invocationBudgets must contain explorer, reviewer, and worker")
+    else:
+        for role, hard in HARD_TOOL_CALL_CEILINGS.items():
+            configured = invocation_budgets.get(role)
+            if not isinstance(configured, Mapping):
+                result.error("profile.invocation_budgets", f"invocationBudgets.{role} must be an object")
+                continue
+            initial, ceiling = configured.get("initialToolCalls"), configured.get("maxToolCalls")
+            if not isinstance(initial, int) or isinstance(initial, bool) or initial < 1:
+                result.error("profile.invocation_budgets", f"invocationBudgets.{role}.initialToolCalls must be positive")
+            if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 1 or ceiling > hard:
+                result.error("profile.invocation_ceiling", f"invocationBudgets.{role}.maxToolCalls must be between 1 and {hard}")
+            elif isinstance(initial, int) and not isinstance(initial, bool) and initial > ceiling:
+                result.error("profile.invocation_budgets", f"invocationBudgets.{role} initial cannot exceed its ceiling")
     orchestration = profile.get("orchestration")
     if not isinstance(orchestration, Mapping):
         result.error("profile.orchestration", "orchestration is required")
@@ -427,18 +456,120 @@ def _validate_v4_profile(profile: Mapping[str, Any]) -> ValidationResult:
             result.error("profile.orchestration", "orchestration.maxConcurrentWriters must be between 1 and 4")
         if not isinstance(readers, int) or isinstance(readers, bool) or not 0 <= readers <= 2:
             result.error("profile.orchestration", "orchestration.maxConcurrentReaders must be between 0 and 2")
-        expected = {"maxDelegationDepth": 1, "managerSlots": 1, "maxRepairs": 1, "maxTransportRetries": 1}
+        expected = {"maxDelegationDepth": 1, "managerSlots": 1, "maxTransportRetries": 1}
         for name, value in expected.items():
             if orchestration.get(name) != value:
                 result.error("profile.orchestration", f"orchestration.{name} must be {value}")
+        repairs = orchestration.get("maxRepairs")
+        if not isinstance(repairs, int) or isinstance(repairs, bool) or not 0 <= repairs <= 3:
+            result.error("profile.orchestration", "orchestration.maxRepairs must be between 0 and 3")
     pool = profile.get("workspacePool")
     if not isinstance(pool, Mapping):
         result.error("profile.workspace_pool", "workspacePool is required")
     else:
-        if pool.get("enabled") is not True or pool.get("maxIdle") != 2 or pool.get("maxIdleGiB") != 10 or pool.get("eviction") != "lru":
-            result.error("profile.workspace_pool", "workspacePool must enable lru with maxIdle=2 and maxIdleGiB=10")
+        enabled, max_idle, max_gib = pool.get("enabled"), pool.get("maxIdle"), pool.get("maxIdleGiB")
+        if not isinstance(enabled, bool) or not isinstance(max_idle, int) or isinstance(max_idle, bool) or max_idle < 0 or not isinstance(max_gib, (int, float)) or isinstance(max_gib, bool) or max_gib < 0 or pool.get("eviction") != "lru":
+            result.error("profile.workspace_pool", "workspacePool requires boolean enabled, non-negative maxIdle/maxIdleGiB, and lru eviction")
     return result
 
+
+
+def validate_task_budget(task: Mapping[str, Any]) -> ValidationResult:
+    result = ValidationResult()
+    budget = task.get("budget")
+    if not isinstance(budget, Mapping):
+        result.error("budget.shape", "budget must be an object")
+        return result
+    policy = budget.get("policy")
+    if not isinstance(policy, Mapping):
+        result.error("budget.policy", "budget.policy is required")
+        return result
+    context = policy.get("context")
+    tools = policy.get("toolCalls")
+    if not isinstance(context, Mapping) or set(context) != set(HARD_CONTEXT_CEILINGS):
+        result.error("budget.context", "budget.policy.context must contain the three context limits")
+    else:
+        for name, hard in HARD_CONTEXT_CEILINGS.items():
+            item = context.get(name)
+            if not isinstance(item, Mapping) or not isinstance(item.get("initial"), int) or not isinstance(item.get("ceiling"), int) or not 1 <= item["initial"] <= item["ceiling"] <= hard:
+                result.error("budget.context", f"budget context {name} is outside its hard ceiling")
+    if not isinstance(tools, Mapping) or set(tools) != set(HARD_TOOL_CALL_CEILINGS):
+        result.error("budget.tools", "budget.policy.toolCalls must contain explorer, reviewer, and worker")
+    else:
+        for role, hard in HARD_TOOL_CALL_CEILINGS.items():
+            item = tools.get(role)
+            if not isinstance(item, Mapping) or not isinstance(item.get("initial"), int) or not isinstance(item.get("ceiling"), int) or not 1 <= item["initial"] <= item["ceiling"] <= hard:
+                result.error("budget.tools", f"budget tool-call policy for {role} is outside its hard ceiling")
+    repairs = policy.get("maxRepairs")
+    if not isinstance(repairs, int) or isinstance(repairs, bool) or not 0 <= repairs <= 3:
+        result.error("budget.repairs", "budget.policy.maxRepairs must be between 0 and 3")
+    usage = budget.get("usage")
+    if isinstance(usage, Mapping):
+        expansions_used = usage.get("contextExpansions")
+        repairs_used = usage.get("repairCycles")
+        if not isinstance(expansions_used, int) or isinstance(expansions_used, bool) or expansions_used < 0:
+            result.error("budget.usage", "contextExpansions must be a non-negative integer")
+        elif isinstance(context, Mapping) and isinstance(context.get("maxExpansions"), Mapping) and expansions_used > context["maxExpansions"].get("ceiling", -1):
+            result.error("budget.ceiling", "context expansion usage exceeds its frozen ceiling")
+        if not isinstance(repairs_used, int) or isinstance(repairs_used, bool) or repairs_used < 0 or (isinstance(repairs, int) and repairs_used > repairs):
+            result.error("budget.ceiling", "repair cycle usage exceeds its frozen ceiling")
+    if not isinstance(usage, Mapping) or not isinstance(usage.get("toolCalls"), Mapping):
+        result.error("budget.usage", "budget usage and tool-call totals are required")
+    else:
+        for role in HARD_TOOL_CALL_CEILINGS:
+            value = usage["toolCalls"].get(role)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                result.error("budget.usage", f"budget usage for {role} must be non-negative")
+            elif isinstance(tools, Mapping) and isinstance(tools.get(role), Mapping) and isinstance(tools[role].get("ceiling"), int) and value > tools[role]["ceiling"]:
+                result.error("budget.ceiling", f"budget usage for {role} exceeds its frozen ceiling")
+    extensions = budget.get("extensions")
+    if not isinstance(extensions, list):
+        result.error("budget.extensions", "budget.extensions must be an array")
+    else:
+        for index, item in enumerate(extensions):
+            if not isinstance(item, Mapping) or not item.get("unresolvedQuestion") or not item.get("progress") or not isinstance(item.get("amount"), int) or isinstance(item.get("amount"), bool) or item.get("amount") < 1:
+                result.error("budget.extensions", f"budget extension {index} requires amount, unresolvedQuestion, and progress")
+        if isinstance(policy.get("context"), Mapping):
+            for name in HARD_CONTEXT_CEILINGS:
+                configured = policy["context"].get(name)
+                if isinstance(configured, Mapping):
+                    approved = configured.get("initial", 0) + sum(item.get("amount", 0) for item in extensions if isinstance(item, Mapping) and item.get("kind") == name and isinstance(item.get("amount"), int) and not isinstance(item.get("amount"), bool))
+                    if approved > configured.get("ceiling", -1):
+                        result.error("budget.extension_ceiling", f"extensions exceed the frozen {name} ceiling")
+        if isinstance(policy.get("toolCalls"), Mapping):
+            for role in HARD_TOOL_CALL_CEILINGS:
+                configured = policy["toolCalls"].get(role)
+                if isinstance(configured, Mapping):
+                    approved = configured.get("initial", 0) + sum(item.get("amount", 0) for item in extensions if isinstance(item, Mapping) and item.get("kind") == "toolCalls" and item.get("role") == role and isinstance(item.get("amount"), int) and not isinstance(item.get("amount"), bool))
+                    if approved > configured.get("ceiling", -1):
+                        result.error("budget.extension_ceiling", f"extensions exceed the frozen {role} tool-call ceiling")
+    locked_roles = budget.get("lockedRoles")
+    if not isinstance(locked_roles, list) or any(role not in HARD_TOOL_CALL_CEILINGS for role in locked_roles) or len(locked_roles) != len(set(locked_roles)):
+        result.error("budget.locked_roles", "budget.lockedRoles must contain unique supported roles")
+    grants = budget.get("grants")
+    if not isinstance(grants, list):
+        result.error("budget.grants", "budget.grants must be an array")
+    elif any(not isinstance(item, Mapping) or item.get("role") not in HARD_TOOL_CALL_CEILINGS or not item.get("invocationId") or not isinstance(item.get("amount"), int) or isinstance(item.get("amount"), bool) or item.get("amount") < 1 for item in grants):
+        result.error("budget.grants", "each budget grant requires invocationId, role, and positive amount")
+    reservations = budget.get("reservations")
+    if not isinstance(reservations, list):
+        result.error("budget.reservations", "budget.reservations must be an array")
+    else:
+        ids: set[str] = set()
+        for item in reservations:
+            if not isinstance(item, Mapping) or item.get("role") not in HARD_TOOL_CALL_CEILINGS or not isinstance(item.get("amount"), int) or isinstance(item.get("amount"), bool) or item.get("amount") < 1 or not item.get("invocationId"):
+                result.error("budget.reservations", "each reservation requires invocationId, role, and positive amount")
+                continue
+            if item["invocationId"] in ids:
+                result.error("budget.reservations", "budget reservation invocationIds must be unique")
+            ids.add(item["invocationId"])
+        if isinstance(usage, Mapping) and isinstance(usage.get("toolCalls"), Mapping):
+            for role in HARD_TOOL_CALL_CEILINGS:
+                outstanding = sum(item.get("amount", 0) for item in reservations if isinstance(item, Mapping) and item.get("role") == role and isinstance(item.get("amount"), int) and not isinstance(item.get("amount"), bool))
+                role_usage = usage["toolCalls"].get(role, 0)
+                if isinstance(role_usage, int) and not isinstance(role_usage, bool) and role_usage + outstanding > approved_tool_calls(budget, role):
+                    result.error("budget.over.reservations", f"settled and reserved {role} calls exceed the approved budget")
+    return result
 
 def validate_profile(profile: Mapping[str, Any]) -> ValidationResult:
     result = ValidationResult()
@@ -701,20 +832,22 @@ def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
             result.error("invocation.shape", f"{field_name} must be an array")
     context_refs = invocation.get("contextRefs")
     if isinstance(context_refs, list):
-        if len(context_refs) > DEFAULT_CONTEXT_POLICY["maxWorkingSetItems"]:
-            result.error("context.entries", "AgentInvocation exceeds 12 context references")
+        if len(context_refs) > HARD_CONTEXT_CEILINGS["maxWorkingSetItems"]:
+            result.error("context.entries", "AgentInvocation exceeds the 24-reference hard ceiling")
         for index, item in enumerate(context_refs):
             if not isinstance(item, Mapping) or not item.get("ref") or not item.get("purpose") or not item.get("contentHash"):
                 result.error("context.reference", f"contextRefs[{index}] requires ref, purpose, and contentHash")
     encoded = json.dumps(invocation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    if len(encoded) > DEFAULT_CONTEXT_POLICY["maxPacketBytes"]:
-        result.error("context.bytes", "AgentInvocation exceeds 16 KiB")
+    if len(encoded) > HARD_CONTEXT_CEILINGS["maxPacketBytes"]:
+        result.error("context.bytes", "AgentInvocation exceeds the 32 KiB hard ceiling")
     limits = invocation.get("limits")
     role_limits = DEFAULT_INVOCATION_LIMITS.get(str(invocation.get("role")))
     if not isinstance(limits, Mapping) or not role_limits:
         result.error("invocation.limits", "role limits are required")
     else:
         for name, maximum in role_limits.items():
+            if name == "maxToolCalls":
+                maximum = HARD_TOOL_CALL_CEILINGS[str(invocation.get("role"))]
             value = limits.get(name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1 or value > maximum:
                 result.error("invocation.limits", f"limits.{name} must be between 1 and {maximum}")
@@ -755,6 +888,12 @@ def validate_agent_result(
             result.error("result.shape", f"{field_name} must be an array")
     if result_value.get("status") == "succeeded" and invocation.get("role") == "worker" and not result_value.get("candidateHead"):
         result.error("result.candidate", "successful worker result requires candidateHead")
+    usage = result_value.get("usage")
+    if usage is not None:
+        if not isinstance(usage, Mapping) or not isinstance(usage.get("trusted"), bool):
+            result.error("result.usage", "usage requires a boolean trusted field")
+        elif usage.get("trusted") and (not isinstance(usage.get("toolCalls"), int) or isinstance(usage.get("toolCalls"), bool) or usage.get("toolCalls") < 0):
+            result.error("result.usage", "trusted usage requires a non-negative toolCalls integer")
     return result
 
 
@@ -823,6 +962,8 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     if cohort is not None and (not isinstance(cohort, str) or not cohort.strip()):
         result.error("telemetry.cohort", "telemetryCohort must be null or a non-empty string")
     result.extend(validate_routing_recovery(task))
+    if task.get("budget") is not None:
+        result.extend(validate_task_budget(task))
     result.extend(validate_models(task, profile))
     result.extend(validate_debt(task))
     execution = task.get("execution") or {}
@@ -867,6 +1008,24 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
                 review_status = attempt.get("reviewStatus")
                 if review_status is not None and review_status not in REVIEW_STATES:
                     result.error("quality.review_status", f"execution.attempts[{index - 1}].reviewStatus is invalid")
+    repair_history = execution.get("repairHistory") if isinstance(execution, Mapping) else None
+    if repair_history is not None:
+        if not isinstance(repair_history, list):
+            result.error("repair.history", "execution.repairHistory must be an array")
+        else:
+            for index, entry in enumerate(repair_history, 1):
+                if not isinstance(entry, Mapping) or entry.get("cycle") != index:
+                    result.error("repair.history", f"repairHistory[{index - 1}] must have cycle {index}")
+                    continue
+                if not entry.get("reviewRef") or not entry.get("progress"):
+                    result.error("repair.history", f"repairHistory[{index - 1}] requires reviewRef and progress")
+                for field_name in ("resolvedFindingIds", "remainingFindingIds"):
+                    values = entry.get(field_name)
+                    if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+                        result.error("repair.history", f"repairHistory[{index - 1}].{field_name} must be an array of finding ids")
+            max_repairs = int((((task.get("budget") or {}).get("policy") or {}).get("maxRepairs", 3)))
+            if len(repair_history) > max_repairs:
+                result.error("repair.ceiling", "repair history exceeds the frozen Task ceiling")
     review_history = task.get("reviewHistory")
     if review_history is not None:
         if not isinstance(review_history, list) or any(not isinstance(value, str) or not value.strip() for value in review_history):
@@ -1064,6 +1223,8 @@ def plan_digest(value: Mapping[str, Any]) -> str:
     body = {name: value.get(name) for name in names}
     if value.get("effectiveConfig"):
         body["effectiveConfig"] = value["effectiveConfig"]
+    if isinstance(value.get("budget"), Mapping):
+        body["budgetPolicy"] = (value.get("budget") or {}).get("policy")
     if value.get("ruleSelection"):
         body["ruleSelection"] = value["ruleSelection"]
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -1114,11 +1275,15 @@ def validate_review(
                 result.error("review.finding_origin", f"findings[{index}].origin is invalid")
             if not finding.get("summary"):
                 result.error("review.finding_summary", f"findings[{index}].summary is required")
+            if task and task.get("budget") is not None and (review.get("subject") or {}).get("kind") == "candidate" and not finding.get("findingId"):
+                result.error("review.finding_id", f"findings[{index}].findingId is required for budgeted candidate reviews")
     if not isinstance(review.get("validation"), list):
         result.error("review.validation", "review validation must be an array")
     cycle = review.get("cycle")
-    if not isinstance(cycle, int) or isinstance(cycle, bool) or cycle < 1 or cycle > 2:
-        result.error("review.cycle", "review cycle must be 1 or 2")
+    configured_repairs = ((((task or {}).get("budget") or {}).get("policy") or {}).get("maxRepairs", ((profile or {}).get("orchestration") or {}).get("maxRepairs", 3)))
+    max_repairs = configured_repairs if isinstance(configured_repairs, int) and not isinstance(configured_repairs, bool) and 0 <= configured_repairs <= 3 else 3
+    if not isinstance(cycle, int) or isinstance(cycle, bool) or cycle < 1 or cycle > max_repairs + 1:
+        result.error("review.cycle", f"review cycle must be between 1 and {max_repairs + 1}")
     subject = review.get("subject") or {}
     kind = subject.get("kind") if isinstance(subject, Mapping) else None
     if kind == "candidate":
@@ -1135,8 +1300,8 @@ def validate_review(
             result.error("review.range", "review range must be non-empty")
         if task.get("state") in {"Accepted", "Integrated"} and review.get("status") != "Accepted":
             result.error("review.verdict", "Accepted and Integrated tasks require an Accepted review")
-        if review.get("status") == "ChangesRequested" and cycle == 2 and task.get("state") != "Replan Required":
-            result.error("review.replan", "second failed review requires Replan Required")
+        if review.get("status") == "ChangesRequested" and cycle == max_repairs + 1 and task.get("state") != "Replan Required":
+            result.error("review.replan", "the final permitted candidate check requires Replan Required")
     elif kind == "baseline":
         if not phase:
             result.error("review.phase_required", "baseline review requires its phase artifact")
@@ -1160,6 +1325,39 @@ def validate_review(
         result.error("review.subject", "review subject.kind must be candidate, baseline, or plan")
     return result
 
+
+
+def assess_repair_progress(task: Mapping[str, Any], review: Mapping[str, Any]) -> str:
+    """Return repair, accept, or replan from stable findings and manager evidence."""
+    if review.get("status") == "Accepted":
+        return "accept"
+    cycle = int(review.get("cycle", 1))
+    configured_repairs = ((((task.get("budget") or {}).get("policy") or {}).get("maxRepairs", 3)))
+    max_repairs = configured_repairs if isinstance(configured_repairs, int) and not isinstance(configured_repairs, bool) and 0 <= configured_repairs <= 3 else 3
+    history = ((task.get("execution") or {}).get("repairHistory") or [])
+    current_ids = {str(item.get("findingId")) for item in review.get("findings") or [] if isinstance(item, Mapping) and item.get("findingId")}
+    previous_ids = set(history[-1].get("remainingFindingIds") or []) if history else set()
+    latest = history[-1] if history else {}
+    if cycle >= max_repairs + 1 or latest.get("scopeChanged") or latest.get("approachInvalid"):
+        return "replan"
+    if previous_ids and current_ids == previous_ids and not latest.get("resolvedFindingIds"):
+        return "replan"
+    return "repair"
+
+
+def wave_results_complete(tasks: Iterable[Mapping[str, Any]], wave_task_ids: Iterable[str]) -> bool:
+    """Gate result acceptance/integration until every writer in the wave has returned."""
+    indexed = {str(task.get("taskId")): task for task in tasks}
+    for task_id in wave_task_ids:
+        task = indexed.get(str(task_id))
+        if not task:
+            return False
+        execution = task.get("execution") if isinstance(task.get("execution"), Mapping) else {}
+        invocations = [item for item in execution.get("invocations") or [] if isinstance(item, Mapping) and item.get("role") == "worker"]
+        results = execution.get("agentResults") or []
+        if not invocations or not any(isinstance(item, Mapping) and item.get("invocationId") == invocations[-1].get("invocationId") for item in results):
+            return False
+    return True
 
 def validate_repository_commits(repo: Path, task: Mapping[str, Any], phase: Mapping[str, Any] | None = None) -> ValidationResult:
     result = ValidationResult()

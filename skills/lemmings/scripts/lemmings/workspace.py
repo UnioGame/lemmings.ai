@@ -848,6 +848,7 @@ def claim_workspace(
     branch: str,
     expected_revision: int,
     phase_id: str | None = None,
+    profile: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if base_sha != integration_head:
         raise ValueError("workspace base must equal the current integration head")
@@ -927,6 +928,8 @@ def claim_workspace(
             entry.update({"baseSha": base_sha, "headSha": base_sha, "everActive": True, "lastUsedAt": utc_timestamp()})
             _save_registry(repo, registry, expected_revision)
             return {"ok": True, "revision": expected_revision + 1, "entry": entry, "inspection": info}
+        if not _pool_policy(profile).get("enabled"):
+            raise ValueError("workspace pool is disabled; idle workspaces cannot be claimed")
         reasons, info = _reuse_reasons(repo, entry)
         if reasons:
             entry["state"] = "quarantined"

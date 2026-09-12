@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "4.5.0"
+VERSION = "5.0.0"
 OWNED_AGENTS = (
     "lemmings-worker.toml", "lemmings-reviewer.toml", "lemmings-explorer.toml",
     "lemmings-orchestrator.toml", "lemmings-validator.toml", "lemmings-summarizer.toml",
@@ -108,7 +108,7 @@ def move_if_present(source: Path, destination: Path, moved: list[tuple[Path, Pat
 
 def install(args: argparse.Namespace) -> int:
     if sys.version_info < (3, 10):
-        raise ValueError("Lemmings 4.0 requires Python 3.10 or newer")
+        raise ValueError("Lemmings 5.0 requires Python 3.10 or newer")
     skill_source = Path(__file__).resolve().parents[1]
     package_root = Path(__file__).resolve().parents[3]
     if "Library" in package_root.parts and "PackageCache" in package_root.parts:
@@ -143,6 +143,8 @@ def install(args: argparse.Namespace) -> int:
         if existing.get("schemaVersion") != 4:
             raise ValueError("unsupported profile schema; replace the legacy bundle explicitly")
         profile = merge_settings(profile, existing)
+        if existing.get("distributionVersion") in {"4.1.1", "4.5.0"} and (existing.get("orchestration") or {}).get("maxRepairs") == 1:
+            profile["orchestration"]["maxRepairs"] = 3
     profile["distributionVersion"] = VERSION
     try:
         profile["tooling"] = {"root": relative(package_root, repo)}
@@ -160,7 +162,7 @@ def install(args: argparse.Namespace) -> int:
         for name in OWNED_AGENTS:
             if (agents_source / name).is_file() or (agents_target / name).exists():
                 print(f"replace/delete: {agents_target / name}")
-        print("Lemmings 4.0 install dry run complete.")
+        print("Lemmings 5.0 install dry run complete.")
         return 0
 
     transaction = Path(tempfile.mkdtemp(prefix=".lemmings-install-", dir=repo))
