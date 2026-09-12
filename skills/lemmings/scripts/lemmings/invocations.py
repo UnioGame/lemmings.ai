@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from .effective import capture_effective, checked_effective
+from .models import normalize_route_failure
 from .budget import consume_context_expansions, extend_budget, new_task_budget, reserve_tool_calls, settle_tool_calls
 
 from .contracts import (
@@ -104,14 +105,14 @@ def build_invocation(
         "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
         "outputSchemaVersion": SCHEMA_VERSION,
     }
-    if task.get("budget"):
-        reservations = [item for item in task["budget"].get("reservations", []) if item.get("invocationId") == invocation["invocationId"]]
-        if len(reservations) > 1:
-            raise ValueError("budgeted invocation has duplicate reservations")
-        invocation["limits"]["maxToolCalls"] = int(
-            reservations[0]["amount"] if reservations
-            else task["budget"]["policy"]["toolCalls"][role]["initial"]
-        )
+    invocation_budget = task.get("budget") if isinstance(task.get("budget"), Mapping) else new_task_budget(profile)
+    reservations = [item for item in invocation_budget.get("reservations", []) if item.get("invocationId") == invocation["invocationId"]]
+    if len(reservations) > 1:
+        raise ValueError("budgeted invocation has duplicate reservations")
+    invocation["limits"]["maxToolCalls"] = int(
+        reservations[0]["amount"] if reservations
+        else invocation_budget["policy"]["toolCalls"][role]["initial"]
+    )
     if frozen:
         invocation["effectiveConfigDigest"] = frozen["digest"]
         invocation["roleRoutes"] = frozen["profile"].get("roleRoutes", {}).get(role, [])
@@ -124,17 +125,16 @@ def build_invocation(
             invocation["assignedModel"] = route_name(recovered)
             invocation["assignedHost"] = recovered["hostId"]
     invocation["contextDigest"] = invocation_digest(invocation)
-    if task.get("budget"):
-        context_policy = task["budget"]["policy"]["context"]
-        approved = {}
-        for name, configured in context_policy.items():
-            extra = sum(item.get("amount", 0) for item in task["budget"].get("extensions", []) if item.get("kind") == name)
-            approved[name] = min(configured["initial"] + extra, configured["ceiling"])
-        encoded = json.dumps(invocation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        if len(invocation["contextRefs"]) > approved["maxWorkingSetItems"]:
-            raise ValueError(f"AgentInvocation exceeds currently approved {approved['maxWorkingSetItems']} context references")
-        if len(encoded) > approved["maxPacketBytes"]:
-            raise ValueError(f"AgentInvocation exceeds currently approved {approved['maxPacketBytes']} bytes")
+    context_policy = invocation_budget["policy"]["context"]
+    approved = {}
+    for name, configured in context_policy.items():
+        extra = sum(item.get("amount", 0) for item in invocation_budget.get("extensions", []) if item.get("kind") == name)
+        approved[name] = min(configured["initial"] + extra, configured["ceiling"])
+    encoded = json.dumps(invocation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(invocation["contextRefs"]) > approved["maxWorkingSetItems"]:
+        raise ValueError(f"AgentInvocation exceeds currently approved {approved['maxWorkingSetItems']} context references")
+    if len(encoded) > approved["maxPacketBytes"]:
+        raise ValueError(f"AgentInvocation exceeds currently approved {approved['maxPacketBytes']} bytes")
     checked = validate_invocation(invocation)
     if not checked.ok:
         raise ValueError(checked.findings[0].message)
@@ -218,8 +218,7 @@ def record_invocation(
                 task["models"] = models
         task["revision"] = expected_revision + 1
         if not task.get("budget"):
-            selected_profile = ((task.get("effectiveConfig") or {}).get("profile") or profile)
-            task["budget"] = new_task_budget(selected_profile)
+            task["budget"] = new_task_budget(profile)
         seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
         invocation_id = hashlib.sha256(seed.encode()).hexdigest()[:24]
         grant = reserve_tool_calls(task["budget"], role, invocation_id)
@@ -302,6 +301,41 @@ def accept_result(
         task["revision"] = expected_revision + 1
         write_object(task_path, task)
         return {"ok": True, "taskId": task.get("taskId"), "revision": task["revision"], "invocationId": result_value.get("invocationId")}
+
+
+def record_route_failure(
+    task_path: Path, *, failure_value: Mapping[str, Any], expected_revision: int,
+    usage: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a normalized RouteFailure and settle its outstanding grant atomically."""
+    with task_lock(task_path):
+        task = read_object(task_path)
+        if task.get("revision") != expected_revision:
+            raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        normalized = normalize_route_failure(failure_value)
+        invocation_id = normalized["invocationId"]
+        if find_invocation(task, invocation_id) is None:
+            raise ValueError("RouteFailure has no unique stored invocation")
+        failures = task.setdefault("execution", {}).setdefault("routeFailures", [])
+        if any(isinstance(item, Mapping) and item.get("invocationId") == invocation_id for item in failures):
+            raise ValueError("RouteFailure invocationId was already settled")
+        consumed = settle_tool_calls(task["budget"], invocation_id, usage)
+        failures.append({
+            **normalized,
+            "usage": {
+                "trusted": bool(isinstance(usage, Mapping) and usage.get("trusted") is True),
+                "toolCalls": consumed,
+            },
+        })
+        task["revision"] = expected_revision + 1
+        write_object(task_path, task)
+        return {
+            "ok": True,
+            "taskId": task.get("taskId"),
+            "revision": task["revision"],
+            "invocationId": invocation_id,
+            "consumedToolCalls": consumed,
+        }
 
 
 def record_context_usage(task_path: Path, *, expected_revision: int, amount: int = 1) -> dict[str, Any]:

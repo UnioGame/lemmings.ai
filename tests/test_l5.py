@@ -10,14 +10,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/lemmings/scripts"))
 
-from lemmings.budget import HARD_CONTEXT_CEILINGS, HARD_TOOL_CALL_CEILINGS
+from lemmings.budget import HARD_CONTEXT_CEILINGS, HARD_TOOL_CALL_CEILINGS, new_task_budget
 from lemmings.contracts import (
     assess_repair_progress,
+    validate_task,
     validate_profile,
     validate_review,
     wave_results_complete,
 )
-from lemmings.invocations import accept_result, extend_task_budget, record_invocation
+from lemmings.invocations import accept_result, extend_task_budget, record_invocation, record_route_failure
 
 
 def defaults() -> dict:
@@ -47,6 +48,12 @@ class ProfileBudgetTests(unittest.TestCase):
         broken = json.loads(json.dumps(profile))
         broken["orchestration"]["maxRepairs"] = 4
         self.assertIn("profile.orchestration", {item.code for item in validate_profile(broken).findings})
+
+    def test_task_budget_rejects_boolean_limits(self) -> None:
+        value = task()
+        value["budget"] = new_task_budget(defaults())
+        value["budget"]["policy"]["context"]["maxExpansions"] = {"initial": True, "ceiling": True}
+        self.assertIn("budget.context", {item.code for item in validate_task(value, defaults()).findings})
 
 
 class InvocationLedgerTests(unittest.TestCase):
@@ -86,6 +93,35 @@ class InvocationLedgerTests(unittest.TestCase):
         if trusted is not None:
             value["usage"] = {"trusted": trusted, "toolCalls": calls}
         return value
+
+    def test_first_invocation_freezes_custom_profile_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo, packet, profile = self.repo_task(Path(temp))
+            profile["invocationBudgets"]["worker"].update(initialToolCalls=7, maxToolCalls=9)
+            invocation = record_invocation(repo, packet, profile, "worker", 1, 0)
+            stored = json.loads(packet.read_text(encoding="utf-8"))
+            self.assertEqual(7, invocation["limits"]["maxToolCalls"])
+            self.assertEqual({"initial": 7, "ceiling": 9}, stored["budget"]["policy"]["toolCalls"]["worker"])
+
+    def test_route_failure_settles_reservation_before_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo, packet, profile = self.repo_task(Path(temp))
+            first = record_invocation(repo, packet, profile, "worker", 1, 0)
+            failure = {
+                "category": "transient_transport",
+                "invocationId": first["invocationId"],
+                "route": {"hostId": "native", "providerId": "test", "modelId": "worker"},
+                "resumable": True,
+            }
+            settled = record_route_failure(
+                packet, failure_value=failure, expected_revision=1,
+                usage={"trusted": True, "toolCalls": 3},
+            )
+            self.assertEqual(3, settled["consumedToolCalls"])
+            second = record_invocation(repo, packet, profile, "worker", 2, 2)
+            self.assertEqual(21, second["limits"]["maxToolCalls"])
+            stored = json.loads(packet.read_text(encoding="utf-8"))
+            self.assertEqual(first["invocationId"], stored["execution"]["routeFailures"][0]["invocationId"])
 
     def test_trusted_usage_releases_remainder_and_ceiling_is_final(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -174,7 +210,7 @@ class RepairAndWaveTests(unittest.TestCase):
 
     def test_progress_controls_repair_and_four_candidate_checks_are_allowed(self) -> None:
         value = task()
-        value.update(state="Candidate", previousState="ActiveActive", baseSha="base")
+        value.update(state="Candidate", previousState="Active", baseSha="base")
         value["commits"]["candidate"] = "head"
         value["models"]["actual"] = value["models"]["assigned"]
         value["execution"]["validationEvidence"] = ["focused tests"]
@@ -189,6 +225,9 @@ class RepairAndWaveTests(unittest.TestCase):
             "resolvedFindingIds": [],
             "remainingFindingIds": ["F2"],
         }]
+        value["budget"] = new_task_budget(defaults())
+        self.assertIn("repair.usage", {item.code for item in validate_task(value, defaults()).findings})
+        value["budget"]["usage"]["repairCycles"] = 1
         self.assertEqual("replan", assess_repair_progress(value, second))
         value["execution"]["repairHistory"][0]["resolvedFindingIds"] = ["F1"]
         self.assertEqual("repair", assess_repair_progress(value, second))

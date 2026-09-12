@@ -34,7 +34,7 @@ from .contracts import (
     validate_wave,
     write_object,
 )
-from .invocations import accept_result, extend_task_budget, record_context_usage, record_invocation, task_lock
+from .invocations import accept_result, extend_task_budget, record_context_usage, record_invocation, record_route_failure, task_lock
 from .bundle import skill_root
 from .models import (
     advance_recovery_route,
@@ -663,6 +663,13 @@ def command_invocation(args: argparse.Namespace) -> int:
         emit(extend_task_budget(task_path, expected_revision=args.expected_revision, kind=args.kind, role=args.role, amount=args.amount, unresolved_question=args.unresolved_question, progress=args.progress))
     elif args.invocation_command == "context-use":
         emit(record_context_usage(task_path, expected_revision=args.expected_revision, amount=args.amount))
+    elif args.invocation_command == "fail":
+        failure_path = resolve_path(repo, args.failure)
+        if failure_path is None or not failure_path.is_file():
+            raise ValueError("invocation fail requires an existing RouteFailure")
+        usage = ({"trusted": True, "toolCalls": args.trusted_tool_calls}
+                 if args.trusted_tool_calls is not None else None)
+        emit(record_route_failure(task_path, failure_value=read_object(failure_path), expected_revision=args.expected_revision, usage=usage))
     else:
         result_path = resolve_path(repo, args.result)
         if result_path is None or not result_path.is_file():
@@ -755,6 +762,7 @@ def build_parser() -> argparse.ArgumentParser:
     invocation = sub.add_parser("invocation", help="persist dispatch and accept matching AgentResult"); invocation_sub = invocation.add_subparsers(dest="invocation_command", required=True)
     invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.add_argument("--preset", help="named role preset for this new Task"); invocation_create.set_defaults(run=command_invocation)
     invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--expected-revision", type=int, required=True); invocation_accept.set_defaults(run=command_invocation)
+    invocation_fail = invocation_sub.add_parser("fail"); add_common(invocation_fail); invocation_fail.add_argument("--task", required=True); invocation_fail.add_argument("--failure", required=True); invocation_fail.add_argument("--trusted-tool-calls", type=int); invocation_fail.add_argument("--expected-revision", type=int, required=True); invocation_fail.set_defaults(run=command_invocation)
     invocation_extend = invocation_sub.add_parser("extend"); add_common(invocation_extend); invocation_extend.add_argument("--task", required=True); invocation_extend.add_argument("--kind", required=True, choices=["toolCalls", "maxPacketBytes", "maxWorkingSetItems", "maxExpansions"]); invocation_extend.add_argument("--role", choices=["worker", "reviewer", "explorer"]); invocation_extend.add_argument("--amount", type=int, required=True); invocation_extend.add_argument("--unresolved-question", required=True); invocation_extend.add_argument("--progress", required=True); invocation_extend.add_argument("--expected-revision", type=int, required=True); invocation_extend.set_defaults(run=command_invocation)
     invocation_context = invocation_sub.add_parser("context-use"); add_common(invocation_context); invocation_context.add_argument("--task", required=True); invocation_context.add_argument("--amount", type=int, default=1); invocation_context.add_argument("--expected-revision", type=int, required=True); invocation_context.set_defaults(run=command_invocation)
     integration = sub.add_parser("integration", help="run declared checks on the exact merged tree"); integration_sub = integration.add_subparsers(dest="integration_command", required=True)

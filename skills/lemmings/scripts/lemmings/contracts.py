@@ -491,14 +491,20 @@ def validate_task_budget(task: Mapping[str, Any]) -> ValidationResult:
     else:
         for name, hard in HARD_CONTEXT_CEILINGS.items():
             item = context.get(name)
-            if not isinstance(item, Mapping) or not isinstance(item.get("initial"), int) or not isinstance(item.get("ceiling"), int) or not 1 <= item["initial"] <= item["ceiling"] <= hard:
+            if (not isinstance(item, Mapping)
+                    or not isinstance(item.get("initial"), int) or isinstance(item.get("initial"), bool)
+                    or not isinstance(item.get("ceiling"), int) or isinstance(item.get("ceiling"), bool)
+                    or not 1 <= item["initial"] <= item["ceiling"] <= hard):
                 result.error("budget.context", f"budget context {name} is outside its hard ceiling")
     if not isinstance(tools, Mapping) or set(tools) != set(HARD_TOOL_CALL_CEILINGS):
         result.error("budget.tools", "budget.policy.toolCalls must contain explorer, reviewer, and worker")
     else:
         for role, hard in HARD_TOOL_CALL_CEILINGS.items():
             item = tools.get(role)
-            if not isinstance(item, Mapping) or not isinstance(item.get("initial"), int) or not isinstance(item.get("ceiling"), int) or not 1 <= item["initial"] <= item["ceiling"] <= hard:
+            if (not isinstance(item, Mapping)
+                    or not isinstance(item.get("initial"), int) or isinstance(item.get("initial"), bool)
+                    or not isinstance(item.get("ceiling"), int) or isinstance(item.get("ceiling"), bool)
+                    or not 1 <= item["initial"] <= item["ceiling"] <= hard):
                 result.error("budget.tools", f"budget tool-call policy for {role} is outside its hard ceiling")
     repairs = policy.get("maxRepairs")
     if not isinstance(repairs, int) or isinstance(repairs, bool) or not 0 <= repairs <= 3:
@@ -986,6 +992,25 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
             if invocation_id in invocation_ids:
                 result.error("invocation.duplicate", f"duplicate invocationId: {invocation_id}")
             invocation_ids.add(invocation_id)
+    route_failures = execution.get("routeFailures") if isinstance(execution, Mapping) else None
+    if route_failures is not None:
+        if not isinstance(route_failures, list):
+            result.error("routing.failure_history", "execution.routeFailures must be an array")
+        else:
+            failure_ids: set[str] = set()
+            for index, failure in enumerate(route_failures):
+                invocation_id = failure.get("invocationId") if isinstance(failure, Mapping) else None
+                usage_value = failure.get("usage") if isinstance(failure, Mapping) else None
+                if (not isinstance(failure, Mapping) or failure.get("category") not in ROUTE_FAILURE_CATEGORIES
+                        or not invocation_id or not _route_ref_valid(failure.get("route"))
+                        or not isinstance(usage_value, Mapping) or not isinstance(usage_value.get("trusted"), bool)
+                        or not isinstance(usage_value.get("toolCalls"), int) or isinstance(usage_value.get("toolCalls"), bool)
+                        or usage_value.get("toolCalls") < 0):
+                    result.error("routing.failure_history", f"execution.routeFailures[{index}] is invalid")
+                    continue
+                if invocation_id in failure_ids:
+                    result.error("routing.failure_history", f"duplicate RouteFailure invocationId: {invocation_id}")
+                failure_ids.add(invocation_id)
     attempts = execution.get("attempts") if isinstance(execution, Mapping) else None
     if attempts is not None:
         if not isinstance(attempts, list):
@@ -1026,6 +1051,10 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
             max_repairs = int((((task.get("budget") or {}).get("policy") or {}).get("maxRepairs", 3)))
             if len(repair_history) > max_repairs:
                 result.error("repair.ceiling", "repair history exceeds the frozen Task ceiling")
+            if isinstance(task.get("budget"), Mapping):
+                budget_usage = ((task.get("budget") or {}).get("usage") or {})
+                if budget_usage.get("repairCycles") != len(repair_history):
+                    result.error("repair.usage", "budget usage repairCycles must equal execution.repairHistory length")
     review_history = task.get("reviewHistory")
     if review_history is not None:
         if not isinstance(review_history, list) or any(not isinstance(value, str) or not value.strip() for value in review_history):

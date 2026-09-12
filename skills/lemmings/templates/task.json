@@ -95,51 +95,5 @@
     "integrationEvidence": [],
     "workspaceDisposition": null
   },
-  "budget": {
-    "policy": {
-      "context": {
-        "maxPacketBytes": {
-          "initial": 16384,
-          "ceiling": 32768
-        },
-        "maxWorkingSetItems": {
-          "initial": 12,
-          "ceiling": 24
-        },
-        "maxExpansions": {
-          "initial": 1,
-          "ceiling": 3
-        }
-      },
-      "toolCalls": {
-        "explorer": {
-          "initial": 12,
-          "ceiling": 24
-        },
-        "reviewer": {
-          "initial": 16,
-          "ceiling": 32
-        },
-        "worker": {
-          "initial": 24,
-          "ceiling": 48
-        }
-      },
-      "maxRepairs": 3
-    },
-    "usage": {
-      "contextExpansions": 0,
-      "toolCalls": {
-        "explorer": 0,
-        "reviewer": 0,
-        "worker": 0
-      },
-      "repairCycles": 0
-    },
-    "reservations": [],
-    "extensions": [],
-    "grants": [],
-    "lockedRoles": [],
-    "stop": null
-  }
+  "budget": null
 }

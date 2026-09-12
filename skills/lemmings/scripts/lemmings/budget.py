@@ -12,6 +12,7 @@ HARD_CONTEXT_CEILINGS = {
     "maxExpansions": 3,
 }
 HARD_TOOL_CALL_CEILINGS = {"explorer": 24, "reviewer": 32, "worker": 48}
+INITIAL_CONTEXT = {"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1}
 INITIAL_TOOL_CALLS = {"explorer": 12, "reviewer": 16, "worker": 24}
 
 
@@ -28,7 +29,7 @@ def policy_from_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
         }
     return {
         "context": {
-            name: {"initial": int(context.get(name, 0)), "ceiling": int(ceilings.get(name, hard))}
+            name: {"initial": int(context.get(name, INITIAL_CONTEXT[name])), "ceiling": int(ceilings.get(name, hard))}
             for name, hard in HARD_CONTEXT_CEILINGS.items()
         },
         "toolCalls": tools,

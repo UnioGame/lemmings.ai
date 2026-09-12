@@ -648,7 +648,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 )
             except (TypeError, ValueError) as error:
                 return decision("block", str(error))
-            return decision("allow", f"RouteFailure accepted; next action: {action}", routeFailure=normalized, recoveryAction=action)
+            return decision("allow", f"RouteFailure accepted; persist it with invocation fail before {action}", routeFailure=normalized, recoveryAction=action)
         result_value = payload.get("agentResult") or payload.get("agent_result")
         if not isinstance(result_value, Mapping):
             return decision("block", "v4 subagent stop requires structured AgentResult")
