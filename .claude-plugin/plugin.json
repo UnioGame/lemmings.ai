@@ -1,0 +1,16 @@
+{
+  "name": "lemmings",
+  "version": "5.0.1",
+  "description": "Proportional repository orchestration with bounded workers and immutable review evidence",
+  "author": {
+    "name": "Lemmings Maintainers"
+  },
+  "homepage": "https://github.com/UnioGame/unigame.ai.lemmings",
+  "repository": "https://github.com/UnioGame/unigame.ai.lemmings",
+  "keywords": [
+    "agents",
+    "orchestration",
+    "code-review",
+    "cost-control"
+  ]
+}

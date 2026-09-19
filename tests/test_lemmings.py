@@ -80,8 +80,17 @@ class SchemaOnlyTests(unittest.TestCase):
     def test_distribution_versions_are_consistent(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        claude_plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        claude_marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual("5.0.1", package["version"])
         self.assertEqual("5.0.1", plugin["version"])
+        self.assertEqual("5.0.1", claude_plugin["version"])
+        self.assertEqual("unigame-ai", claude_marketplace["name"])
+        self.assertEqual("UnioGame/unigame.ai.lemmings", claude_marketplace["plugins"][0]["source"]["repo"])
+        for role in ("worker", "reviewer", "explorer"):
+            definition = (ROOT / "agents" / f"lemmings-{role}.md").read_text(encoding="utf-8")
+            self.assertIn(f"name: lemmings-{role}", definition)
+            self.assertNotIn("\nmodel:", definition)
 
     def test_specialization_is_optional_hint_and_cross_review_degrades(self):
         configured = profile()

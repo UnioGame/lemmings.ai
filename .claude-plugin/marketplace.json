@@ -1,0 +1,17 @@
+{
+  "name": "unigame-ai",
+  "owner": {
+    "name": "Lemmings Maintainers"
+  },
+  "plugins": [
+    {
+      "name": "lemmings",
+      "source": {
+        "source": "github",
+        "repo": "UnioGame/unigame.ai.lemmings"
+      },
+      "description": "Proportional repository orchestration with bounded workers and immutable review evidence"
+    }
+  ],
+  "description": "Lemmings orchestration plugins from UnioGame"
+}

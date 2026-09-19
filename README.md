@@ -74,6 +74,26 @@ The installer preserves schema-v4 manual settings and rolls back owned files on 
 
 For an update, ask the agent to compare the source version and Git commit with the repository bundle, update only when no Lemmings work is active, preserve manual settings, and run `doctor` again.
 
+### Claude Code plugin
+
+The same repository is also a Claude Code plugin. It keeps the shared `skills/lemmings/` workflow and provides Claude-compatible worker, reviewer, and explorer definitions without pinning a model.
+
+Validate or try a local checkout:
+
+```text
+claude plugin validate . --strict
+claude --plugin-dir .
+```
+
+After this repository is published, add its marketplace and install the plugin:
+
+```text
+claude plugin marketplace add UnioGame/unigame.ai.lemmings
+claude plugin install lemmings@unigame-ai
+```
+
+Restart Claude Code after installation, or use `/reload-plugins` when the install summary offers it. The Claude package exposes `/lemmings:lemmings` and the scoped `lemmings-worker`, `lemmings-reviewer`, and `lemmings-explorer` agents.
+
 ## Using Lemmings
 
 Start with the result and observable success criteria:
@@ -220,7 +240,7 @@ Validation preserves the real exit status and returns bounded diagnostics with a
 
 ## Version and Reference
 
-The package is **5.0.1** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
+The package is **5.0.1** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
 
 Authoritative details live in:
 
