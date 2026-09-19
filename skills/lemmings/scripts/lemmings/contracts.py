@@ -1475,6 +1475,16 @@ def validate_review(
     if not isinstance(review.get("validation"), list):
         result.error("review.validation", "review validation must be an array")
     spec = review.get("reviewSpec")
+    subject_for_binding = review.get("subject") if isinstance(review.get("subject"), Mapping) else {}
+    execution_for_binding = task.get("execution") if task and isinstance(task.get("execution"), Mapping) else {}
+    host_v1_for_binding = [
+        item for item in as_list(execution_for_binding.get("invocations"))
+        if isinstance(item, Mapping) and item.get("role") == "reviewer"
+        and item.get("reviewSubjectKind", "candidate") == "candidate"
+        and item.get("usageAccounting") == "host-v1"
+    ]
+    if spec is None and task and subject_for_binding.get("kind") == "candidate" and host_v1_for_binding:
+        result.error("review.invocation_binding", "host-v1 candidate review requires reviewSpec bound to its stored reviewer invocation")
     if spec is not None:
         if not isinstance(spec, Mapping):
             result.error("review.spec", "reviewSpec must be an object")

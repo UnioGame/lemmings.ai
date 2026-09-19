@@ -818,8 +818,6 @@ def apply_review(
             dispositions = review.get("findingDispositions")
             if not isinstance(dispositions, Mapping) or target_ids - {str(key) for key in dispositions}:
                 raise ValueError("review after active repair requires a disposition for every target finding")
-            if ({str(key) for key in dispositions} - target_ids):
-                raise ValueError("repair finding dispositions contain an unknown target id")
 
             def disposition_state(value: Any) -> str:
                 if isinstance(value, Mapping):

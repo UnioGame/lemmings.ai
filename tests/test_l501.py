@@ -180,6 +180,8 @@ class CandidateGateTests(unittest.TestCase):
             review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "Accepted", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": current["taskId"], "baseSha": base, "headSha": head}, "reviewSpec": dict(invocation["reviewSpec"]), "findings": [], "validation": []}
             self.assertTrue(validate_review(review, current, profile()).ok, validate_review(review, current, profile()).as_dict())
+            spec_less = {key: value for key, value in review.items() if key != "reviewSpec"}
+            self.assertIn("review.invocation_binding", {item.code for item in validate_review(spec_less, current, profile()).findings})
             missing = {**review, "reviewSpec": {key: value for key, value in review["reviewSpec"].items() if key != "invocationId"}}
             self.assertIn("review.invocation_binding", {item.code for item in validate_review(missing, current, profile()).findings})
             mutated = {**review, "reviewSpec": {**review["reviewSpec"], "invocationDigest": "mutated"}}
@@ -217,18 +219,18 @@ class RepairAndReviewChainTests(unittest.TestCase):
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
             review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "head"},
-                      "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}], "validation": []}
+                      "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}, {"findingId": "F2", "priority": "P1", "origin": "validation", "summary": "also fix"}], "validation": []}
             review_path = repo / "r1.json"; review_path.write_text(json.dumps(review), encoding="utf-8")
             applied = apply_review(repo, packet, review_path, expected_revision=0, profile=profile())
             self.assertEqual("Repair", applied["state"])
-            first = start_repair(packet, expected_revision=1, progress="identified F1", plan="fix F1", review=review, review_ref="r1.json")
+            first = start_repair(packet, expected_revision=1, progress="identified F1", plan="fix F1", review=review, review_ref="r1.json", target_finding_ids=["F1"])
             self.assertTrue(first["ok"])
             with self.assertRaisesRegex(ValueError, "subset of material"):
                 start_repair(packet, expected_revision=2, progress="forged target", plan="different plan", review=review, review_ref="r1.json", target_finding_ids=["P3"])
             forged = dict(review); forged["findings"] = [{**review["findings"][0], "summary": "different"}]
             with self.assertRaisesRegex(ValueError, "persisted immutable"):
                 start_repair(packet, expected_revision=2, progress="forged", plan="bad", review=forged, review_ref="r1.json")
-            review2 = {**review, "reviewId": "R2", "findings": [{"findingId": "F2", "priority": "P1", "origin": "validation", "summary": "new"}], "findingDispositions": {"F1": "resolved"}}
+            review2 = {**review, "reviewId": "R2", "findings": [{"findingId": "F2", "priority": "P1", "origin": "validation", "summary": "new"}], "findingDispositions": {"F1": "resolved", "F2": "remaining"}}
             review2_path = repo / "r2.json"; review2_path.write_text(json.dumps(review2), encoding="utf-8")
             renamed = {**review2, "reviewId": "R2-bad", "findingDispositions": {"renamed": "resolved"}}
             renamed_path = repo / "r2-bad.json"; renamed_path.write_text(json.dumps(renamed), encoding="utf-8")
