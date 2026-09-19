@@ -94,7 +94,13 @@ def _candidate_review_spec(task: Mapping[str, Any], lane: str, invocation: Mappi
         "reviewerHost": host,
         "reviewerModel": model,
     }
-    current = task.get("reviewSpec")
+    current = None
+    execution = task.get("execution") if isinstance(task.get("execution"), Mapping) else {}
+    chains = execution.get("reviewChains") if isinstance(execution, Mapping) else None
+    if isinstance(chains, Mapping) and isinstance(chains.get(lane), Mapping):
+        current = chains[lane].get("reviewSpec") if isinstance(chains[lane].get("reviewSpec"), Mapping) else chains[lane]
+    if current is None:
+        current = task.get("reviewSpec")
     if isinstance(current, Mapping) and (not current.get("reviewLane") or current.get("reviewLane") == lane):
         spec.update(dict(current))
         spec.update({
@@ -123,6 +129,18 @@ def _review_basis(spec: Mapping[str, Any], head: str | None) -> str:
         "previousHead": spec.get("previousHead"),
         "findingIds": spec.get("findingIds") or [],
     })
+
+
+def invocation_binding_digest(invocation: Mapping[str, Any]) -> str:
+    """Digest a stored invocation without its self-referential review binding."""
+    material = dict(invocation)
+    spec = material.get("reviewSpec")
+    if isinstance(spec, Mapping):
+        bound = dict(spec)
+        for key in ("invocationId", "invocationBasis", "invocationDigest"):
+            bound.pop(key, None)
+        material["reviewSpec"] = bound
+    return invocation_digest(material)
 
 
 def reference_hash(repo: Path, entry: Mapping[str, Any]) -> str:
@@ -244,6 +262,9 @@ def build_invocation(
         lane = _review_lane(task, profile, explicit=review_lane, invocation=invocation)
         invocation["reviewLane"] = lane
         invocation["reviewSpec"] = _candidate_review_spec(task, lane, invocation)
+        invocation["reviewSpec"]["invocationId"] = invocation["invocationId"]
+        invocation["reviewSpec"]["invocationBasis"] = _review_basis(invocation["reviewSpec"], invocation.get("candidateHead"))
+        invocation["reviewSpec"]["invocationDigest"] = invocation_binding_digest(invocation)
     invocation["contextDigest"] = invocation_digest(invocation)
     context_policy = invocation_budget["policy"]["context"]
     approved = {}
@@ -261,7 +282,7 @@ def build_invocation(
     return invocation
 
 
-def validate_dispatch(repo: Path, task: Mapping[str, Any], profile: Mapping[str, Any], invocation: Mapping[str, Any]) -> None:
+def validate_dispatch(repo: Path, task: Mapping[str, Any], profile: Mapping[str, Any], invocation: Mapping[str, Any], *, task_path: Path | None = None) -> None:
     checked = validate_invocation(invocation)
     if not checked.ok:
         raise ValueError(checked.findings[0].message)
@@ -291,7 +312,7 @@ def validate_dispatch(repo: Path, task: Mapping[str, Any], profile: Mapping[str,
         if reference_hash(repo, ref) != ref.get("contentHash"):
             raise ValueError("saved invocation context file changed; create a fresh invocation")
     if invocation.get("role") == "reviewer" and invocation.get("reviewSubjectKind", "candidate") == "candidate":
-        readiness = validate_candidate_readiness(repo, task)
+        readiness = validate_candidate_readiness(repo, task, task_path=task_path)
         if not readiness.ok:
             raise ValueError(readiness.findings[0].message)
     if invocation.get("role") == "worker" and task.get("state") == "Repair":
@@ -363,7 +384,7 @@ def record_invocation(
         resolved_kind = dispatch_kind or ("review" if role == "reviewer" else "repair" if task.get("state") == "Repair" else "initial")
         resolved_lane = _review_lane(task, profile, explicit=review_lane) if role == "reviewer" and resolved_subject == "candidate" else None
         if role == "reviewer" and resolved_subject == "candidate":
-            readiness = validate_candidate_readiness(repo, task)
+            readiness = validate_candidate_readiness(repo, task, task_path=task_path)
             if not readiness.ok:
                 raise ValueError(readiness.findings[0].message)
             current_head = candidate_head(task)
@@ -649,7 +670,7 @@ def start_repair(
             if review.get("status") != "ChangesRequested":
                 raise ValueError("repair start requires a ChangesRequested immutable review")
             findings = [item for item in review.get("findings") or [] if isinstance(item, Mapping)]
-            source_ids = [str(item.get("findingId")) for item in findings if item.get("findingId")]
+            source_ids = [str(item.get("findingId")) for item in findings if item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}]
             source_digest = review_digest(review)
             source_head = (review.get("subject") or {}).get("headSha") if isinstance(review.get("subject"), Mapping) else None
             candidate_refs = {str(value) for value in (review_ref, review.get("_evidencePath")) if value}
@@ -667,6 +688,9 @@ def start_repair(
             if not isinstance(supplied, Mapping) or supplied.get("digest") != stored.get("digest"):
                 raise ValueError("repair readiness source is stale or mutated")
             source_ids = [str(item) for item in as_list(readiness_failure.get("findingIds") or readiness_failure.get("targets")) if item]
+            stored_targets = [str(item) for item in as_list(stored.get("findingIds") or stored.get("targets") or stored.get("targetFindingIds")) if item]
+            if not stored_targets or not set(source_ids).issubset(set(stored_targets)):
+                raise ValueError("repair readiness targets must match exact stored candidate readiness targets")
             source_digest = str(stored["digest"])
             source_head = stored.get("candidateHead") or candidate_head(task)
             source_ref = "readiness:" + source_digest
@@ -679,6 +703,8 @@ def start_repair(
         ids = [str(item) for item in (target_finding_ids or source_ids) if str(item)]
         if not ids:
             raise ValueError("repair start requires at least one concrete finding or readiness target")
+        if not set(ids).issubset(set(source_ids)):
+            raise ValueError("repair targets must be a subset of material findings in the immutable source")
         prior = history[-1] if history else None
         if prior and (scope_changed or approach_invalid or not (narrowed_cause or bool(as_list(prior.get("resolvedFindingIds"))))):
             task["previousState"] = task.get("state")
@@ -761,6 +787,25 @@ def apply_review(
         lane = str(spec.get("reviewLane") or f"{review.get('hostId') or 'native'}::{review.get('reviewerModel') or 'current-host/default'}")
         review_basis = _review_basis(spec, candidate_subject.get("headSha"))
         execution = task.setdefault("execution", {})
+        material_finding_ids = sorted({
+            str(item.get("findingId")) for item in review.get("findings") or []
+            if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}
+        })
+        chains = execution.setdefault("reviewChains", {})
+        if not isinstance(chains, dict):
+            raise ValueError("execution.reviewChains must be an object")
+        chains[lane] = {
+            "reviewerLane": lane,
+            "reviewRef": relative,
+            "digest": digest,
+            "head": candidate_subject.get("headSha"),
+            "fullBaseSha": spec.get("fullBaseSha"),
+            "planDigest": spec.get("planDigest"),
+            "validationDigest": spec.get("validationDigest"),
+            "findingIds": material_finding_ids,
+            "reviewSpec": dict(spec),
+            "forceFull": bool(spec.get("requiresFullReview")),
+        }
         active = execution.get("activeRepair") if isinstance(execution.get("activeRepair"), Mapping) else None
         repair_decision = assess_repair_progress(task, review) if status == "ChangesRequested" else "accept"
         repair_outcome: dict[str, Any] | None = None
@@ -770,12 +815,23 @@ def apply_review(
             if entry is None:
                 raise ValueError("active repair has no persisted repair history entry")
             target_ids = {str(item) for item in as_list(active.get("targetFindingIds")) if item}
+            dispositions = review.get("findingDispositions")
+            if not isinstance(dispositions, Mapping) or target_ids - {str(key) for key in dispositions}:
+                raise ValueError("review after active repair requires a disposition for every target finding")
+            if ({str(key) for key in dispositions} - target_ids):
+                raise ValueError("repair finding dispositions contain an unknown target id")
+
+            def disposition_state(value: Any) -> str:
+                if isinstance(value, Mapping):
+                    value = value.get("disposition") or value.get("status") or value.get("state")
+                return str(value or "").strip().lower()
+
             current_ids = {
                 str(item.get("findingId")) for item in review.get("findings") or []
                 if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}
             }
-            resolved = sorted(target_ids - current_ids)
-            remaining = sorted(current_ids)
+            resolved = sorted({finding_id for finding_id in target_ids if disposition_state(dispositions[finding_id]) == "resolved"})
+            remaining = sorted((target_ids - set(resolved)) | current_ids)
             entry.update({
                 "resolvedFindingIds": resolved,
                 "remainingFindingIds": remaining,

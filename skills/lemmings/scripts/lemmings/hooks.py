@@ -526,7 +526,8 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "reviewer must inspect the current candidate/fix head")
                 if subject_kind == "candidate":
                     repo_root = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve()
-                    readiness = validate_candidate_readiness(repo_root, task)
+                    task_path_value = payload.get("_taskPath") or payload.get("taskPath")
+                    readiness = validate_candidate_readiness(repo_root, task, task_path=Path(str(task_path_value)).resolve() if task_path_value else None)
                     if not readiness.ok:
                         return decision("block", readiness.findings[0].message)
                 extras = {}
@@ -698,10 +699,11 @@ def hydrate(payload: dict[str, Any]) -> dict[str, Any]:
         combined["profile"] = read_object(repo / profile_path)
     task_paths = as_list(state.get("taskPaths"))
     requested_task = str(payload.get("taskId") or (payload.get("tool_input") or {}).get("taskId") or "")
-    candidates = [read_object(repo / value) for value in task_paths]
-    matches = [task for task in candidates if str(task.get("taskId")) == requested_task] if requested_task else candidates
+    candidates = [(value, read_object(repo / value)) for value in task_paths]
+    matches = [item for item in candidates if str(item[1].get("taskId")) == requested_task] if requested_task else candidates
     if len(matches) == 1:
-        combined["task"] = matches[0]
+        combined["task"] = matches[0][1]
+        combined["_taskPath"] = str((repo / matches[0][0]).resolve())
     elif candidates:
         raise ValueError("active wave hook payload must identify one taskId")
     for name in ("phase", "review"):

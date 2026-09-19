@@ -75,6 +75,16 @@ def _clean(repo: Path, task_path: Path | None, task: Mapping[str, Any]) -> bool:
     return True
 
 
+def _live_candidate(repo: Path, task: Mapping[str, Any], task_path: Path | None, head: str) -> ValidationResult:
+    result = ValidationResult()
+    current = git(repo, "rev-parse", "--verify", "HEAD^{commit}")
+    if current.returncode or current.stdout.strip() != head:
+        result.error("candidate.live_head", "candidate readiness requires git HEAD to equal the recorded candidate head")
+    if not _clean(repo, task_path, task):
+        result.error("candidate.live_tree", "candidate readiness requires a clean tree outside the canonical Task and allowed outputs")
+    return result
+
+
 def _worker_result(task: Mapping[str, Any], invocation_id: str | None, head: str) -> Mapping[str, Any] | None:
     results = [item for item in as_list((task.get("execution") or {}).get("agentResults")) if isinstance(item, Mapping)]
     candidates = [item for item in results if item.get("status") == "succeeded" and item.get("candidateHead") == head]
@@ -110,11 +120,43 @@ def _check_passed(check: Mapping[str, Any], debt: Mapping[str, Any] | None) -> b
     return str(check.get("classification") or "executed") == "unavailable" and debt is not None
 
 
+def _next_lane_spec(task: Mapping[str, Any], readiness: Mapping[str, Any], head: str, lane: str, chain: Mapping[str, Any]) -> dict[str, Any]:
+    previous = chain.get("reviewSpec") if isinstance(chain.get("reviewSpec"), Mapping) else {}
+    history = ((task.get("execution") or {}).get("repairHistory") if isinstance(task.get("execution"), Mapping) else []) or []
+    scope_changed = bool(history and isinstance(history[-1], Mapping) and (history[-1].get("scopeChanged") or history[-1].get("approachInvalid")))
+    contract_changed = (
+        previous.get("fullBaseSha") not in (None, task.get("baseSha"))
+        or previous.get("planDigest") not in (None, plan_digest(task))
+        or previous.get("validationDigest") not in (None, validation_digest(task))
+    )
+    fresh = bool(chain.get("forceFull") or scope_changed or contract_changed)
+    spec = dict(previous)
+    spec.update({
+        "fullBaseSha": task.get("baseSha"),
+        "candidateHead": head,
+        "readinessDigest": readiness.get("digest"),
+        "planDigest": plan_digest(task),
+        "validationDigest": validation_digest(task),
+        "reviewLane": lane,
+    })
+    for key in ("invocationId", "invocationBasis", "invocationDigest"):
+        spec.pop(key, None)
+    if fresh:
+        spec.update({"mode": "full", "previousReviewRef": None, "previousReviewDigest": None, "previousHead": None,
+                     "findingIds": [], "inspectionRange": None})
+    else:
+        spec.update({"mode": "delta", "previousReviewRef": chain.get("reviewRef"), "previousReviewDigest": chain.get("digest"),
+                     "previousHead": chain.get("head"), "findingIds": list(chain.get("findingIds") or []),
+                     "inspectionRange": {"from": chain.get("head"), "to": head}})
+    return spec
+
+
 def validate_candidate_readiness(
     repo: Path,
     task: Mapping[str, Any],
     *,
     candidate_head_value: str | None = None,
+    task_path: Path | None = None,
     require: bool = True,
 ) -> ValidationResult:
     """Validate readiness stored on a Task against the current candidate.
@@ -134,6 +176,7 @@ def validate_candidate_readiness(
     if not head:
         result.error("candidate.readiness_head", "candidate readiness requires a candidate head")
         return result
+    result.extend(_live_candidate(repo, task, task_path, head))
     if readiness.get("status") != "passed":
         result.error("candidate.readiness_status", "candidate readiness checks did not pass")
     if readiness.get("candidateHead") != head:
@@ -216,12 +259,15 @@ def prepare_candidate(
         head = str(expected_head or candidate_head(task) or "")
         if not head:
             raise ValueError("candidate prepare requires candidateHead")
+        live = _live_candidate(repo, task, task_path, head)
+        if not live.ok:
+            raise ValueError(live.findings[0].message)
         resolved = git(repo, "rev-parse", "--verify", f"{head}^{{commit}}")
         if resolved.returncode:
             raise ValueError("candidateHead does not resolve to a commit")
         existing = ((task.get("execution") or {}).get("candidateReadiness"))
         if isinstance(existing, Mapping) and existing.get("candidateHead") == head and existing.get("planDigest") == plan_digest(task) and existing.get("validationDigest") == validation_digest(task):
-            checked = validate_candidate_readiness(repo, task)
+            checked = validate_candidate_readiness(repo, task, task_path=task_path)
             if checked.ok:
                 return {"ok": True, "taskId": task.get("taskId"), "revision": expected_revision, "candidateReadiness": dict(existing), "reused": True}
         ownership = validate_repository_ownership(repo, task)
@@ -259,9 +305,11 @@ def prepare_candidate(
             except OSError as error:
                 checks.append({"command": command, "headSha": head, "passed": False, "classification": "unavailable", "errorType": type(error).__name__})
         clean_after = _clean(repo, task_path, task)
+        live_after = git(repo, "rev-parse", "--verify", "HEAD^{commit}")
+        live_head_after = not live_after.returncode and live_after.stdout.strip() == head
         readiness: dict[str, Any] = {
             "version": 1,
-            "status": "passed" if clean_before and clean_after and all(
+            "status": "passed" if clean_before and clean_after and live_head_after and all(
                 _check_passed(item, _debt_for(supplied_debt, str(item.get("command") or ""), head))
                 for item in checks
             ) else "failed",
@@ -278,6 +326,15 @@ def prepare_candidate(
         }
         readiness["digest"] = readiness_digest(readiness)
         task.setdefault("execution", {})["candidateReadiness"] = readiness
+        chains = task.setdefault("execution", {}).get("reviewChains")
+        if isinstance(chains, Mapping):
+            refreshed_chains: dict[str, Any] = {}
+            for lane, chain in chains.items():
+                if isinstance(chain, Mapping):
+                    refreshed = dict(chain)
+                    refreshed["reviewSpec"] = _next_lane_spec(task, readiness, head, str(lane), chain)
+                    refreshed_chains[str(lane)] = refreshed
+            task["execution"]["reviewChains"] = refreshed_chains
         current_spec = task.get("reviewSpec")
         if isinstance(current_spec, Mapping):
             # Preserve an immutable delta predecessor while rebinding its next
@@ -294,7 +351,7 @@ def prepare_candidate(
             task["reviewSpec"] = refreshed
         task["revision"] = expected_revision + 1
         write_object(task_path, task)
-        checked = validate_candidate_readiness(repo, task)
+        checked = validate_candidate_readiness(repo, task, task_path=task_path)
         if not checked.ok:
             return {"ok": False, "taskId": task.get("taskId"), "revision": task["revision"], "candidateReadiness": readiness,
                     "findings": [item.as_dict() for item in checked.findings]}

@@ -471,7 +471,7 @@ def command_run(args: argparse.Namespace) -> int:
     invocation = find_invocation(task, args.invocation_id)
     if not invocation or invocation.get("taskRevision") != task.get("revision"):
         raise ValueError("run requires a current saved invocation")
-    validate_dispatch(repo, task, load_profile(repo, args.profile), invocation)
+    validate_dispatch(repo, task, load_profile(repo, args.profile), invocation, task_path=resolve_path(repo, args.task))
     if invocation["role"] == "worker":
         workspace = task.get("workspace") or {}
         if workspace.get("destination") and Path(workspace["destination"]).resolve() != repo:
@@ -716,10 +716,14 @@ def command_repair(args: argparse.Namespace) -> int:
     task_path = resolve_path(repo, args.task)
     if task_path is None or not task_path.is_file():
         raise ValueError("repair start requires an existing Task")
-    review = read_object(resolve_path(repo, args.review)) if args.review else None
+    review_path = resolve_path(repo, args.review) if args.review else None
+    review_ref = review_path.resolve().relative_to(repo).as_posix() if review_path else None
+    review = read_object(review_path) if review_path else None
+    if isinstance(review, dict) and review_ref:
+        review["_evidencePath"] = review_ref
     readiness = read_object(resolve_path(repo, args.readiness_failure)) if args.readiness_failure else None
     output = start_repair(task_path, expected_revision=args.expected_revision, progress=args.progress, plan=args.plan,
-                          review=review, review_ref=args.review, readiness_failure=readiness,
+                          review=review, review_ref=review_ref, readiness_failure=readiness,
                           target_finding_ids=args.finding_id, narrowed_cause=args.narrowed_cause,
                           scope_changed=args.scope_changed, approach_invalid=args.approach_invalid)
     emit(output)

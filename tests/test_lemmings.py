@@ -200,28 +200,37 @@ class HookPolicyTests(unittest.TestCase):
                 self.assertEqual("block", result["decision"])
 
     def test_cross_review_uses_distinct_models_across_hosts_and_degrades_openly(self):
-        value = task(state="Candidate")
-        value.update({"previousState": "Active", "baseSha": "base", "reviewPolicy": "cross"})
-        value["commits"]["candidate"] = "head"
-        value["models"]["actual"] = value["models"]["assigned"]
-        value["execution"]["validationEvidence"] = ["ok"]
-        ready_candidate(value)
-        configured = profile()
-        configured["modelRoutes"]["opencode"] = {
-            "worker": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "max"}],
-            "reviewer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-sol", "variantId": "high"}],
-            "explorer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "high"}],
-        }
-        value["execution"]["invocations"].append(derive_context_packet(value, None, "reviewer", {"profile": configured}))
-        cross = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": configured, "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
-        self.assertEqual("allow", cross["decision"])
-        self.assertNotIn("capabilityDegradation", cross)
-        single_profile = profile()
-        single_value = json.loads(json.dumps(value))
-        single_value["execution"]["invocations"] = [item for item in single_value["execution"]["invocations"] if item.get("role") == "worker"]
-        single_value["execution"]["invocations"].append(derive_context_packet(single_value, None, "reviewer", {"profile": single_profile}))
-        single = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": single_value, "profile": single_profile, "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
-        self.assertEqual("cross-review-unavailable", single.get("capabilityDegradation"))
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp); init_repo(repo)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "tests@example.invalid"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Lemmings Tests"], check=True, capture_output=True)
+            (repo / "tracked.txt").write_text("base\n", encoding="utf-8"); subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True, capture_output=True); subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True, capture_output=True)
+            base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            (repo / "tracked.txt").write_text("candidate\n", encoding="utf-8"); subprocess.run(["git", "-C", str(repo), "commit", "-qam", "candidate"], check=True, capture_output=True)
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            value = task(state="Candidate")
+            value.update({"previousState": "Active", "baseSha": base, "reviewPolicy": "cross"})
+            value["commits"]["candidate"] = head
+            value["models"]["actual"] = value["models"]["assigned"]
+            value["execution"]["validationEvidence"] = ["ok"]
+            ready_candidate(value)
+            configured = profile()
+            configured["modelRoutes"]["opencode"] = {
+                "worker": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "max"}],
+                "reviewer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-sol", "variantId": "high"}],
+                "explorer": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "high"}],
+            }
+            value["execution"]["invocations"].append(derive_context_packet(value, None, "reviewer", {"profile": configured}))
+            payload = {"event": "PreToolUse", "tool_name": "spawn_agent", "task": value, "profile": configured, "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": head, "_repoRoot": str(repo)}
+            cross = handle(payload)
+            self.assertEqual("allow", cross["decision"])
+            self.assertNotIn("capabilityDegradation", cross)
+            single_profile = profile()
+            single_value = json.loads(json.dumps(value))
+            single_value["execution"]["invocations"] = [item for item in single_value["execution"]["invocations"] if item.get("role") == "worker"]
+            single_value["execution"]["invocations"].append(derive_context_packet(single_value, None, "reviewer", {"profile": single_profile}))
+            single = handle({**payload, "task": single_value, "profile": single_profile, "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high"})
+            self.assertEqual("cross-review-unavailable", single.get("capabilityDegradation"))
 
     def test_candidate_no_longer_requires_handoff(self):
         value = task(state="Candidate")

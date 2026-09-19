@@ -1078,6 +1078,8 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         for name in ("repairHistory", "reviewApplications"):
             if execution.get(name) is not None and not isinstance(execution.get(name), list):
                 result.error("task.execution", f"execution.{name} must be an array")
+        if execution.get("reviewChains") is not None and not isinstance(execution.get("reviewChains"), Mapping):
+            result.error("task.execution", "execution.reviewChains must be an object")
         readiness = execution.get("candidateReadiness")
         if readiness is not None:
             if not isinstance(readiness, Mapping):
@@ -1389,6 +1391,34 @@ def review_digest(value: Mapping[str, Any]) -> str:
     }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
+def _review_basis_digest(spec: Mapping[str, Any], head: Any) -> str:
+    body = {
+        "candidateHead": head,
+        "mode": spec.get("mode", "full"),
+        "fullBaseSha": spec.get("fullBaseSha"),
+        "readinessDigest": spec.get("readinessDigest"),
+        "planDigest": spec.get("planDigest"),
+        "validationDigest": spec.get("validationDigest"),
+        "previousReviewRef": spec.get("previousReviewRef"),
+        "previousReviewDigest": spec.get("previousReviewDigest"),
+        "previousHead": spec.get("previousHead"),
+        "findingIds": spec.get("findingIds") or [],
+    }
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _invocation_binding_digest(invocation: Mapping[str, Any]) -> str:
+    material = dict(invocation)
+    spec = material.get("reviewSpec")
+    if isinstance(spec, Mapping):
+        bound = dict(spec)
+        for key in ("invocationId", "invocationBasis", "invocationDigest"):
+            bound.pop(key, None)
+        material["reviewSpec"] = bound
+    material.pop("contextDigest", None)
+    return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def validate_review(
     review: Mapping[str, Any],
     task: Mapping[str, Any] | None = None,
@@ -1464,6 +1494,31 @@ def validate_review(
             result.error("review.spec_identity", "reviewSpec.reviewLane must match the actual hostId and reviewerModel")
         subject_value = review.get("subject") if isinstance(review.get("subject"), Mapping) else {}
         if subject_value.get("kind") == "candidate" and task:
+            execution = task.get("execution") if isinstance(task.get("execution"), Mapping) else {}
+            host_v1 = [item for item in as_list(execution.get("invocations"))
+                       if isinstance(item, Mapping) and item.get("role") == "reviewer"
+                       and item.get("reviewSubjectKind", "candidate") == "candidate"
+                       and item.get("usageAccounting") == "host-v1"]
+            binding_fields = ("invocationId", "invocationBasis", "invocationDigest")
+            if host_v1:
+                missing = [field_name for field_name in binding_fields if not spec.get(field_name)]
+                if missing:
+                    result.error("review.invocation_binding", "host-v1 candidate reviewSpec must bind invocationId, invocationBasis, and invocationDigest")
+                else:
+                    stored = next((item for item in host_v1 if item.get("invocationId") == spec.get("invocationId")), None)
+                    if stored is None:
+                        result.error("review.invocation_binding", "reviewSpec.invocationId does not reference a stored reviewer invocation")
+                    else:
+                        stored_spec = stored.get("reviewSpec") if isinstance(stored.get("reviewSpec"), Mapping) else {}
+                        for field_name in ("mode", "fullBaseSha", "candidateHead", "readinessDigest", "planDigest", "validationDigest",
+                                            "previousReviewRef", "previousReviewDigest", "previousHead", "findingIds", "inspectionRange",
+                                            "reviewLane", "reviewerHost", "reviewerModel"):
+                            if spec.get(field_name) != stored_spec.get(field_name):
+                                result.error("review.invocation_binding", f"reviewSpec.{field_name} differs from the stored reviewer invocation")
+                        if spec.get("invocationBasis") != _review_basis_digest(stored_spec, stored.get("candidateHead")):
+                            result.error("review.invocation_binding", "reviewSpec.invocationBasis is stale or mutated")
+                        if spec.get("invocationDigest") != _invocation_binding_digest(stored):
+                            result.error("review.invocation_binding", "reviewSpec.invocationDigest is stale or mutated")
             current_head = candidate_head(task)
             current_readiness = ((task.get("execution") or {}).get("candidateReadiness") if isinstance(task.get("execution"), Mapping) else None)
             readiness_value = current_readiness.get("digest") if isinstance(current_readiness, Mapping) else None
@@ -1507,6 +1562,8 @@ def validate_review(
                         result.error("review.full_required", "delta predecessor belongs to another reviewer lane; a full review is required")
                     if previous_spec.get("fullBaseSha") and previous_spec.get("fullBaseSha") != spec.get("fullBaseSha"):
                         result.error("review.full_required", "delta predecessor base differs; a full review is required")
+                    if previous_spec.get("planDigest") and spec.get("planDigest") and previous_spec.get("planDigest") != spec.get("planDigest"):
+                        result.error("review.full_required", "delta predecessor plan changed; a full review is required")
                     if previous_spec.get("validationDigest") and spec.get("validationDigest") and previous_spec.get("validationDigest") != spec.get("validationDigest"):
                         result.error("review.full_required", "delta validation contract changed; a full review is required")
                     previous_ids = {
