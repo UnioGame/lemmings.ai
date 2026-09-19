@@ -1582,6 +1582,16 @@ def validate_review(
                     }
                     if previous_ids and (not isinstance(dispositions, Mapping) or previous_ids - set(dispositions)):
                         result.error("review.delta_dispositions", "every prior material finding requires a disposition")
+                    if isinstance(dispositions, Mapping):
+                        def disposition_state(value: Any) -> str:
+                            if isinstance(value, Mapping):
+                                value = value.get("disposition") or value.get("status") or value.get("state")
+                            return str(value or "").strip().lower()
+                        disposition_states = {finding_id: disposition_state(dispositions.get(finding_id)) for finding_id in previous_ids}
+                        if any(value not in {"resolved", "remaining", "regressed"} for value in disposition_states.values()):
+                            result.error("review.delta_dispositions", "material finding dispositions must be resolved, remaining, or regressed")
+                        if review.get("status") == "Accepted" and any(value != "resolved" for value in disposition_states.values()):
+                            result.error("review.delta_unresolved", "Accepted delta review cannot leave a material predecessor finding unresolved")
                     new_ids = {
                         str(item.get("findingId")) for item in review.get("findings") or []
                         if isinstance(item, Mapping) and item.get("findingId")

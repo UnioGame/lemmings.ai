@@ -211,6 +211,18 @@ class RepairAndReviewChainTests(unittest.TestCase):
         self.assertTrue(validate_review(delta, task).ok, validate_review(delta, task).as_dict())
         missing_disposition = {**delta, "findingDispositions": {}}
         self.assertIn("review.delta_dispositions", {item.code for item in validate_review(missing_disposition, task).findings})
+        unresolved_accepted = {**delta, "findingDispositions": {"F1": "remaining"}}
+        self.assertIn("review.delta_unresolved", {item.code for item in validate_review(unresolved_accepted, task).findings})
+
+        carried = {**review, "reviewId": "R-carried", "findings": [], "reviewSpec": {"findingIds": ["F1", "F2"]},
+                   "findingDispositions": {"F1": "remaining", "F2": "resolved"}, "_evidencePath": "carried.json"}
+        carried_task = template(); carried_task.update({"state": "Candidate", "baseSha": "base"}); carried_task["commits"]["candidate"] = "head"; carried_task["budget"] = new_task_budget(profile())
+        carried_task["execution"]["reviewApplications"] = [{"reviewRef": "carried.json", "digest": review_digest(carried), "status": "ChangesRequested"}]
+        with tempfile.TemporaryDirectory() as temp:
+            packet = Path(temp) / "task.json"; packet.write_text(json.dumps(carried_task), encoding="utf-8")
+            carried_repair = start_repair(packet, expected_revision=0, progress="carry F1", plan="fix F1",
+                                           review=carried, review_ref="carried.json", target_finding_ids=["F1"])
+            self.assertTrue(carried_repair["ok"])
 
     def test_apply_review_closes_repair_and_rejects_forged_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
