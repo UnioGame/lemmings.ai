@@ -17,18 +17,23 @@ from .contracts import (
     DEFAULT_INVOCATION_LIMITS,
     SCHEMA_VERSION,
     as_list,
+    canonical_evidence_path,
     candidate_head,
     current_recovery_route,
     git,
     path_matches,
     plan_digest,
     read_object,
+    review_digest,
     route_name,
+    assess_repair_progress,
+    validate_review,
     validate_agent_result,
     validate_budget_ledger,
     validate_invocation,
     write_object,
 )
+from .readiness import readiness_digest, validate_candidate_readiness, validation_digest
 
 
 def stable_digest(value: Mapping[str, Any]) -> str:
@@ -41,6 +46,83 @@ def profile_digest(profile: Mapping[str, Any]) -> str:
 
 def invocation_digest(invocation: Mapping[str, Any]) -> str:
     return stable_digest({key: value for key, value in invocation.items() if key != "contextDigest"})
+
+
+def _review_lane(
+    task: Mapping[str, Any],
+    profile: Mapping[str, Any] | None = None,
+    *,
+    explicit: str | None = None,
+    invocation: Mapping[str, Any] | None = None,
+) -> str:
+    """Return the immutable reviewer host/model lane identity."""
+    if explicit:
+        return str(explicit)
+    if invocation and invocation.get("reviewLane"):
+        return str(invocation["reviewLane"])
+    effective = task.get("effectiveConfig") if isinstance(task.get("effectiveConfig"), Mapping) else None
+    route = None
+    if effective:
+        route = next(iter((effective.get("profile") or {}).get("roleRoutes", {}).get("reviewer", []) or []), None)
+    if route is None and isinstance(profile, Mapping):
+        route = next(iter((profile.get("roleRoutes") or {}).get("reviewer", []) or []), None)
+    models = task.get("models") if isinstance(task.get("models"), Mapping) else {}
+    host = (invocation or {}).get("assignedHost") or (route or {}).get("hostId") or models.get("hostId") or "native"
+    model = (invocation or {}).get("assignedModel") or (route_name(route) if route else None)
+    model = model or models.get("assigned") or "current-host/default"
+    return f"{host}::{model}"
+
+
+def _candidate_review_spec(task: Mapping[str, Any], lane: str, invocation: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    readiness = ((task.get("execution") or {}).get("candidateReadiness") if isinstance(task.get("execution"), Mapping) else None)
+    if "::" in lane:
+        host, model = lane.split("::", 1)
+    else:
+        host, model = None, lane
+    spec: dict[str, Any] = {
+        "mode": "full",
+        "fullBaseSha": task.get("baseSha"),
+        "candidateHead": candidate_head(task),
+        "readinessDigest": readiness.get("digest") if isinstance(readiness, Mapping) else None,
+        "planDigest": plan_digest(task),
+        "validationDigest": validation_digest(task),
+        "previousReviewRef": None,
+        "previousReviewDigest": None,
+        "previousHead": None,
+        "findingIds": [],
+        "reviewLane": lane,
+        "reviewerHost": host,
+        "reviewerModel": model,
+    }
+    current = task.get("reviewSpec")
+    if isinstance(current, Mapping) and (not current.get("reviewLane") or current.get("reviewLane") == lane):
+        spec.update(dict(current))
+        spec.update({
+            "fullBaseSha": task.get("baseSha"),
+            "candidateHead": candidate_head(task),
+            "readinessDigest": readiness.get("digest") if isinstance(readiness, Mapping) else None,
+            "planDigest": plan_digest(task),
+            "validationDigest": validation_digest(task),
+            "reviewLane": lane,
+            "reviewerHost": host,
+            "reviewerModel": model,
+        })
+    return spec
+
+
+def _review_basis(spec: Mapping[str, Any], head: str | None) -> str:
+    return stable_digest({
+        "candidateHead": head,
+        "mode": spec.get("mode", "full"),
+        "fullBaseSha": spec.get("fullBaseSha"),
+        "readinessDigest": spec.get("readinessDigest"),
+        "planDigest": spec.get("planDigest"),
+        "validationDigest": spec.get("validationDigest"),
+        "previousReviewRef": spec.get("previousReviewRef"),
+        "previousReviewDigest": spec.get("previousReviewDigest"),
+        "previousHead": spec.get("previousHead"),
+        "findingIds": spec.get("findingIds") or [],
+    })
 
 
 def reference_hash(repo: Path, entry: Mapping[str, Any]) -> str:
@@ -67,6 +149,11 @@ def build_invocation(
     attempt: int,
     objective: str | None = None,
     invocation_id: str | None = None,
+    subject_kind: str | None = None,
+    dispatch_kind: str | None = None,
+    retry_of: str | None = None,
+    repair_cycle: int | None = None,
+    review_lane: str | None = None,
 ) -> dict[str, Any]:
     references = [
         {"ref": entry.get("ref"), "purpose": entry.get("purpose"), "contentHash": reference_hash(repo, entry)}
@@ -84,6 +171,8 @@ def build_invocation(
     ownership = task.get("ownership") if isinstance(task.get("ownership"), Mapping) else {}
     validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
     seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
+    kind = dispatch_kind or ("review" if role == "reviewer" else "repair" if task.get("state") == "Repair" else "initial")
+    review_kind = subject_kind or ("candidate" if task.get("state") == "Candidate" else "plan" if role == "reviewer" else None)
     invocation = {
         "schemaVersion": SCHEMA_VERSION,
         "runId": str(task.get("runId") or task.get("taskId")),
@@ -103,9 +192,32 @@ def build_invocation(
         "contextRefs": references,
         "validationCommands": as_list(validation.get("commands")),
         "candidateHead": candidate_head(task) if role == "reviewer" else None,
+        "usageAccounting": "host-v1",
+        "dispatchKind": kind,
+        "retryOf": retry_of,
+        "repairCycle": repair_cycle,
+        "reviewSubjectKind": review_kind,
+        "reviewLane": review_lane if role == "reviewer" and review_kind == "candidate" else None,
         "limits": dict(DEFAULT_INVOCATION_LIMITS.get(role) or {}),
         "outputSchemaVersion": SCHEMA_VERSION,
     }
+    if role == "reviewer" and review_kind == "candidate":
+        readiness = ((task.get("execution") or {}).get("candidateReadiness") if isinstance(task.get("execution"), Mapping) else None)
+        invocation["reviewSpec"] = {
+            "mode": "full",
+            "fullBaseSha": task.get("baseSha"),
+            "candidateHead": candidate_head(task),
+            "readinessDigest": readiness.get("digest") if isinstance(readiness, Mapping) else None,
+            "planDigest": plan_digest(task),
+            "validationDigest": validation_digest(task),
+            "previousReviewRef": None,
+            "previousReviewDigest": None,
+            "previousHead": None,
+            "findingIds": [],
+        }
+        current_spec = task.get("reviewSpec")
+        if isinstance(current_spec, Mapping):
+            invocation["reviewSpec"] = dict(current_spec)
     task_budget_frozen = isinstance(task.get("budget"), Mapping)
     invocation_budget = task.get("budget") if task_budget_frozen else new_task_budget(profile)
     if task_budget_frozen:
@@ -128,6 +240,10 @@ def build_invocation(
             invocation["roleRoutes"] = task["routingRecovery"]["roleRoutes"][role]
             invocation["assignedModel"] = route_name(recovered)
             invocation["assignedHost"] = recovered["hostId"]
+    if role == "reviewer" and review_kind == "candidate":
+        lane = _review_lane(task, profile, explicit=review_lane, invocation=invocation)
+        invocation["reviewLane"] = lane
+        invocation["reviewSpec"] = _candidate_review_spec(task, lane, invocation)
     invocation["contextDigest"] = invocation_digest(invocation)
     context_policy = invocation_budget["policy"]["context"]
     approved = {}
@@ -174,6 +290,14 @@ def validate_dispatch(repo: Path, task: Mapping[str, Any], profile: Mapping[str,
     for ref in invocation.get("contextRefs", []):
         if reference_hash(repo, ref) != ref.get("contentHash"):
             raise ValueError("saved invocation context file changed; create a fresh invocation")
+    if invocation.get("role") == "reviewer" and invocation.get("reviewSubjectKind", "candidate") == "candidate":
+        readiness = validate_candidate_readiness(repo, task)
+        if not readiness.ok:
+            raise ValueError(readiness.findings[0].message)
+    if invocation.get("role") == "worker" and task.get("state") == "Repair":
+        active = ((task.get("execution") or {}).get("activeRepair") if isinstance(task.get("execution"), Mapping) else None)
+        if invocation.get("dispatchKind") != "repair" or not isinstance(active, Mapping) or invocation.get("repairCycle") != active.get("cycle"):
+            raise ValueError("Repair worker dispatch requires an authorized open repair cycle")
 
 
 def find_invocation(task: Mapping[str, Any], invocation_id: str) -> Mapping[str, Any] | None:
@@ -213,6 +337,9 @@ def record_invocation(
     expected_revision: int,
     objective: str | None = None,
     *, preset: str | None = None, freeze: bool = False,
+    subject_kind: str | None = None, dispatch_kind: str | None = None,
+    retry_of: str | None = None, repair_cycle: int | None = None,
+    review_lane: str | None = None,
 ) -> dict[str, Any]:
     with task_lock(task_path):
         task = read_object(task_path)
@@ -232,6 +359,45 @@ def record_invocation(
                 # Execute the first already-ordered user selection; never rank alternatives.
                 models.update(assigned=route_name(chain[0]), hostId=chain[0]["hostId"])
                 task["models"] = models
+        resolved_subject = subject_kind or ("candidate" if role == "reviewer" and task.get("state") == "Candidate" else "plan" if role == "reviewer" else None)
+        resolved_kind = dispatch_kind or ("review" if role == "reviewer" else "repair" if task.get("state") == "Repair" else "initial")
+        resolved_lane = _review_lane(task, profile, explicit=review_lane) if role == "reviewer" and resolved_subject == "candidate" else None
+        if role == "reviewer" and resolved_subject == "candidate":
+            readiness = validate_candidate_readiness(repo, task)
+            if not readiness.ok:
+                raise ValueError(readiness.findings[0].message)
+            current_head = candidate_head(task)
+            current_spec = _candidate_review_spec(task, resolved_lane or _review_lane(task, profile))
+            current_basis = _review_basis(current_spec, current_head)
+            for prior in as_list((task.get("execution") or {}).get("invocations")):
+                if not isinstance(prior, Mapping) or prior.get("role") != "reviewer":
+                    continue
+                if prior.get("reviewSubjectKind", "candidate") != "candidate":
+                    continue
+                prior_spec = prior.get("reviewSpec") if isinstance(prior.get("reviewSpec"), Mapping) else {}
+                prior_lane = prior.get("reviewLane") or prior_spec.get("reviewLane")
+                if not prior_lane:
+                    prior_lane = f"{prior.get('assignedHost') or 'native'}::{prior.get('assignedModel') or 'current-host/default'}"
+                same_subject = prior.get("candidateHead") == current_head
+                same_lane = prior_lane == (resolved_lane or _review_lane(task, profile))
+                same_basis = (_review_basis(prior_spec, current_head) == current_basis
+                              if prior_spec else prior.get("reviewSpec", {}).get("mode", "full") == current_spec.get("mode", "full"))
+                if same_subject and same_lane and same_basis:
+                    raise ValueError("reviewer subject is already dispatched; create a new candidate or review basis")
+        if role == "worker" and task.get("state") == "Repair":
+            active = ((task.get("execution") or {}).get("activeRepair") if isinstance(task.get("execution"), Mapping) else None)
+            if resolved_kind != "repair" or not isinstance(active, Mapping):
+                raise ValueError("Repair worker dispatch requires an authorized open repair cycle")
+            resolved_cycle = repair_cycle or active.get("cycle")
+            if resolved_cycle != active.get("cycle"):
+                raise ValueError("repair cycle does not match the active repair")
+            for prior in as_list((task.get("execution") or {}).get("invocations")):
+                if not isinstance(prior, Mapping) or prior.get("dispatchKind") != "repair" or prior.get("repairCycle") != resolved_cycle:
+                    continue
+                settled = any(isinstance(item, Mapping) and item.get("invocationId") == prior.get("invocationId") for item in as_list((task.get("execution") or {}).get("agentResults")))
+                settled = settled or any(isinstance(item, Mapping) and item.get("invocationId") == prior.get("invocationId") for item in as_list((task.get("execution") or {}).get("routeFailures")))
+                if not settled:
+                    raise ValueError("one worker dispatch is already open for this repair cycle")
         task["revision"] = expected_revision + 1
         if not task.get("budget"):
             task["budget"] = new_task_budget(profile)
@@ -242,7 +408,10 @@ def record_invocation(
             task["budget"]["stop"] = {"reason": "tool-call budget exhausted", "role": role, "invocationId": invocation_id}
             write_object(task_path, task)
             raise ValueError("tool-call budget exhausted; Task stop reason was recorded")
-        invocation = build_invocation(repo, task, profile, role, attempt=attempt, objective=objective, invocation_id=invocation_id)
+        invocation = build_invocation(repo, task, profile, role, attempt=attempt, objective=objective, invocation_id=invocation_id,
+                                      subject_kind=resolved_subject, dispatch_kind=resolved_kind,
+                                      retry_of=retry_of, repair_cycle=repair_cycle or (active.get("cycle") if role == "worker" and task.get("state") == "Repair" and isinstance((task.get("execution") or {}).get("activeRepair"), Mapping) else None),
+                                      review_lane=resolved_lane)
         task.setdefault("execution", {}).setdefault("invocations", []).append(invocation)
         write_object(task_path, task)
         return invocation
@@ -297,12 +466,34 @@ def result_findings(repo: Path, task: Mapping[str, Any], profile: Mapping[str, A
     return checked
 
 
+def _host_usage_receipt(task: Mapping[str, Any], invocation: Mapping[str, Any], receipt: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """Accept only a host/runner receipt bound to this invocation and grant."""
+    if not isinstance(receipt, Mapping) or receipt.get("trusted") is not True:
+        return None
+    if receipt.get("source") not in {"host-v1", "host", "runner"}:
+        return None
+    if receipt.get("invocationId") != invocation.get("invocationId"):
+        return None
+    reservations = [item for item in ((task.get("budget") or {}).get("reservations") or [])
+                    if isinstance(item, Mapping) and item.get("invocationId") == invocation.get("invocationId")]
+    if len(reservations) != 1:
+        return None
+    grant = reservations[0].get("amount")
+    receipt_grant = receipt.get("grant", receipt.get("grantAmount"))
+    calls = receipt.get("toolCalls")
+    if receipt_grant != grant or not isinstance(calls, int) or isinstance(calls, bool) or calls < 0 or calls > int(grant):
+        return None
+    return {"trusted": True, "toolCalls": calls}
+
+
 def accept_result(
     repo: Path,
     task_path: Path,
     profile: Mapping[str, Any],
     result_value: Mapping[str, Any],
     expected_revision: int,
+    trusted_usage: Mapping[str, Any] | None = None,
+    usage_receipt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     with task_lock(task_path):
         task = read_object(task_path)
@@ -312,9 +503,23 @@ def accept_result(
         checked = result_findings(repo, task, profile, result_value)
         if not checked.ok:
             raise ValueError(checked.findings[0].message)
+        invocation = find_invocation(task, str(result_value.get("invocationId") or ""))
+        stored_result = dict(result_value)
+        accounting = invocation.get("usageAccounting") if isinstance(invocation, Mapping) else None
         if task.get("budget"):
-            settle_tool_calls(task["budget"], str(result_value.get("invocationId")), result_value.get("usage"))
-        task.setdefault("execution", {}).setdefault("agentResults", []).append(dict(result_value))
+            receipt = trusted_usage if trusted_usage is not None else usage_receipt
+            if accounting == "host-v1":
+                accepted_usage = _host_usage_receipt(task, invocation, receipt)
+                consumed = settle_tool_calls(task["budget"], str(result_value.get("invocationId")), accepted_usage)
+                # Never persist model-authored usage as an authority.  The
+                # normalized ledger entry is the only usage attached to the
+                # accepted result.
+                stored_result.pop("usage", None)
+                stored_result["usage"] = {"trusted": bool(accepted_usage), "toolCalls": consumed, "source": "host-v1", "invocationId": invocation.get("invocationId")}
+            else:
+                consumed = settle_tool_calls(task["budget"], str(result_value.get("invocationId")), result_value.get("usage"))
+                stored_result["usage"] = {"trusted": bool(isinstance(result_value.get("usage"), Mapping) and result_value.get("usage", {}).get("trusted") is True), "toolCalls": consumed}
+        task.setdefault("execution", {}).setdefault("agentResults", []).append(stored_result)
         task["revision"] = expected_revision + 1
         write_object(task_path, task)
         return {"ok": True, "taskId": task.get("taskId"), "revision": task["revision"], "invocationId": result_value.get("invocationId")}
@@ -323,6 +528,7 @@ def accept_result(
 def record_route_failure(
     task_path: Path, *, failure_value: Mapping[str, Any], expected_revision: int,
     usage: Mapping[str, Any] | None = None,
+    host_receipt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a normalized RouteFailure and settle its outstanding grant atomically."""
     with task_lock(task_path):
@@ -343,12 +549,17 @@ def record_route_failure(
         failures = task.setdefault("execution", {}).setdefault("routeFailures", [])
         if any(isinstance(item, Mapping) and item.get("invocationId") == invocation_id for item in failures):
             raise ValueError("RouteFailure invocationId was already settled")
-        consumed = settle_tool_calls(task["budget"], invocation_id, usage)
+        if invocation.get("usageAccounting") == "host-v1":
+            accepted_usage = _host_usage_receipt(task, invocation, host_receipt)
+        else:
+            accepted_usage = usage
+        consumed = settle_tool_calls(task["budget"], invocation_id, accepted_usage)
         failures.append({
             **normalized,
             "usage": {
-                "trusted": bool(isinstance(usage, Mapping) and usage.get("trusted") is True),
+                "trusted": bool(isinstance(accepted_usage, Mapping) and accepted_usage.get("trusted") is True),
                 "toolCalls": consumed,
+                **({"source": "host-v1", "invocationId": invocation_id} if invocation.get("usageAccounting") == "host-v1" else {}),
             },
         })
         task["revision"] = expected_revision + 1
@@ -397,3 +608,225 @@ def extend_task_budget(
         task["revision"] = expected_revision + 1
         write_object(task_path, task)
         return {"ok": True, "taskId": task.get("taskId"), "revision": task["revision"], "extension": entry}
+
+
+def start_repair(
+    task_path: Path,
+    *,
+    expected_revision: int,
+    progress: str,
+    plan: str,
+    review: Mapping[str, Any] | None = None,
+    review_ref: str | None = None,
+    readiness_failure: Mapping[str, Any] | None = None,
+    target_finding_ids: list[str] | None = None,
+    narrowed_cause: bool = False,
+    scope_changed: bool = False,
+    approach_invalid: bool = False,
+) -> dict[str, Any]:
+    """Atomically authorize one semantic repair cycle or require replanning."""
+    if not progress.strip() or not plan.strip():
+        raise ValueError("repair start requires concrete progress and plan")
+    with task_lock(task_path):
+        task = read_object(task_path)
+        if task.get("revision") != expected_revision:
+            raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        history = task.setdefault("execution", {}).setdefault("repairHistory", [])
+        if not isinstance(history, list):
+            raise ValueError("execution.repairHistory must be an array")
+        budget = task.get("budget")
+        if not isinstance(budget, Mapping):
+            raise ValueError("repair start requires a frozen Task budget")
+        maximum = int(((budget.get("policy") or {}).get("maxRepairs", 3)))
+        if len(history) >= maximum:
+            task["previousState"] = task.get("state")
+            task["state"] = "Replan Required"
+            task["revision"] = expected_revision + 1
+            task.setdefault("execution", {})["repairDecision"] = {"status": "replan", "reason": "repair ceiling exhausted"}
+            write_object(task_path, task)
+            return {"ok": False, "status": "replan", "taskId": task.get("taskId"), "revision": task["revision"]}
+        if review is not None:
+            if review.get("status") != "ChangesRequested":
+                raise ValueError("repair start requires a ChangesRequested immutable review")
+            findings = [item for item in review.get("findings") or [] if isinstance(item, Mapping)]
+            source_ids = [str(item.get("findingId")) for item in findings if item.get("findingId")]
+            source_digest = review_digest(review)
+            source_head = (review.get("subject") or {}).get("headSha") if isinstance(review.get("subject"), Mapping) else None
+            candidate_refs = {str(value) for value in (review_ref, review.get("_evidencePath")) if value}
+            applications = as_list((task.get("execution") or {}).get("reviewApplications"))
+            matched = next((item for item in applications if isinstance(item, Mapping)
+                            and item.get("digest") == source_digest and str(item.get("reviewRef") or "") in candidate_refs), None)
+            if matched is None:
+                raise ValueError("repair source review must match a persisted immutable review application")
+            source_ref = str(matched.get("reviewRef"))
+        elif readiness_failure is not None:
+            stored = ((task.get("execution") or {}).get("candidateReadiness") if isinstance(task.get("execution"), Mapping) else None)
+            if not isinstance(stored, Mapping) or stored.get("status") != "failed" or not stored.get("digest") or readiness_digest(stored) != stored.get("digest"):
+                raise ValueError("repair readiness source requires the stored failed candidateReadiness")
+            supplied = readiness_failure.get("candidateReadiness") if isinstance(readiness_failure.get("candidateReadiness"), Mapping) else readiness_failure
+            if not isinstance(supplied, Mapping) or supplied.get("digest") != stored.get("digest"):
+                raise ValueError("repair readiness source is stale or mutated")
+            source_ids = [str(item) for item in as_list(readiness_failure.get("findingIds") or readiness_failure.get("targets")) if item]
+            source_digest = str(stored["digest"])
+            source_head = stored.get("candidateHead") or candidate_head(task)
+            source_ref = "readiness:" + source_digest
+        else:
+            raise ValueError("repair start requires an immutable review or failed readiness evidence")
+        active = task.setdefault("execution", {}).get("activeRepair")
+        if (isinstance(active, Mapping) and active.get("status") == "open"
+                and active.get("sourceDigest") == source_digest and active.get("plan") == plan.strip()):
+            return {"ok": True, "status": "repair", "idempotent": True, "taskId": task.get("taskId"), "revision": expected_revision, "cycle": active.get("cycle"), "targetFindingIds": active.get("targetFindingIds") or []}
+        ids = [str(item) for item in (target_finding_ids or source_ids) if str(item)]
+        if not ids:
+            raise ValueError("repair start requires at least one concrete finding or readiness target")
+        prior = history[-1] if history else None
+        if prior and (scope_changed or approach_invalid or not (narrowed_cause or bool(as_list(prior.get("resolvedFindingIds"))))):
+            task["previousState"] = task.get("state")
+            task["state"] = "Replan Required"
+            task["revision"] = expected_revision + 1
+            task.setdefault("execution", {})["repairDecision"] = {"status": "replan", "reason": "no resolved finding or narrowed cause", "sourceDigest": source_digest}
+            write_object(task_path, task)
+            return {"ok": False, "status": "replan", "taskId": task.get("taskId"), "revision": task["revision"]}
+        cycle = len(history) + 1
+        remaining = list(ids)
+        entry = {
+            "cycle": cycle,
+            "reviewRef": source_ref,
+            "sourceDigest": source_digest,
+            "sourceHead": source_head,
+            "targetFindingIds": ids,
+            "progress": progress.strip(),
+            "plan": plan.strip(),
+            "resolvedFindingIds": [],
+            "remainingFindingIds": remaining,
+            "scopeChanged": bool(scope_changed),
+            "approachInvalid": bool(approach_invalid),
+            "narrowedCause": bool(narrowed_cause),
+            "status": "open",
+        }
+        history.append(entry)
+        budget.setdefault("usage", {})["repairCycles"] = cycle
+        task.setdefault("execution", {})["activeRepair"] = {
+            "cycle": cycle,
+            "sourceDigest": source_digest,
+            "sourceHead": source_head,
+            "targetFindingIds": ids,
+            "plan": plan.strip(),
+            "narrowedCause": bool(narrowed_cause),
+            "status": "open",
+        }
+        task["previousState"] = task.get("state")
+        task["state"] = "Repair"
+        task["revision"] = expected_revision + 1
+        write_object(task_path, task)
+        return {"ok": True, "status": "repair", "taskId": task.get("taskId"), "revision": task["revision"], "cycle": cycle, "targetFindingIds": ids}
+
+
+def apply_review(
+    repo: Path,
+    task_path: Path,
+    review_path: Path,
+    *,
+    expected_revision: int,
+    profile: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Apply an immutable review to the Task with a revision CAS."""
+    with task_lock(task_path):
+        task = read_object(task_path)
+        if task.get("revision") != expected_revision:
+            raise ValueError(f"stale Task revision: expected {expected_revision}, actual {task.get('revision')}")
+        relative, canonical = canonical_evidence_path(repo, review_path)
+        if not relative or not canonical or not canonical.is_file():
+            raise ValueError("immutable review artifact must be an existing file inside the repository")
+        review = read_object(canonical)
+        review["_evidencePath"] = relative
+        if isinstance(review.get("reviewSpec"), Mapping) and review["reviewSpec"].get("mode") == "delta":
+            previous_ref = review["reviewSpec"].get("previousReviewRef")
+            previous_relative, previous_path = canonical_evidence_path(repo, str(previous_ref).split("#", 1)[0] if previous_ref else None)
+            if not previous_relative or not previous_path or not previous_path.is_file():
+                raise ValueError("delta review requires an immutable predecessor inside the repository")
+            review["previousReview"] = read_object(previous_path)
+            review["previousReview"]["_evidencePath"] = previous_relative
+        checked = validate_review(review, task, profile=profile)
+        if not checked.ok:
+            raise ValueError(checked.findings[0].message)
+        digest = review_digest(review)
+        applications = task.setdefault("execution", {}).setdefault("reviewApplications", [])
+        for application in applications:
+            if isinstance(application, Mapping) and application.get("reviewRef") == relative and application.get("digest") == digest:
+                return {"ok": True, "idempotent": True, "taskId": task.get("taskId"), "revision": expected_revision, "reviewRef": relative, "digest": digest}
+        status = review.get("status")
+        spec = review.get("reviewSpec") if isinstance(review.get("reviewSpec"), Mapping) else {}
+        candidate_subject = review.get("subject") if isinstance(review.get("subject"), Mapping) else {}
+        lane = str(spec.get("reviewLane") or f"{review.get('hostId') or 'native'}::{review.get('reviewerModel') or 'current-host/default'}")
+        review_basis = _review_basis(spec, candidate_subject.get("headSha"))
+        execution = task.setdefault("execution", {})
+        active = execution.get("activeRepair") if isinstance(execution.get("activeRepair"), Mapping) else None
+        repair_decision = assess_repair_progress(task, review) if status == "ChangesRequested" else "accept"
+        repair_outcome: dict[str, Any] | None = None
+        if isinstance(active, Mapping) and active.get("status") == "open":
+            history = execution.setdefault("repairHistory", [])
+            entry = next((item for item in reversed(history) if isinstance(item, Mapping) and item.get("cycle") == active.get("cycle")), None)
+            if entry is None:
+                raise ValueError("active repair has no persisted repair history entry")
+            target_ids = {str(item) for item in as_list(active.get("targetFindingIds")) if item}
+            current_ids = {
+                str(item.get("findingId")) for item in review.get("findings") or []
+                if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}
+            }
+            resolved = sorted(target_ids - current_ids)
+            remaining = sorted(current_ids)
+            entry.update({
+                "resolvedFindingIds": resolved,
+                "remainingFindingIds": remaining,
+                "status": "closed",
+                "closedByReviewRef": relative,
+                "closedReviewDigest": digest,
+            })
+            closed = dict(active)
+            closed.update({"status": "closed", "resolvedFindingIds": resolved, "remainingFindingIds": remaining, "closedByReviewRef": relative, "closedReviewDigest": digest})
+            execution["activeRepair"] = closed
+            repair_outcome = {"cycle": active.get("cycle"), "resolvedFindingIds": resolved, "remainingFindingIds": remaining}
+            if status == "ChangesRequested":
+                repair_decision = "repair" if resolved or entry.get("narrowedCause") else "replan"
+        task["previousState"] = task.get("state")
+        if status == "Accepted" and task.get("reviewPolicy") == "cross":
+            accepted = [item for item in applications if isinstance(item, Mapping) and item.get("status") == "Accepted"]
+            accepted.append({"status": status, "candidateHead": candidate_subject.get("headSha"), "reviewLane": lane, "basis": review_basis})
+            lanes = {
+                str(item.get("reviewLane")) for item in accepted
+                if item.get("candidateHead") == candidate_subject.get("headSha") and item.get("reviewLane")
+                and (item.get("basis") or _review_basis(item.get("reviewSpec") if isinstance(item.get("reviewSpec"), Mapping) else {}, item.get("candidateHead"))) == review_basis
+            }
+            cross_pending = len(lanes) < 2
+        else:
+            cross_pending = False
+        if status == "Accepted" and not cross_pending:
+            task["state"] = "Accepted"
+            execution["crossReviewPending"] = False
+        elif spec.get("requiresFullReview") is True:
+            task["state"] = "Candidate"
+            execution["fullReviewRequired"] = True
+            fresh = _candidate_review_spec(task, lane)
+            fresh.update({"mode": "full", "previousReviewRef": None, "previousReviewDigest": None, "previousHead": None, "findingIds": []})
+            fresh.pop("requiresFullReview", None)
+            task["reviewSpec"] = fresh
+        elif status == "Accepted" and cross_pending:
+            task["state"] = "Candidate"
+            execution["crossReviewPending"] = True
+        elif repair_decision == "replan":
+            task["state"] = "Replan Required"
+            execution["repairDecision"] = {"status": "replan", "reason": "review made no grounded progress", "reviewRef": relative, "digest": digest}
+        else:
+            task["state"] = "Repair"
+            execution["repairDecision"] = {"status": "repair", "reviewRef": relative, "digest": digest, "outcome": repair_outcome}
+        if isinstance(spec, Mapping) and not (spec.get("requiresFullReview") is True and status == "ChangesRequested"):
+            task["reviewSpec"] = dict(spec)
+        task["reviewRef"] = relative
+        task.setdefault("reviewHistory", []).append(relative)
+        applications.append({"reviewRef": relative, "digest": digest, "status": status, "mode": spec.get("mode", "legacy"),
+                             "candidateHead": candidate_subject.get("headSha"), "reviewLane": lane, "basis": review_basis,
+                             "reviewSpec": dict(spec), "repairOutcome": repair_outcome, "appliedRevision": expected_revision + 1})
+        task["revision"] = expected_revision + 1
+        write_object(task_path, task)
+        return {"ok": True, "idempotent": False, "taskId": task.get("taskId"), "revision": task["revision"], "reviewRef": relative, "digest": digest, "state": task["state"]}

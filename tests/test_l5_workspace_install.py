@@ -55,7 +55,7 @@ class DisabledPoolTests(unittest.TestCase):
 
 class UpgradeInstallerTests(unittest.TestCase):
     def test_legacy_profiles_receive_5_budget_defaults_and_keep_manual_routes(self) -> None:
-        for version in ("4.1.1", "4.5.0"):
+        for version in ("4.1.1", "4.5.0", "5.0.0"):
             with self.subTest(version=version), tempfile.TemporaryDirectory() as temp:
                 repo = Path(temp) / "repo"
                 repo.mkdir()
@@ -83,8 +83,8 @@ class UpgradeInstallerTests(unittest.TestCase):
                 )
                 self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
                 installed = json.loads(profile_path.read_text(encoding="utf-8"))
-                self.assertEqual("5.0.0", installed["distributionVersion"])
-                self.assertEqual(3, installed["orchestration"]["maxRepairs"])
+                self.assertEqual("5.0.1", installed["distributionVersion"])
+                self.assertEqual(1 if version == "5.0.0" else 3, installed["orchestration"]["maxRepairs"])
                 self.assertEqual(32768, installed["contextPolicy"]["ceilings"]["maxPacketBytes"])
                 self.assertEqual(48, installed["invocationBudgets"]["worker"]["maxToolCalls"])
                 self.assertEqual("chosen", installed["modelRoutes"]["codex"]["worker"][0]["modelId"])

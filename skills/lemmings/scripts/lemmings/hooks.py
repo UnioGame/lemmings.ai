@@ -19,6 +19,7 @@ if __package__ in (None, ""):
     from lemmings.telemetry import contains_sensitive_text, looks_absolute_path
     from lemmings.workspace import load_registry
     from lemmings.invocations import build_invocation, find_invocation, profile_digest, result_findings, invocation_digest
+    from lemmings.readiness import validate_candidate_readiness
     from lemmings.effective import effective_profile, checked_effective
 else:
     from .budget import HARD_CONTEXT_CEILINGS
@@ -27,6 +28,7 @@ else:
     from .telemetry import contains_sensitive_text, looks_absolute_path
     from .workspace import load_registry
     from .invocations import build_invocation, find_invocation, profile_digest, result_findings, invocation_digest
+    from .readiness import validate_candidate_readiness
     from .effective import effective_profile, checked_effective
 
 READ_ONLY_COMMANDS = {
@@ -522,6 +524,11 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "reviewer requires Candidate actual-model evidence")
                 if subject_kind == "candidate" and (not head or (review_head and str(review_head) != head)):
                     return decision("block", "reviewer must inspect the current candidate/fix head")
+                if subject_kind == "candidate":
+                    repo_root = Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve()
+                    readiness = validate_candidate_readiness(repo_root, task)
+                    if not readiness.ok:
+                        return decision("block", readiness.findings[0].message)
                 extras = {}
                 if task.get("reviewPolicy") == "cross":
                     identities = set()
@@ -546,8 +553,14 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                 if task.get("state") not in {"Ready", "Active", "Candidate"} and not workspace_blocked:
                     return decision("block", f"{role} requires Ready, Active, or Candidate task")
                 return decision("allow", f"bounded {role} dispatch accepted")
-            if task.get("state") != "Ready":
-                return decision("block", "writer requires a Ready task")
+            if task.get("state") not in {"Ready", "Repair"}:
+                return decision("block", "writer requires a Ready or authorized Repair task")
+            if task.get("state") == "Repair":
+                active = ((task.get("execution") or {}).get("activeRepair") if isinstance(task.get("execution"), Mapping) else None)
+                stored_kind = invocation.get("dispatchKind") if isinstance(invocation, Mapping) else None
+                stored_cycle = invocation.get("repairCycle") if isinstance(invocation, Mapping) else None
+                if stored_kind != "repair" or not isinstance(active, Mapping) or stored_cycle != active.get("cycle"):
+                    return decision("block", "Repair worker requires an authorized open repair cycle")
             model_result = validate_models(task, profile)
             if not model_result.ok:
                 return decision("block", model_result.findings[0].message)

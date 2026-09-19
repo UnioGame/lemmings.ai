@@ -16,8 +16,8 @@ from .budget import (
 )
 
 SCHEMA_VERSION = 4
-DISTRIBUTION_VERSION = "5.0.0"
-PLUGIN_VERSION = "5.0.0"
+DISTRIBUTION_VERSION = "5.0.1"
+PLUGIN_VERSION = "5.0.1"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -911,6 +911,19 @@ def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
             result.error("invocation.missing", f"missing invocation field: {field_name}")
     if invocation.get("role") not in {"worker", "reviewer", "explorer"}:
         result.error("invocation.role", "invocation role must be worker, reviewer, or explorer")
+    accounting = invocation.get("usageAccounting")
+    if accounting is not None and accounting not in {"host-v1", "legacy-v0"}:
+        result.error("invocation.usage_accounting", "usageAccounting must be host-v1 or legacy-v0")
+    dispatch_kind = invocation.get("dispatchKind")
+    if dispatch_kind is not None and dispatch_kind not in {"initial", "review", "repair", "retry", "context-correction", "schema-correction"}:
+        result.error("invocation.dispatch_kind", "dispatchKind is invalid")
+    repair_cycle = invocation.get("repairCycle")
+    if repair_cycle is not None and (not isinstance(repair_cycle, int) or isinstance(repair_cycle, bool) or repair_cycle < 1):
+        result.error("invocation.repair_cycle", "repairCycle must be a positive integer")
+    if invocation.get("retryOf") is not None and not isinstance(invocation.get("retryOf"), str):
+        result.error("invocation.retry_of", "retryOf must be an invocation id")
+    if invocation.get("reviewLane") is not None and (not isinstance(invocation.get("reviewLane"), str) or not invocation.get("reviewLane").strip()):
+        result.error("invocation.review_lane", "reviewLane must be a non-empty reviewer identity")
     for field_name in ("taskRevision", "attempt"):
         value = invocation.get(field_name)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -1062,6 +1075,25 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         for name in ("interfaces", "tests", "dependencyHandoffs", "validationEvidence", "attempts", "invocations", "agentResults"):
             if not isinstance(execution.get(name), list):
                 result.error("task.execution", f"execution.{name} must be an array")
+        for name in ("repairHistory", "reviewApplications"):
+            if execution.get(name) is not None and not isinstance(execution.get(name), list):
+                result.error("task.execution", f"execution.{name} must be an array")
+        readiness = execution.get("candidateReadiness")
+        if readiness is not None:
+            if not isinstance(readiness, Mapping):
+                result.error("candidate.readiness", "execution.candidateReadiness must be an object")
+            else:
+                for name in ("candidateHead", "baseSha", "planDigest", "validationDigest", "digest"):
+                    if not readiness.get(name):
+                        result.error("candidate.readiness", f"candidateReadiness.{name} is required")
+                if readiness.get("status") not in {"passed", "failed"}:
+                    result.error("candidate.readiness", "candidateReadiness.status must be passed or failed")
+                for name in ("checks", "debt"):
+                    if not isinstance(readiness.get(name), list):
+                        result.error("candidate.readiness", f"candidateReadiness.{name} must be an array")
+                for name in ("cleanBefore", "cleanAfter"):
+                    if not isinstance(readiness.get(name), bool):
+                        result.error("candidate.readiness", f"candidateReadiness.{name} must be boolean")
     invocations = execution.get("invocations") if isinstance(execution, Mapping) else None
     if isinstance(invocations, list):
         invocation_ids: set[str] = set()
@@ -1349,6 +1381,14 @@ def plan_digest(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def review_digest(value: Mapping[str, Any]) -> str:
+    """Digest immutable review content while ignoring repository-local metadata."""
+    return hashlib.sha256(json.dumps({
+        key: item for key, item in value.items()
+        if key not in {"_evidencePath", "digest", "appliedAt", "application", "previousReview"}
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
 def validate_review(
     review: Mapping[str, Any],
     task: Mapping[str, Any] | None = None,
@@ -1382,6 +1422,7 @@ def validate_review(
     if not isinstance(review.get("findings"), list):
         result.error("review.findings", "review findings must be an array")
     else:
+        finding_ids_seen: set[str] = set()
         for index, finding in enumerate(review.get("findings") or []):
             if not isinstance(finding, Mapping):
                 result.error("review.finding", f"findings[{index}] must be an object")
@@ -1394,10 +1435,98 @@ def validate_review(
                 result.error("review.finding_origin", f"findings[{index}].origin is invalid")
             if not finding.get("summary"):
                 result.error("review.finding_summary", f"findings[{index}].summary is required")
+            if finding.get("findingId"):
+                finding_id = str(finding.get("findingId"))
+                if finding_id in finding_ids_seen:
+                    result.error("review.finding_duplicate", f"findings[{index}].findingId is duplicated")
+                finding_ids_seen.add(finding_id)
             if task and task.get("budget") is not None and (review.get("subject") or {}).get("kind") == "candidate" and not finding.get("findingId"):
                 result.error("review.finding_id", f"findings[{index}].findingId is required for budgeted candidate reviews")
     if not isinstance(review.get("validation"), list):
         result.error("review.validation", "review validation must be an array")
+    spec = review.get("reviewSpec")
+    if spec is not None:
+        if not isinstance(spec, Mapping):
+            result.error("review.spec", "reviewSpec must be an object")
+            spec = {}
+        mode = spec.get("mode")
+        if mode not in {"full", "delta"}:
+            result.error("review.spec_mode", "reviewSpec.mode must be full or delta")
+        for field_name in ("reviewLane", "reviewerHost", "reviewerModel"):
+            if spec.get(field_name) is not None and (not isinstance(spec.get(field_name), str) or not spec.get(field_name).strip()):
+                result.error("review.spec_identity", f"reviewSpec.{field_name} must be a non-empty string")
+        expected_lane = f"{review.get('hostId')}::{review.get('reviewerModel')}"
+        if spec.get("reviewerHost") and spec.get("reviewerHost") != review.get("hostId"):
+            result.error("review.spec_identity", "reviewSpec.reviewerHost must match the actual review hostId")
+        if spec.get("reviewerModel") and spec.get("reviewerModel") != review.get("reviewerModel"):
+            result.error("review.spec_identity", "reviewSpec.reviewerModel must match the actual reviewerModel")
+        if spec.get("reviewLane") and spec.get("reviewLane") != expected_lane:
+            result.error("review.spec_identity", "reviewSpec.reviewLane must match the actual hostId and reviewerModel")
+        subject_value = review.get("subject") if isinstance(review.get("subject"), Mapping) else {}
+        if subject_value.get("kind") == "candidate" and task:
+            current_head = candidate_head(task)
+            current_readiness = ((task.get("execution") or {}).get("candidateReadiness") if isinstance(task.get("execution"), Mapping) else None)
+            readiness_value = current_readiness.get("digest") if isinstance(current_readiness, Mapping) else None
+            if spec.get("fullBaseSha") != task.get("baseSha"):
+                result.error("review.spec_base", "reviewSpec.fullBaseSha must equal the Task baseSha")
+            if spec.get("candidateHead") != current_head:
+                result.error("review.spec_head", "reviewSpec.candidateHead must equal the current candidate head")
+            if readiness_value and spec.get("readinessDigest") != readiness_value:
+                result.error("review.spec_readiness", "reviewSpec.readinessDigest is stale")
+            if spec.get("planDigest") and spec.get("planDigest") != plan_digest(task):
+                result.error("review.full_required", "review plan requirements changed; a new full review is required")
+            if spec.get("validationDigest"):
+                from .readiness import validation_digest
+                if spec.get("validationDigest") != validation_digest(task):
+                    result.error("review.full_required", "review validation requirements changed; a new full review is required")
+            if mode == "full":
+                if spec.get("previousReviewRef") or spec.get("previousReviewDigest") or spec.get("previousHead"):
+                    result.error("review.spec_full_chain", "full review must not carry a delta predecessor")
+            elif mode == "delta":
+                required = ("previousReviewRef", "previousReviewDigest", "previousHead", "findingIds")
+                for field_name in required:
+                    if not spec.get(field_name):
+                        result.error("review.delta_binding", f"delta review requires reviewSpec.{field_name}")
+                if spec.get("previousHead") == current_head:
+                    result.error("review.delta_range", "delta review range must be non-empty")
+                finding_ids = spec.get("findingIds")
+                if not isinstance(finding_ids, list) or any(not isinstance(item, str) or not item for item in finding_ids) or len(finding_ids) != len(set(finding_ids)):
+                    result.error("review.delta_findings", "delta review findingIds must be unique non-empty strings")
+                dispositions = review.get("findingDispositions")
+                if dispositions is not None and not isinstance(dispositions, Mapping):
+                    result.error("review.delta_dispositions", "findingDispositions must be an object")
+                previous = review.get("previousReview")
+                if isinstance(previous, Mapping):
+                    if review_digest(previous) != spec.get("previousReviewDigest"):
+                        result.error("review.delta_chain", "delta predecessor digest does not match immutable previous review")
+                    previous_subject = previous.get("subject") if isinstance(previous.get("subject"), Mapping) else {}
+                    if previous_subject.get("headSha") != spec.get("previousHead"):
+                        result.error("review.delta_chain", "delta predecessor head does not match previous review")
+                    previous_spec = previous.get("reviewSpec") if isinstance(previous.get("reviewSpec"), Mapping) else {}
+                    if previous_spec.get("reviewLane") and spec.get("reviewLane") and previous_spec.get("reviewLane") != spec.get("reviewLane"):
+                        result.error("review.full_required", "delta predecessor belongs to another reviewer lane; a full review is required")
+                    if previous_spec.get("fullBaseSha") and previous_spec.get("fullBaseSha") != spec.get("fullBaseSha"):
+                        result.error("review.full_required", "delta predecessor base differs; a full review is required")
+                    if previous_spec.get("validationDigest") and spec.get("validationDigest") and previous_spec.get("validationDigest") != spec.get("validationDigest"):
+                        result.error("review.full_required", "delta validation contract changed; a full review is required")
+                    previous_ids = {
+                        str(item.get("findingId")) for item in previous.get("findings") or []
+                        if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}
+                    }
+                    if previous_ids and (not isinstance(dispositions, Mapping) or previous_ids - set(dispositions)):
+                        result.error("review.delta_dispositions", "every prior material finding requires a disposition")
+                    new_ids = {
+                        str(item.get("findingId")) for item in review.get("findings") or []
+                        if isinstance(item, Mapping) and item.get("findingId")
+                    }
+                    if new_ids.intersection(previous_ids):
+                        result.error("review.delta_findings", "delta review must use unique ids for new findings")
+                if spec.get("inspectionRange") is not None:
+                    inspection = spec.get("inspectionRange")
+                    if not isinstance(inspection, Mapping) or inspection.get("from") != spec.get("previousHead") or inspection.get("to") != spec.get("candidateHead"):
+                        result.error("review.delta_range", "inspectionRange must equal previousHead..candidateHead")
+            if spec.get("requiresFullReview") is True and mode != "full":
+                result.error("review.full_required", "review chain or contract changes require a full review")
     cycle = review.get("cycle")
     configured_repairs = ((((task or {}).get("budget") or {}).get("policy") or {}).get("maxRepairs", ((profile or {}).get("orchestration") or {}).get("maxRepairs", 3)))
     max_repairs = configured_repairs if isinstance(configured_repairs, int) and not isinstance(configured_repairs, bool) and 0 <= configured_repairs <= 3 else 3

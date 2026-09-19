@@ -74,7 +74,12 @@
     "attempts": [],
     "invocations": [],
     "agentResults": [],
-    "repairHistory": []
+    "repairHistory": [],
+    "reviewApplications": [],
+    "candidateReadiness": null,
+    "activeRepair": null,
+    "repairDecision": null,
+    "fullReviewRequired": false
   },
   "baseSha": null,
   "commits": {

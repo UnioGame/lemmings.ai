@@ -121,7 +121,7 @@ class InvocationLedgerTests(unittest.TestCase):
             failure["route"] = {"hostId": "native", "providerId": "test", "modelId": "worker"}
             settled = record_route_failure(
                 packet, failure_value=failure, expected_revision=1,
-                usage={"trusted": True, "toolCalls": 3},
+                host_receipt={"trusted": True, "source": "host-v1", "invocationId": first["invocationId"], "grant": first["limits"]["maxToolCalls"], "toolCalls": 3},
             )
             self.assertEqual(3, settled["consumedToolCalls"])
             second = record_invocation(repo, packet, profile, "worker", 2, 2)
@@ -133,7 +133,8 @@ class InvocationLedgerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             repo, packet, profile = self.repo_task(Path(temp))
             first = record_invocation(repo, packet, profile, "worker", 1, 0)
-            accept_result(repo, packet, profile, self.result(first, trusted=True, calls=5), 1)
+            accept_result(repo, packet, profile, self.result(first, trusted=True, calls=0), 1,
+                          trusted_usage={"trusted": True, "source": "host-v1", "invocationId": first["invocationId"], "grant": first["limits"]["maxToolCalls"], "toolCalls": 5})
             stored = json.loads(packet.read_text(encoding="utf-8"))
             frozen = stored["budget"]
             stored["budget"] = None
@@ -157,7 +158,8 @@ class InvocationLedgerTests(unittest.TestCase):
             repo, packet, profile = self.repo_task(Path(temp))
             first = record_invocation(repo, packet, profile, "worker", 1, 0)
             self.assertEqual(24, first["limits"]["maxToolCalls"])
-            accept_result(repo, packet, profile, self.result(first, trusted=True, calls=5), 1)
+            accept_result(repo, packet, profile, self.result(first, trusted=True, calls=0), 1,
+                          trusted_usage={"trusted": True, "source": "host-v1", "invocationId": first["invocationId"], "grant": first["limits"]["maxToolCalls"], "toolCalls": 5})
             extend_task_budget(
                 packet,
                 expected_revision=2,
@@ -169,7 +171,8 @@ class InvocationLedgerTests(unittest.TestCase):
             )
             second = record_invocation(repo, packet, profile, "worker", 2, 3)
             self.assertEqual(31, second["limits"]["maxToolCalls"])
-            accept_result(repo, packet, profile, self.result(second, trusted=True, calls=31), 4)
+            accept_result(repo, packet, profile, self.result(second, trusted=True, calls=0), 4,
+                          trusted_usage={"trusted": True, "source": "host-v1", "invocationId": second["invocationId"], "grant": second["limits"]["maxToolCalls"], "toolCalls": 31})
             extend_task_budget(
                 packet,
                 expected_revision=5,

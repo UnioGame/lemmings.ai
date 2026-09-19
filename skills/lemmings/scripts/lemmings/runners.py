@@ -34,7 +34,8 @@ def _prompt(invocation):
              "Do not delegate, resume history, change providers, publish, or use unrelated tools. "
              "Return only an AgentResult v4 JSON object with matching invocationId/attempt, status succeeded|failed|blocked|cancelled, "
              "candidateHead when applicable, and arrays changedPaths, acceptanceEvidence, validationEvidence, findings, blockers, remainingRisks. "
-             "For reviewer/explorer return changedPaths=[]. Keep evidence compact.\n" + json.dumps(invocation, separators=(",", ":")))
+             "For reviewer/explorer return changedPaths=[]. Keep evidence compact. Never claim trusted tool usage in AgentResult; host-v1 accounting accepts only a separate host receipt. "
+             "Follow reviewSpec full or delta bindings when the role is reviewer.\n" + json.dumps(invocation, separators=(",", ":")))
     if len(value.encode()) > 16384:
         raise ValueError("runner dispatch exceeds16KiB")
     return value

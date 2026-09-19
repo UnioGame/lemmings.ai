@@ -34,7 +34,17 @@ from .contracts import (
     validate_wave,
     write_object,
 )
-from .invocations import accept_result, extend_task_budget, record_context_usage, record_invocation, record_route_failure, task_lock
+from .invocations import (
+    accept_result,
+    apply_review,
+    extend_task_budget,
+    record_context_usage,
+    record_invocation,
+    record_route_failure,
+    start_repair,
+    task_lock,
+)
+from .readiness import prepare_candidate
 from .bundle import skill_root
 from .models import (
     advance_recovery_route,
@@ -658,7 +668,10 @@ def command_invocation(args: argparse.Namespace) -> int:
     if profile is None or task_path is None or not task_path.is_file():
         raise ValueError("invocation requires an existing profile and Task")
     if args.invocation_command == "create":
-        emit(record_invocation(repo, task_path, profile, args.role, args.attempt, args.expected_revision, args.objective, preset=args.preset, freeze=True))
+        emit(record_invocation(repo, task_path, profile, args.role, args.attempt, args.expected_revision, args.objective, preset=args.preset, freeze=True,
+                               subject_kind=getattr(args, "subject_kind", None), dispatch_kind=getattr(args, "dispatch_kind", None),
+                               retry_of=getattr(args, "retry_of", None), repair_cycle=getattr(args, "repair_cycle", None),
+                               review_lane=getattr(args, "review_lane", None)))
     elif args.invocation_command == "extend":
         emit(extend_task_budget(task_path, expected_revision=args.expected_revision, kind=args.kind, role=args.role, amount=args.amount, unresolved_question=args.unresolved_question, progress=args.progress))
     elif args.invocation_command == "context-use":
@@ -669,12 +682,58 @@ def command_invocation(args: argparse.Namespace) -> int:
             raise ValueError("invocation fail requires an existing RouteFailure")
         usage = ({"trusted": True, "toolCalls": args.trusted_tool_calls}
                  if args.trusted_tool_calls is not None else None)
-        emit(record_route_failure(task_path, failure_value=read_object(failure_path), expected_revision=args.expected_revision, usage=usage))
+        receipt = read_object(resolve_path(repo, args.host_receipt)) if getattr(args, "host_receipt", None) else None
+        emit(record_route_failure(task_path, failure_value=read_object(failure_path), expected_revision=args.expected_revision, usage=usage, host_receipt=receipt))
     else:
         result_path = resolve_path(repo, args.result)
         if result_path is None or not result_path.is_file():
             raise ValueError("invocation accept requires an existing AgentResult")
-        emit(accept_result(repo, task_path, profile, read_object(result_path), args.expected_revision))
+        receipt = read_object(resolve_path(repo, args.host_receipt)) if getattr(args, "host_receipt", None) else None
+        emit(accept_result(repo, task_path, profile, read_object(result_path), args.expected_revision, trusted_usage=receipt))
+    return 0
+
+
+def command_candidate(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    task_path = resolve_path(repo, args.task)
+    if task_path is None or not task_path.is_file():
+        raise ValueError("candidate prepare requires an existing Task")
+    debts = []
+    for value in getattr(args, "debt", []) or []:
+        target = resolve_path(repo, value)
+        if target and target.is_file():
+            item = read_object(target)
+        else:
+            item = json.loads(value)
+        debts.extend(item if isinstance(item, list) else [item])
+    output = prepare_candidate(repo, task_path, expected_revision=args.expected_revision, expected_head=args.expected_revision_head, debt=debts)
+    emit(output)
+    return 0 if output.get("ok") else 1
+
+
+def command_repair(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    task_path = resolve_path(repo, args.task)
+    if task_path is None or not task_path.is_file():
+        raise ValueError("repair start requires an existing Task")
+    review = read_object(resolve_path(repo, args.review)) if args.review else None
+    readiness = read_object(resolve_path(repo, args.readiness_failure)) if args.readiness_failure else None
+    output = start_repair(task_path, expected_revision=args.expected_revision, progress=args.progress, plan=args.plan,
+                          review=review, review_ref=args.review, readiness_failure=readiness,
+                          target_finding_ids=args.finding_id, narrowed_cause=args.narrowed_cause,
+                          scope_changed=args.scope_changed, approach_invalid=args.approach_invalid)
+    emit(output)
+    return 0 if output.get("ok") else 1
+
+
+def command_review(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    task_path = resolve_path(repo, args.task)
+    review_path = resolve_path(repo, args.review)
+    if task_path is None or not task_path.is_file() or review_path is None or not review_path.is_file():
+        raise ValueError("review apply requires existing Task and immutable Review")
+    profile = load_profile(repo, args.profile) or {}
+    emit(apply_review(repo, task_path, review_path, expected_revision=args.expected_revision, profile=profile))
     return 0
 
 
@@ -761,10 +820,18 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="verify the installed self-contained runtime"); doctor.add_argument("--repo", default="."); doctor.set_defaults(run=command_doctor)
     invocation = sub.add_parser("invocation", help="persist dispatch and accept matching AgentResult"); invocation_sub = invocation.add_subparsers(dest="invocation_command", required=True)
     invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.add_argument("--preset", help="named role preset for this new Task"); invocation_create.set_defaults(run=command_invocation)
-    invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--expected-revision", type=int, required=True); invocation_accept.set_defaults(run=command_invocation)
-    invocation_fail = invocation_sub.add_parser("fail"); add_common(invocation_fail); invocation_fail.add_argument("--task", required=True); invocation_fail.add_argument("--failure", required=True); invocation_fail.add_argument("--trusted-tool-calls", type=int); invocation_fail.add_argument("--expected-revision", type=int, required=True); invocation_fail.set_defaults(run=command_invocation)
+    invocation_create.add_argument("--subject-kind", choices=["candidate", "plan", "baseline"]); invocation_create.add_argument("--dispatch-kind", choices=["initial", "review", "repair", "retry", "context-correction", "schema-correction"]); invocation_create.add_argument("--retry-of"); invocation_create.add_argument("--repair-cycle", type=int)
+    invocation_create.add_argument("--review-lane", help="stable reviewer host::model identity for cross-review lanes")
+    invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--host-receipt"); invocation_accept.add_argument("--expected-revision", type=int, required=True); invocation_accept.set_defaults(run=command_invocation)
+    invocation_fail = invocation_sub.add_parser("fail"); add_common(invocation_fail); invocation_fail.add_argument("--task", required=True); invocation_fail.add_argument("--failure", required=True); invocation_fail.add_argument("--trusted-tool-calls", type=int); invocation_fail.add_argument("--host-receipt"); invocation_fail.add_argument("--expected-revision", type=int, required=True); invocation_fail.set_defaults(run=command_invocation)
     invocation_extend = invocation_sub.add_parser("extend"); add_common(invocation_extend); invocation_extend.add_argument("--task", required=True); invocation_extend.add_argument("--kind", required=True, choices=["toolCalls", "maxPacketBytes", "maxWorkingSetItems", "maxExpansions"]); invocation_extend.add_argument("--role", choices=["worker", "reviewer", "explorer"]); invocation_extend.add_argument("--amount", type=int, required=True); invocation_extend.add_argument("--unresolved-question", required=True); invocation_extend.add_argument("--progress", required=True); invocation_extend.add_argument("--expected-revision", type=int, required=True); invocation_extend.set_defaults(run=command_invocation)
     invocation_context = invocation_sub.add_parser("context-use"); add_common(invocation_context); invocation_context.add_argument("--task", required=True); invocation_context.add_argument("--amount", type=int, default=1); invocation_context.add_argument("--expected-revision", type=int, required=True); invocation_context.set_defaults(run=command_invocation)
+    candidate = sub.add_parser("candidate", help="prepare and validate one immutable candidate"); candidate_sub = candidate.add_subparsers(dest="candidate_command", required=True)
+    candidate_prepare = candidate_sub.add_parser("prepare"); add_common(candidate_prepare); candidate_prepare.add_argument("--task", required=True); candidate_prepare.add_argument("--expected-revision", type=int, required=True); candidate_prepare.add_argument("--expected-revision-head", dest="expected_revision_head"); candidate_prepare.add_argument("--debt", action="append", default=[]); candidate_prepare.set_defaults(run=command_candidate)
+    repair = sub.add_parser("repair", help="authorize one bounded semantic repair cycle"); repair_sub = repair.add_subparsers(dest="repair_command", required=True)
+    repair_start = repair_sub.add_parser("start"); add_common(repair_start); repair_start.add_argument("--task", required=True); repair_start.add_argument("--review"); repair_start.add_argument("--readiness-failure"); repair_start.add_argument("--finding-id", action="append", default=[]); repair_start.add_argument("--progress", required=True); repair_start.add_argument("--plan", required=True); repair_start.add_argument("--narrowed-cause", action="store_true"); repair_start.add_argument("--scope-changed", action="store_true"); repair_start.add_argument("--approach-invalid", action="store_true"); repair_start.add_argument("--expected-revision", type=int, required=True); repair_start.set_defaults(run=command_repair)
+    review = sub.add_parser("review", help="apply immutable Review evidence with Task CAS"); review_sub = review.add_subparsers(dest="review_command", required=True)
+    review_apply = review_sub.add_parser("apply"); add_common(review_apply); review_apply.add_argument("--task", required=True); review_apply.add_argument("--review", required=True); review_apply.add_argument("--expected-revision", type=int, required=True); review_apply.set_defaults(run=command_review)
     integration = sub.add_parser("integration", help="run declared checks on the exact merged tree"); integration_sub = integration.add_subparsers(dest="integration_command", required=True)
     integration_validate = integration_sub.add_parser("validate"); integration_validate.add_argument("--repo", default="."); integration_validate.add_argument("--task", required=True); integration_validate.add_argument("--expected-revision", type=int, required=True); integration_validate.set_defaults(run=command_integration)
     status = sub.add_parser("status", help="inspect runtime and contract status"); add_common(status, True); status.set_defaults(run=command_status)

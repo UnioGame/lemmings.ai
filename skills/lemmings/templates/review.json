@@ -12,6 +12,19 @@
   "hostId": "native",
   "reviewerModel": "<host-reported-model>",
   "cycle": 1,
+  "reviewSpec": {
+    "mode": "full",
+    "fullBaseSha": "<sha>",
+    "candidateHead": "<candidate-or-fix-sha>",
+    "readinessDigest": "<candidate-readiness-digest>",
+    "planDigest": "<plan-digest>",
+    "validationDigest": "<validation-digest>",
+    "previousReviewRef": null,
+    "previousReviewDigest": null,
+    "previousHead": null,
+    "findingIds": []
+  },
+  "findingDispositions": {},
   "findings": [],
   "validation": []
 }

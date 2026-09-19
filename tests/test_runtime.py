@@ -22,6 +22,7 @@ from lemmings.contracts import (
     validate_task,
 )
 from lemmings.hooks import derive_context_packet, handle
+from lemmings.readiness import readiness_digest, result_digest, validation_digest
 from lemmings.models import (
     advance_recovery_route,
     apply_proposal,
@@ -41,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 4,
-        "distributionVersion": "5.0.0",
+        "distributionVersion": "5.0.1",
         "mode": "auto",
         "modelRoutes": {
             "codex": {
@@ -64,6 +65,21 @@ def task(task_id: str = "TASK-1") -> dict:
     value = json.loads((ROOT / "skills/lemmings/templates/task.json").read_text(encoding="utf-8"))
     value["taskId"] = task_id
     value["models"].update(hostId="codex", assigned="openai/gpt-5.6-luna:max")
+    return value
+
+
+def ready_candidate(value: dict) -> dict:
+    from lemmings.contracts import plan_digest
+    invocation = derive_context_packet(value, None, "worker", {"profile": profile()})
+    value["execution"]["invocations"].append(invocation)
+    worker_id = invocation["invocationId"]
+    worker = {"schemaVersion": 4, "invocationId": worker_id, "attempt": 1, "status": "succeeded", "candidateHead": value["commits"]["candidate"], "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+    value["execution"]["agentResults"] = [worker]
+    evidence = {"version": 1, "status": "passed", "candidateHead": value["commits"]["candidate"], "baseSha": value["baseSha"],
+                "planDigest": plan_digest(value), "validationDigest": validation_digest(value), "workerInvocationId": worker_id, "workerResultDigest": result_digest(worker),
+                "checks": [], "debt": [], "cleanBefore": True, "cleanAfter": True}
+    evidence["digest"] = readiness_digest(evidence)
+    value["execution"]["candidateReadiness"] = evidence
     return value
 
 
@@ -263,6 +279,7 @@ class ModelsAndUsageV4Tests(unittest.TestCase):
             candidate["models"]["actual"] = candidate["models"]["assigned"]
             candidate["commits"]["candidate"] = "head"
             candidate["execution"].update({"handoff": {"changedPaths": []}, "validationEvidence": ["ok"]})
+            ready_candidate(candidate)
             candidate["execution"]["invocations"].append(derive_context_packet(candidate, None, "reviewer", {"profile": config}))
             reviewer = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": "head"})
             wrong_range = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": "other"})

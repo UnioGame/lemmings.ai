@@ -38,7 +38,7 @@ flowchart LR
   B --> C[Phase plans an independent wave]
   C --> D[Dispatch bounded writers]
   D --> E[Wait for every writer]
-  E --> F[Freeze candidate ranges]
+  E --> F[Prepare immutable candidate and run readiness checks]
   F --> G{Immutable review}
   G -->|Accepted| H[Integrate]
   H --> I[Validate at close.mergeCommit]
@@ -48,7 +48,7 @@ flowchart LR
   G -->|Repeated failure, invalid approach, scope change, or fourth failed check| L[Replan Required]
 ```
 
-Three repair cycles permit four candidate checks: the initial candidate and one after each repair. A repair continues only when it resolves material findings or demonstrably narrows the cause. Acceptance alone is not integration; declared checks must pass while `HEAD` equals the recorded `close.mergeCommit`.
+Three repair cycles permit four candidate checks: the initial candidate and one after each repair. Before a candidate reviewer receives a budget, `candidate prepare` records the exact candidate SHA, plan/validation digests, worker result, ownership, clean-tree checks, bounded command diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt, and readiness is invalidated when the SHA or requirements change. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. Acceptance alone is not integration; declared checks must pass while `HEAD` equals the recorded `close.mergeCommit`.
 
 ## Quick Start
 
@@ -113,7 +113,7 @@ Initial budgets can be extended only with an unresolved question and evidence of
 | Worker tool calls | 24 | 48 |
 | Repair cycles | 0 | 3 |
 
-Each invocation receives only the approved remainder. When a host has no trustworthy tool-call counter, the limit is instruction-enforced, the full grant is treated as spent, and that role is not automatically extended. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
+Each invocation receives only the approved remainder. New invocations use `usageAccounting=host-v1`: only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Historical v5.0.0 invocations retain their legacy read path. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
 
 ### Project Rules
 
@@ -182,9 +182,13 @@ Task selection freezes the resolved profile, rule references, content hashes, an
 
 ```text
 lemmings invocation create --task docs/tasks/change.task.json --role worker --attempt 1 --expected-revision 0 --preset balanced
+lemmings candidate prepare --task docs/tasks/change.task.json --expected-revision <revision>
+lemmings invocation create --task docs/tasks/change.task.json --role reviewer --subject-kind candidate --attempt 1 --expected-revision <revision>
 lemmings invocation extend --task docs/tasks/change.task.json --kind toolCalls --role worker --amount 8 --unresolved-question "<question>" --progress "<evidence>" --expected-revision <revision>
 lemmings run --task docs/tasks/change.task.json --invocation-id <saved-id> --route route.json --output result.json
-lemmings invocation accept --task docs/tasks/change.task.json --result result.json --expected-revision <revision>
+lemmings invocation accept --task docs/tasks/change.task.json --result result.json --host-receipt host-receipt.json --expected-revision <revision>
+lemmings repair start --task docs/tasks/change.task.json --review docs/tasks/reviews/candidate.json --progress "<concrete progress>" --plan "<next bounded change>" --expected-revision <revision>
+lemmings review apply --task docs/tasks/change.task.json --review docs/tasks/reviews/candidate.json --expected-revision <revision>
 ```
 
 External runners require a compatible declared executor and protocol. Unsupported restrictions fail visibly; launching a process does not accept its candidate.
@@ -216,7 +220,7 @@ Validation preserves the real exit status and returns bounded diagnostics with a
 
 ## Version and Reference
 
-The package is **5.0.0** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
+The package is **5.0.1** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
 
 Authoritative details live in:
 

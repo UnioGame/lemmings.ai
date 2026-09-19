@@ -17,6 +17,7 @@ from lemmings import cli
 import lemmings.hooks as hooks_module
 from lemmings.contracts import ValidationResult, runtime_marker, validate_phase, validate_profile, validate_repository_evidence, validate_review, validate_task
 from lemmings.hooks import derive_context_packet, handle, hydrate, is_read_only_shell
+from lemmings.readiness import readiness_digest, result_digest, validation_digest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 4,
-        "distributionVersion": "5.0.0",
+        "distributionVersion": "5.0.1",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -49,6 +50,20 @@ def task(*, mode: str = "standard", state: str = "Ready", task_id: str = "T-1") 
     return value
 
 
+def ready_candidate(value: dict) -> dict:
+    invocation = derive_context_packet(value, None, "worker", {"profile": profile()})
+    value["execution"]["invocations"].append(invocation)
+    worker_id = invocation["invocationId"]
+    worker = {"schemaVersion": 4, "invocationId": worker_id, "attempt": 1, "status": "succeeded", "candidateHead": value["commits"]["candidate"], "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+    value["execution"]["agentResults"] = [worker]
+    evidence = {"version": 1, "status": "passed", "candidateHead": value["commits"]["candidate"], "baseSha": value["baseSha"],
+                "planDigest": __import__("lemmings.contracts", fromlist=["plan_digest"]).plan_digest(value), "validationDigest": validation_digest(value),
+                "workerInvocationId": worker_id, "workerResultDigest": result_digest(worker), "checks": [], "debt": [], "cleanBefore": True, "cleanAfter": True}
+    evidence["digest"] = readiness_digest(evidence)
+    value["execution"]["candidateReadiness"] = evidence
+    return value
+
+
 def init_repo(path: Path) -> None:
     subprocess.run(["git", "-C", str(path), "init"], check=True, capture_output=True)
 
@@ -65,8 +80,8 @@ class SchemaOnlyTests(unittest.TestCase):
     def test_distribution_versions_are_consistent(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual("5.0.0", package["version"])
-        self.assertEqual("5.0.0", plugin["version"])
+        self.assertEqual("5.0.1", package["version"])
+        self.assertEqual("5.0.1", plugin["version"])
 
     def test_specialization_is_optional_hint_and_cross_review_degrades(self):
         configured = profile()
@@ -190,6 +205,7 @@ class HookPolicyTests(unittest.TestCase):
         value["commits"]["candidate"] = "head"
         value["models"]["actual"] = value["models"]["assigned"]
         value["execution"]["validationEvidence"] = ["ok"]
+        ready_candidate(value)
         configured = profile()
         configured["modelRoutes"]["opencode"] = {
             "worker": [{"providerId": "openai-alt", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -202,7 +218,8 @@ class HookPolicyTests(unittest.TestCase):
         self.assertNotIn("capabilityDegradation", cross)
         single_profile = profile()
         single_value = json.loads(json.dumps(value))
-        single_value["execution"]["invocations"] = [derive_context_packet(single_value, None, "reviewer", {"profile": single_profile})]
+        single_value["execution"]["invocations"] = [item for item in single_value["execution"]["invocations"] if item.get("role") == "worker"]
+        single_value["execution"]["invocations"].append(derive_context_packet(single_value, None, "reviewer", {"profile": single_profile}))
         single = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": single_value, "profile": single_profile, "task_name": "lemmings-reviewer", "requestedHostId": "codex", "requestedModel": "openai/gpt-5.6-sol:high", "reviewHead": "head"})
         self.assertEqual("cross-review-unavailable", single.get("capabilityDegradation"))
 
@@ -212,6 +229,7 @@ class HookPolicyTests(unittest.TestCase):
         value["commits"]["candidate"] = "head"
         value["models"]["actual"] = value["models"]["assigned"]
         value["execution"]["validationEvidence"] = ["ok"]
+        ready_candidate(value)
         self.assertTrue(validate_task(value, profile()).ok, validate_task(value, profile()).as_dict())
 
     def test_hook_launcher_never_hides_invalid_input_as_success(self):
