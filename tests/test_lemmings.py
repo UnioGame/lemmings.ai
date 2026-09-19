@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 4,
-        "distributionVersion": "5.0.1",
+        "distributionVersion": "5.0.2",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -82,9 +82,9 @@ class SchemaOnlyTests(unittest.TestCase):
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         claude_plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         claude_marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
-        self.assertEqual("5.0.1", package["version"])
-        self.assertEqual("5.0.1", plugin["version"])
-        self.assertEqual("5.0.1", claude_plugin["version"])
+        self.assertEqual("5.0.2", package["version"])
+        self.assertEqual("5.0.2", plugin["version"])
+        self.assertEqual("5.0.2", claude_plugin["version"])
         self.assertEqual("unigame-ai", claude_marketplace["name"])
         self.assertEqual("UnioGame/unigame.ai.lemmings", claude_marketplace["plugins"][0]["source"]["repo"])
         for role in ("worker", "reviewer", "explorer"):

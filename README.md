@@ -43,12 +43,18 @@ flowchart LR
   G -->|Accepted| H[Integrate]
   H --> I[Validate at close.mergeCommit]
   I --> J[Integrated]
-  G -->|Material progress| K[Repair, maximum 3 cycles]
+  G -->|Blocking defect and grounded progress| K[Repair, maximum 3 cycles]
   K --> F
   G -->|Repeated failure, invalid approach, scope change, or fourth failed check| L[Replan Required]
 ```
 
-Three repair cycles permit four candidate checks: the initial candidate and one after each repair. Before a candidate reviewer receives a budget, `candidate prepare` records the exact candidate SHA, plan/validation digests, worker result, ownership, clean-tree checks, bounded command diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt, and readiness is invalidated when the SHA or requirements change. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. Acceptance alone is not integration; declared checks must pass while `HEAD` equals the recorded `close.mergeCommit`.
+Acceptance is the stopping condition: the requested criteria and required checks pass, with no concrete blocking defect in affected behavior. **P0-P2 block acceptance; P3 suggestions do not.** Optional refactoring, style changes, and speculative improvements remain follow-ups. A repeat review checks the fixes and directly affected behavior using existing evidence; it does not restart a full audit. A new candidate readiness digest alone does not require full review. Mode selection considers the task's actual scope, not merely the presence of submodules or integration branches in its repository.
+
+Three repair cycles are a ceiling, not a target, and permit at most four candidate checks: the initial candidate and one after each repair. Before a candidate reviewer receives a budget, `candidate prepare` records the exact candidate SHA, plan/validation digests, worker result, ownership, clean-tree checks, bounded command diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt, and readiness is invalidated when the SHA or requirements change. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. Acceptance alone is not integration; declared checks must pass while `HEAD` equals the recorded `close.mergeCommit`.
+
+## 5.0.2
+
+Review stops when acceptance and required checks pass with no concrete blocking defect. P3 suggestions remain optional, repeat reviews focus on repairs, and unchanged evidence is reused. Optional suggestions no longer count as progress on an unresolved blocker.
 
 ## Quick Start
 
@@ -240,7 +246,7 @@ Validation preserves the real exit status and returns bounded diagnostics with a
 
 ## Version and Reference
 
-The package is **5.0.1** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
+The package is **5.0.2** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
 
 Authoritative details live in:
 

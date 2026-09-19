@@ -16,8 +16,8 @@ from .budget import (
 )
 
 SCHEMA_VERSION = 4
-DISTRIBUTION_VERSION = "5.0.1"
-PLUGIN_VERSION = "5.0.1"
+DISTRIBUTION_VERSION = "5.0.2"
+PLUGIN_VERSION = "5.0.2"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -49,6 +49,7 @@ STRICT_RISKS = {
 STANDARD_RISKS = {"mediumRisk", "publicContract", "isolatedWriter", "wideValidation", "candidateReview", "repair", "independentReview"}
 FINDING_ORIGINS = {"implementation", "plan-contract", "validation", "integration"}
 FINDING_PRIORITIES = {"P0", "P1", "P2", "P3"}
+BLOCKING_PRIORITIES = {"P0", "P1", "P2"}
 TASK_ROLES = {"manager", "worker", "reviewer", "explorer"}
 DEFAULT_CONTEXT_POLICY = {
     "maxPacketBytes": 16384,
@@ -1578,7 +1579,7 @@ def validate_review(
                         result.error("review.full_required", "delta validation contract changed; a full review is required")
                     previous_ids = {
                         str(item.get("findingId")) for item in previous.get("findings") or []
-                        if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}
+                        if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in BLOCKING_PRIORITIES
                     }
                     if previous_ids and (not isinstance(dispositions, Mapping) or previous_ids - set(dispositions)):
                         result.error("review.delta_dispositions", "every prior material finding requires a disposition")
@@ -1611,6 +1612,16 @@ def validate_review(
         result.error("review.cycle", f"review cycle must be between 1 and {max_repairs + 1}")
     subject = review.get("subject") or {}
     kind = subject.get("kind") if isinstance(subject, Mapping) else None
+    if kind in {"candidate", "plan"}:
+        blocking = bool(unresolved_finding_ids(review)) or any(
+            isinstance(item, Mapping) and item.get("priority") in BLOCKING_PRIORITIES
+            for item in as_list(review.get("findings")))
+        failed_validation = any(isinstance(item, Mapping) and item.get("passed") is False
+                                for item in as_list(review.get("validation")))
+        if review.get("status") == "Accepted" and (blocking or failed_validation):
+            result.error("review.acceptance", "Accepted review requires no unresolved P0-P2 findings or failed validation")
+        if review.get("status") == "ChangesRequested" and not blocking:
+            result.error("review.blocker_required", "ChangesRequested requires a concrete P0-P2 finding; P3 suggestions do not block acceptance")
     if kind == "candidate":
         if not task:
             result.error("review.task_required", "candidate review requires its task packet")
@@ -1652,6 +1663,21 @@ def validate_review(
 
 
 
+def unresolved_finding_ids(review: Mapping[str, Any]) -> set[str]:
+    """Return current and carried blocking IDs; P3 never drives repair progress."""
+    ids = {str(item.get("findingId")) for item in as_list(review.get("findings"))
+           if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in BLOCKING_PRIORITIES}
+    spec = review.get("reviewSpec") if isinstance(review.get("reviewSpec"), Mapping) else {}
+    dispositions = review.get("findingDispositions") if isinstance(review.get("findingDispositions"), Mapping) else {}
+    for finding_id in as_list(spec.get("findingIds")):
+        value = dispositions.get(str(finding_id))
+        if isinstance(value, Mapping):
+            value = value.get("disposition") or value.get("status") or value.get("state")
+        if str(value or "").strip().lower() != "resolved":
+            ids.add(str(finding_id))
+    return ids
+
+
 def assess_repair_progress(task: Mapping[str, Any], review: Mapping[str, Any]) -> str:
     """Return repair, accept, or replan from stable findings and manager evidence."""
     if review.get("status") == "Accepted":
@@ -1660,7 +1686,7 @@ def assess_repair_progress(task: Mapping[str, Any], review: Mapping[str, Any]) -
     configured_repairs = ((((task.get("budget") or {}).get("policy") or {}).get("maxRepairs", 3)))
     max_repairs = configured_repairs if isinstance(configured_repairs, int) and not isinstance(configured_repairs, bool) and 0 <= configured_repairs <= 3 else 3
     history = ((task.get("execution") or {}).get("repairHistory") or [])
-    current_ids = {str(item.get("findingId")) for item in review.get("findings") or [] if isinstance(item, Mapping) and item.get("findingId")}
+    current_ids = unresolved_finding_ids(review)
     previous_ids = set(history[-1].get("remainingFindingIds") or []) if history else set()
     latest = history[-1] if history else {}
     if cycle >= max_repairs + 1 or latest.get("scopeChanged") or latest.get("approachInvalid"):

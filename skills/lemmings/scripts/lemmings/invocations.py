@@ -14,6 +14,7 @@ from .models import normalize_route_failure
 from .budget import consume_context_expansions, extend_budget, new_task_budget, reserve_tool_calls, settle_tool_calls
 
 from .contracts import (
+    BLOCKING_PRIORITIES,
     DEFAULT_INVOCATION_LIMITS,
     SCHEMA_VERSION,
     as_list,
@@ -27,6 +28,7 @@ from .contracts import (
     review_digest,
     route_name,
     assess_repair_progress,
+    unresolved_finding_ids,
     validate_review,
     validate_agent_result,
     validate_budget_ledger,
@@ -669,16 +671,7 @@ def start_repair(
         if review is not None:
             if review.get("status") != "ChangesRequested":
                 raise ValueError("repair start requires a ChangesRequested immutable review")
-            findings = [item for item in review.get("findings") or [] if isinstance(item, Mapping)]
-            source_ids = [str(item.get("findingId")) for item in findings if item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}]
-            source_spec = review.get("reviewSpec") if isinstance(review.get("reviewSpec"), Mapping) else {}
-            source_dispositions = review.get("findingDispositions") if isinstance(review.get("findingDispositions"), Mapping) else {}
-            for finding_id in as_list(source_spec.get("findingIds")):
-                state = source_dispositions.get(str(finding_id))
-                if isinstance(state, Mapping):
-                    state = state.get("disposition") or state.get("status") or state.get("state")
-                if str(state or "").strip().lower() != "resolved" and str(finding_id) not in source_ids:
-                    source_ids.append(str(finding_id))
+            source_ids = sorted(unresolved_finding_ids(review))
             source_digest = review_digest(review)
             source_head = (review.get("subject") or {}).get("headSha") if isinstance(review.get("subject"), Mapping) else None
             candidate_refs = {str(value) for value in (review_ref, review.get("_evidencePath")) if value}
@@ -795,18 +788,7 @@ def apply_review(
         lane = str(spec.get("reviewLane") or f"{review.get('hostId') or 'native'}::{review.get('reviewerModel') or 'current-host/default'}")
         review_basis = _review_basis(spec, candidate_subject.get("headSha"))
         execution = task.setdefault("execution", {})
-        material_finding_ids = {
-            str(item.get("findingId")) for item in review.get("findings") or []
-            if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}
-        }
-        predecessor_dispositions = review.get("findingDispositions") if isinstance(review.get("findingDispositions"), Mapping) else {}
-        for finding_id in as_list(spec.get("findingIds")):
-            state = predecessor_dispositions.get(str(finding_id))
-            if isinstance(state, Mapping):
-                state = state.get("disposition") or state.get("status") or state.get("state")
-            if str(state or "").strip().lower() != "resolved":
-                material_finding_ids.add(str(finding_id))
-        material_finding_ids = sorted(material_finding_ids)
+        material_finding_ids = sorted(unresolved_finding_ids(review))
         chains = execution.setdefault("reviewChains", {})
         if not isinstance(chains, dict):
             raise ValueError("execution.reviewChains must be an object")
@@ -842,7 +824,7 @@ def apply_review(
 
             current_ids = {
                 str(item.get("findingId")) for item in review.get("findings") or []
-                if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in {"P0", "P1", "P2"}
+                if isinstance(item, Mapping) and item.get("findingId") and item.get("priority") in BLOCKING_PRIORITIES
             }
             resolved = sorted({finding_id for finding_id in target_ids if disposition_state(dispositions[finding_id]) == "resolved"})
             remaining = sorted((target_ids - set(resolved)) | current_ids)
