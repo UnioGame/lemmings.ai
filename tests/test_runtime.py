@@ -274,15 +274,21 @@ class ModelsAndUsageV4Tests(unittest.TestCase):
             self.assertEqual(original_config, json.dumps(config, sort_keys=True))
             self.assertTrue(validate_task(current, config).ok, validate_task(current, config).as_dict())
 
+            repo = Path(temp)
+            base = init_repo(repo)
+            (repo / "tracked.txt").write_text("candidate\n", encoding="utf-8")
+            git(repo, "commit", "-am", "candidate")
+            head = git(repo, "rev-parse", "HEAD")
             candidate = json.loads(json.dumps(current))
-            candidate.update({"state": "Candidate", "previousState": "Active", "baseSha": "base"})
+            candidate.update({"state": "Candidate", "previousState": "Active", "baseSha": base})
             candidate["models"]["actual"] = candidate["models"]["assigned"]
-            candidate["commits"]["candidate"] = "head"
+            candidate["commits"]["candidate"] = head
             candidate["execution"].update({"handoff": {"changedPaths": []}, "validationEvidence": ["ok"]})
             ready_candidate(candidate)
             candidate["execution"]["invocations"].append(derive_context_packet(candidate, None, "reviewer", {"profile": config}))
-            reviewer = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": "head"})
-            wrong_range = handle({"event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": "other"})
+            hook_context = {"_repoRoot": str(repo), "_taskPath": str(path)}
+            reviewer = handle({**hook_context, "event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": head})
+            wrong_range = handle({**hook_context, "event": "PreToolUse", "tool_name": "spawn_agent", "task": candidate, "profile": config, "task_name": "lemmings-reviewer", "requestedHostId": "opencode", "requestedModel": "openai-alt/gpt-5.6-sol:high", "reviewHead": "other"})
             self.assertEqual("allow", reviewer["decision"])
             self.assertEqual("block", wrong_range["decision"])
 
