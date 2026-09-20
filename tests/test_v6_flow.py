@@ -140,6 +140,12 @@ class AccountingAndFlowTests(unittest.TestCase):
             repaired=submit_flow(repo,owner,profile(),repair_worker['invocationId'],{'status':'succeeded','candidateHead':fixed,'acceptanceEvidence':['boundary fixed'],'validationEvidence':[]})
             self.assertEqual('dispatch-reviewer',repaired['actions'][0]['type']);delta=repaired['actions'][0]['invocation']['reviewSpec'];self.assertEqual('delta',delta['mode']);self.assertEqual(['F1'],delta['findingIds'])
 
+    def test_phase_projects_wave_and_serializes_overlapping_strict_writers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo=Path(temp);init_repo(repo);phase={'schemaVersion':1,'phaseId':'P1','contracts':[],'maxConcurrentWriters':2,'validation':{'commands':['git diff --check']},'managerDecision':{'roleAssignments':{'reviewer':{'hostId':'native','providerId':'p','modelId':'r'}},'accountingMode':'invocation-v1','hostCapabilities':{}},'tasks':[strict_brief('A'),strict_brief('B')]};source=repo/'phase-brief.json';owner=repo/'phase.json';source.write_text(json.dumps(phase),encoding='utf-8')
+            started=start_flow(repo,source,owner,profile());advanced=submit_flow(repo,owner,profile(),started['actions'][0]['invocationId'],{'verdict':'Accepted','findings':[]})
+            workers=[item for item in advanced['actions'] if item['type']=='dispatch-worker'];self.assertEqual(1,len(workers),advanced)
+            saved=read_object(owner);states=[read_object(repo/ref)['state'] for ref in saved['taskRefs']];self.assertEqual(['Active','Ready'],states)
     def test_phase_gate_then_dependency_ready_wave(self):
         with tempfile.TemporaryDirectory() as temp:
             repo=Path(temp);init_repo(repo);task=strict_brief(task_id='A');task['managerDecision']['reviewRequired']=False

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .budget import new_task_budget, reserve_tool_calls, settle_tool_calls
-from .contracts import SCHEMA_VERSION, as_list, git, plan_digest, read_object, review_digest, resolve_auto_mode, validate_phase, validate_review, validate_task, write_object
+from .contracts import SCHEMA_VERSION, as_list, git, plan_digest, read_object, review_digest, resolve_auto_mode, validate_phase, validate_review, validate_task, validate_wave, write_object
 from .invocations import find_invocation, record_invocation, record_route_failure, start_repair, task_lock
 from .review_workflow import start_review, submit_review
 from .readiness import prepare_candidate, validation_digest
@@ -329,16 +329,40 @@ def advance_phase(repo: Path, phase_path: Path, profile: Mapping[str, Any]) -> d
         invocation["limits"]["maxToolCalls"]=grant; phase["revision"]+=1; invocation["ownerRevision"]=phase["revision"]; invocation["taskRevision"]=phase["revision"]; phase["execution"]["invocations"].append(invocation); write_object(phase_path,phase)
         return _result(phase,[_dispatch(invocation)])
     if gate.get("status")!="Accepted": return _result(phase,[_action("replan-required",reason="phase gate rejected")],ok=False)
-    task_map={node["taskId"]:node for node in phase.get("taskDag") or []}; states={}
-    for node in phase.get("taskDag") or []:
-        task=read_object(repo/node["taskRef"]); states[node["taskId"]]=task.get("state")
-    if all(value=="Integrated" for value in states.values()): return _result(phase,[_action("integrate",phaseId=phase.get("phaseId"),reason="run phase validation")])
-    ready=[node for node in phase.get("taskDag") or [] if states[node["taskId"]] not in TERMINAL and all(states.get(dep)=="Integrated" for dep in node.get("dependencies") or [])]
-    actions=[]
-    for node in ready[:max(1,int(phase.get("maxConcurrentWriters",1)))]:
-        child=repo/node["taskRef"]; result=advance_task(repo,child,profile); actions.extend({**item,"owner":node["taskRef"]} for item in result["actions"])
-    return _result(read_object(phase_path),actions or [_action("blocked",reason="phase has no dependency-ready task")],ok=bool(actions))
-
+    nodes = list(phase.get("taskDag") or [])
+    tasks = {node["taskId"]: read_object(repo / node["taskRef"]) for node in nodes}
+    states = {task_id: task.get("state") for task_id, task in tasks.items()}
+    if all(value == "Integrated" for value in states.values()):
+        return _result(phase, [_action("integrate", phaseId=phase.get("phaseId"), reason="run phase validation")])
+    dependency_ready = [node for node in nodes if states[node["taskId"]] not in TERMINAL and all(states.get(dep) == "Integrated" for dep in node.get("dependencies") or [])]
+    actions = []
+    # Resume already-started work before opening another writer lane.
+    continuing = [node for node in dependency_ready if states[node["taskId"]] != "Ready"]
+    for node in continuing:
+        result = advance_task(repo, repo / node["taskRef"], profile)
+        actions.extend({**item, "owner": node["taskRef"]} for item in result["actions"])
+    if actions:
+        return _result(read_object(phase_path), actions)
+    selected = []
+    rejection = None
+    limit = max(1, int(phase.get("maxConcurrentWriters", 1)))
+    for node in [item for item in dependency_ready if states[item["taskId"]] == "Ready"]:
+        if len(selected) >= limit:
+            break
+        projected = {task_id: copy.deepcopy(task) for task_id, task in tasks.items()}
+        for chosen in [*selected, node]:
+            projected[chosen["taskId"]]["previousState"] = projected[chosen["taskId"]].get("state")
+            projected[chosen["taskId"]]["state"] = "Active"
+        checked = validate_wave(repo, projected.values(), phase, profile, complete=True)
+        if checked.ok:
+            selected.append(node)
+        elif rejection is None:
+            rejection = checked.findings[0].message
+    for node in selected:
+        result = advance_task(repo, repo / node["taskRef"], profile)
+        actions.extend({**item, "owner": node["taskRef"]} for item in result["actions"])
+    reason = rejection or "phase has no dependency-ready task"
+    return _result(read_object(phase_path), actions or [_action("blocked", reason=reason)], ok=bool(actions))
 
 def submit_phase(repo: Path, phase_path: Path, profile: Mapping[str, Any], invocation_id: str, payload: Mapping[str, Any], *, failure: bool = False, host_receipt: Mapping[str, Any] | None=None) -> dict[str, Any]:
     phase=read_object(phase_path); invocation=next((item for item in (phase.get("execution") or {}).get("invocations",[]) if item.get("invocationId")==invocation_id),None)
