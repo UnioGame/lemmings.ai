@@ -833,7 +833,9 @@ def start_repair(
             source_ids = [str(item) for item in as_list(stored.get("targetFindingIds")) if item]
             source_digest = str(stored.get("digest") or "")
             source_head = stored.get("headSha")
-            source_ref = "integration:" + source_digest
+            source_ref = str(stored.get("reviewRef") or "")
+            if not source_ref:
+                raise ValueError("repair integration source requires an immutable reviewRef")
         else:
             raise ValueError("repair start requires an immutable review, failed readiness, or integration evidence")
         active = task.setdefault("execution", {}).get("activeRepair")

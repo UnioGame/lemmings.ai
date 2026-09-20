@@ -37,6 +37,11 @@ def brief(*,accounting='invocation-v1',capabilities=None,task_id='T1')->dict:
             'managerDecision':{'requestedMode':'standard','resolvedMode':'standard','riskClass':'medium','modeReasons':['workerRequired'],'workerRequired':True,'reviewRequired':True,'planReviewRequired':False,'reviewPolicy':'single','workspace':{'policy':'current','backend':'current','reason':'one writer'},'roleAssignments':{'worker':'native::current-host/default','reviewer':'native::current-host/default'},'accountingMode':accounting,'hostCapabilities':capabilities or {}}}
 
 
+def strict_brief(task_id='S1')->dict:
+    value=brief(task_id=task_id)
+    value['managerDecision'].update(requestedMode='auto',resolvedMode='strict',riskClass='high',modeReasons=['highRisk'],workspace={'policy':'isolated','backend':'code-worktree','reason':'phase writer','workspaceId':'ws-'+task_id,'managedBy':'external','lifetime':'phase','estimatedGiB':0,'approval':'not-required'})
+    return value
+
 class AccountingAndFlowTests(unittest.TestCase):
     def test_default_is_invocation_accounting(self):
         self.assertEqual('invocation-v1',profile()['accountingMode'])
@@ -90,7 +95,7 @@ class AccountingAndFlowTests(unittest.TestCase):
             repo=Path(temp);init_repo(repo);task=brief(task_id='A');phase={'schemaVersion':1,'phaseId':'P1','validation':{'commands':['git diff --check']},'managerDecision':{'roleAssignments':{'reviewer':{'hostId':'native','providerId':'p','modelId':'r'}},'accountingMode':'host-v1','hostCapabilities':{}},'tasks':[task]};source=repo/'p.json';source.write_text(json.dumps(phase),encoding='utf-8')
             with self.assertRaisesRegex(ValueError,'usageAccounting'):start_flow(repo,source,repo/'phase.json',profile())
             self.assertFalse((repo/'tasks').exists())
-            phase['managerDecision']['accountingMode']='invocation-v1';source.write_text(json.dumps(phase),encoding='utf-8');started=start_flow(repo,source,repo/'phase.json',profile())
+            phase['managerDecision']['accountingMode']='invocation-v1';phase['tasks']=[strict_brief(task_id='A')];source.write_text(json.dumps(phase),encoding='utf-8');started=start_flow(repo,source,repo/'phase.json',profile())
             saved=read_object(repo/'phase.json');saved['execution']['phaseGate']={'status':'Accepted'};write_object(repo/'phase.json',saved)
             child=repo/saved['taskRefs'][0];child_value=read_object(child);child_value['state']='Integrated';child_value['close']['mergeCommit']='deadbeef';write_object(child,child_value)
             with self.assertRaisesRegex(ValueError,'contain every child'):finish_phase(repo,repo/'phase.json')
@@ -102,8 +107,24 @@ class AccountingAndFlowTests(unittest.TestCase):
 
     def test_integration_failure_opens_bounded_repair(self):
         with tempfile.TemporaryDirectory() as temp:
-            repo=Path(temp);init_repo(repo);owner=repo/'task.json';value=brief();value['validation']['commands']=['git rev-parse --verify missing-ref'];prepare_task(repo,owner,value,profile=profile());task=read_object(owner);head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip();task['state']='Accepted';task['commits']['candidate']=head;write_object(owner,task)
-            result=finish_task(repo,owner);stored=read_object(owner);self.assertEqual('Repair',stored['state']);self.assertEqual('delta',stored['reviewSpec']['mode']);self.assertEqual(1,stored['budget']['usage']['repairCycles']);self.assertFalse(result['ok'])
+            repo=Path(temp);init_repo(repo);owner=repo/'task.json';value=brief();value['ownership']['owned'].append('ok.txt');value['validation']['allowedOutputs']=['reviews/**'];value['validation']['commands']=["python -c \"import pathlib,sys;sys.exit(0 if pathlib.Path('ok.txt').exists() else 1)\""];prepare_task(repo,owner,value,profile=profile());task=read_object(owner);head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip();task['state']='Accepted';task['commits']['candidate']=head;write_object(owner,task)
+            result=finish_task(repo,owner);stored=read_object(owner);self.assertEqual('Repair',stored['state']);self.assertEqual('delta',stored['reviewSpec']['mode']);self.assertEqual(1,stored['budget']['usage']['repairCycles']);self.assertFalse(result['ok']);self.assertTrue((repo/stored['reviewSpec']['previousReviewRef']).is_file())
+            dispatched=advance_task(repo,owner,profile());worker=dispatched['actions'][0]['invocation'];(repo/'ok.txt').write_text('fixed\n',encoding='utf-8');subprocess.run(['git','add','ok.txt'],cwd=repo,check=True);subprocess.run(['git','commit','-qm','integration repair'],cwd=repo,check=True);fixed=subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
+            candidate=submit_flow(repo,owner,profile(),worker['invocationId'],{'status':'succeeded','candidateHead':fixed,'acceptanceEvidence':['integration fixed'],'validationEvidence':[]});reviewer=candidate['actions'][0]['invocation'];finding_id=read_object(owner)['execution']['activeRepair']['targetFindingIds'][0]
+            accepted=submit_flow(repo,owner,profile(),reviewer['invocationId'],{'status':'succeeded','candidateHead':fixed,'acceptanceEvidence':['integration check inspected'],'validationEvidence':[],'findings':[],'blockers':[],'remainingRisks':[],'findingDispositions':{finding_id:'resolved'},'verdict':'Accepted'})
+            self.assertEqual('Accepted',accepted['status'])
+    def test_phase_rejects_standard_child_before_writes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo=Path(temp);init_repo(repo);phase={'schemaVersion':1,'phaseId':'P1','validation':{'commands':['git diff --check']},'managerDecision':{'roleAssignments':{'reviewer':{'hostId':'native','providerId':'p','modelId':'r'}},'accountingMode':'invocation-v1','hostCapabilities':{}},'tasks':[brief(task_id='A')]};source=repo/'p.json';source.write_text(json.dumps(phase),encoding='utf-8')
+            with self.assertRaisesRegex(ValueError,'Strict mode'):start_flow(repo,source,repo/'phase.json',profile())
+            self.assertFalse((repo/'tasks').exists());self.assertFalse((repo/'phase.json').exists())
+
+    def test_replan_scope_invalidates_effective_config_and_recomputes_mode(self):
+        with tempfile.TemporaryDirectory() as temp:
+            from lemmings.effective import digest
+            repo=Path(temp);init_repo(repo);owner=repo/'task.json';prepare_task(repo,owner,brief(),profile=profile());task=read_object(owner);effective={'schemaVersion':5,'profile':{'name':'x','roleRoutes':{},'sources':{}},'rules':{'projects':[],'ruleRefs':[],'digest':'x'}};effective['digest']=digest(effective);task['effectiveConfig']=effective;task['state']='Replan Required';budget=json.loads(json.dumps(task['budget']));write_object(owner,task)
+            result=replan_flow(repo,owner,{'requestedMode':'auto','riskClass':'high','ownership':{'owned':['owned.txt'],'shared':['contract.json'],'forbidden':[]},'workspace':{'policy':'isolated','backend':'code-worktree','reason':'shared contract','workspaceId':'ws-replan','managedBy':'external','lifetime':'task','estimatedGiB':0,'approval':'not-required'}},profile());stored=read_object(owner)
+            self.assertEqual('Ready',result['status']);self.assertEqual('strict',stored['resolvedMode']);self.assertNotIn('effectiveConfig',stored);self.assertEqual(budget,stored['budget'])
     def test_changes_requested_opens_one_repair_and_dispatches_delta_worker(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);repo=root/'repo';repo.mkdir();init_repo(repo);source=root/'brief.json';owner=repo/'task.json';source.write_text(json.dumps(brief()),encoding='utf-8')
@@ -121,7 +142,7 @@ class AccountingAndFlowTests(unittest.TestCase):
 
     def test_phase_gate_then_dependency_ready_wave(self):
         with tempfile.TemporaryDirectory() as temp:
-            repo=Path(temp);init_repo(repo);task=brief(task_id='A');task['managerDecision']['reviewRequired']=False
+            repo=Path(temp);init_repo(repo);task=strict_brief(task_id='A');task['managerDecision']['reviewRequired']=False
             phase={'schemaVersion':1,'phaseId':'P1','contracts':[],'maxConcurrentWriters':1,'validation':{'commands':['git diff --check']},'managerDecision':{'roleAssignments':{'reviewer':{'hostId':'native','providerId':'current-host','modelId':'default'}},'accountingMode':'invocation-v1','hostCapabilities':{}},'tasks':[task]}
             source=repo/'phase-brief.json';owner=repo/'phase.json';source.write_text(json.dumps(phase),encoding='utf-8')
             started=start_flow(repo,source,owner,profile());self.assertEqual('dispatch-reviewer',started['actions'][0]['type'])
@@ -140,6 +161,12 @@ class MigrationTests(unittest.TestCase):
             proposal=propose_migration(repo,owner);out=repo/'migrated';result=apply_migration(repo,proposal,proposal['digest'],out)
             migrated=read_object(out/'task.json');self.assertEqual(5,migrated['schemaVersion']);self.assertEqual(['worker'],migrated['budget']['lockedRoles']);self.assertTrue((out/'reviews/r.json').is_file());self.assertEqual('migrated/reviews/r.json',migrated['reviewRef']);self.assertFalse(result['markerSwitched'])
 
+    def test_apply_rejects_redigested_truncated_graph(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo=Path(temp);init_repo(repo);task=json.loads((ROOT/'skills/lemmings/templates/task.json').read_text(encoding='utf-8'));task['schemaVersion']=4;task['reviewRef']='review.json';task['reviewHistory']=['review.json'];review=json.loads((ROOT/'skills/lemmings/templates/review.json').read_text(encoding='utf-8'));review['schemaVersion']=4;(repo/'task.json').write_text(json.dumps(task),encoding='utf-8');(repo/'review.json').write_text(json.dumps(review),encoding='utf-8')
+            proposal=propose_migration(repo,repo/'task.json');proposal['entries']=[item for item in proposal['entries'] if item['kind']=='task'];proposal['digest']=__import__('hashlib').sha256(json.dumps({k:v for k,v in proposal.items() if k!='digest'},sort_keys=True,separators=(',',':')).encode()).hexdigest()
+            with self.assertRaisesRegex(ValueError,'complete canonical'):apply_migration(repo,proposal,proposal['digest'],repo/'migrated')
+            self.assertFalse((repo/'migrated').exists())
     def test_mixed_graph_and_active_reservation_fail_closed(self):
         with tempfile.TemporaryDirectory() as temp:
             repo=Path(temp);init_repo(repo);task=json.loads((ROOT/'skills/lemmings/templates/task.json').read_text(encoding='utf-8'));task['schemaVersion']=4;task['reviewRef']='review.json';task['reviewHistory']=['review.json'];(repo/'task.json').write_text(json.dumps(task),encoding='utf-8');(repo/'review.json').write_text(json.dumps({'schemaVersion':5,'reviewId':'R'}),encoding='utf-8')

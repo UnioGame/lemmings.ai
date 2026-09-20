@@ -108,7 +108,7 @@ def move_if_present(source: Path, destination: Path, moved: list[tuple[Path, Pat
 
 def install(args: argparse.Namespace) -> int:
     if sys.version_info < (3, 10):
-        raise ValueError("Lemmings 5.0 requires Python 3.10 or newer")
+        raise ValueError("Lemmings 6.0 requires Python 3.10 or newer")
     skill_source = Path(__file__).resolve().parents[1]
     package_root = Path(__file__).resolve().parents[3]
     if "Library" in package_root.parts and "PackageCache" in package_root.parts:
@@ -162,7 +162,7 @@ def install(args: argparse.Namespace) -> int:
         for name in OWNED_AGENTS:
             if (agents_source / name).is_file() or (agents_target / name).exists():
                 print(f"replace/delete: {agents_target / name}")
-        print("Lemmings 5.0 install dry run complete.")
+        print("Lemmings 6.0 install dry run complete.")
         return 0
 
     transaction = Path(tempfile.mkdtemp(prefix=".lemmings-install-", dir=repo))

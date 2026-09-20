@@ -109,6 +109,12 @@ def apply_migration(repo:Path,proposal:Mapping[str,Any],confirmation:str,output_
     expected=_digest({k:v for k,v in proposal.items() if k!="digest"})
     if proposal.get("digest")!=expected or confirmation!=expected:raise ValueError("migration confirmation digest does not match the proposal")
     if proposal.get("sourceSchemaVersion")!=4 or proposal.get("targetSchemaVersion")!=SCHEMA_VERSION:raise ValueError("migration proposal versions are invalid")
+    owner_ref = proposal.get("owner")
+    if not isinstance(owner_ref, str) or not owner_ref:
+        raise ValueError("migration proposal owner is missing")
+    canonical = propose_migration(repo.resolve(), (repo / owner_ref).resolve())
+    if canonical.get("digest") != expected or canonical.get("entries") != proposal.get("entries"):
+        raise ValueError("migration proposal does not contain the complete canonical artifact graph")
     repo=repo.resolve();output_root=output_root.resolve();planned=[]
     try:
         output_root.relative_to(repo)

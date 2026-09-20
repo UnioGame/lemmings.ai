@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .budget import new_task_budget, reserve_tool_calls, settle_tool_calls
-from .contracts import SCHEMA_VERSION, as_list, git, plan_digest, read_object, review_digest, validate_phase, validate_review, validate_task, write_object
+from .contracts import SCHEMA_VERSION, as_list, git, plan_digest, read_object, review_digest, resolve_auto_mode, validate_phase, validate_review, validate_task, write_object
 from .invocations import find_invocation, record_invocation, record_route_failure, start_repair, task_lock
 from .review_workflow import start_review, submit_review
-from .readiness import prepare_candidate
+from .readiness import prepare_candidate, validation_digest
 from .task_workflow import _validate_brief, prepare_task, submit_candidate
 
 PHASE_BRIEF_VERSION = 1
@@ -209,8 +209,30 @@ def finish_task(repo: Path, task_path: Path) -> dict[str, Any]:
             evidence.append({"headSha": head, "command": str(command), "passed": process.returncode == 0, "exitCode": process.returncode, "diagnostics": {"tail": (process.stdout + process.stderr)[-4096:]}})
         if not evidence or not all(item["passed"] for item in evidence):
             failure = evidence or [{"passed": False, "reason": "no validation commands"}]
-            digest = hashlib.sha256(json.dumps(failure, sort_keys=True).encode()).hexdigest()
-            integration_failure = {"headSha": head, "digest": digest, "targetFindingIds": ["integration-" + digest[:12]], "evidence": failure}
+            evidence_digest = hashlib.sha256(json.dumps(failure, sort_keys=True).encode()).hexdigest()
+            finding_id = "integration-" + evidence_digest[:12]
+            readiness = (task.get("execution") or {}).get("candidateReadiness") or {}
+            predecessor = {
+                "schemaVersion": SCHEMA_VERSION, "revision": 0,
+                "reviewId": "review-integration-" + evidence_digest[:16],
+                "subject": {"kind": "candidate", "taskId": task.get("taskId"), "baseSha": task.get("baseSha"), "headSha": head},
+                "status": "ChangesRequested", "hostId": "runtime", "reviewerModel": "deterministic/integration-validator",
+                "cycle": len(as_list((task.get("execution") or {}).get("repairHistory"))) + 1,
+                "reviewSpec": {"mode": "full", "fullBaseSha": task.get("baseSha"), "candidateHead": head,
+                               "readinessDigest": readiness.get("digest"), "planDigest": None,
+                               "validationDigest": validation_digest(task), "previousReviewRef": None,
+                               "previousReviewDigest": None, "previousHead": None, "findingIds": []},
+                "findingDispositions": {},
+                "findings": [{"findingId": finding_id, "priority": "P1", "origin": "implementation", "summary": "Integration validation failed"}],
+                "validation": copy.deepcopy(failure),
+            }
+            review_path = task_path.parent / "reviews" / f"{task_path.stem}-integration-{evidence_digest[:16]}.json"
+            if review_path.exists() and read_object(review_path) != predecessor:
+                raise ValueError("integration review artifact already contains different immutable evidence")
+            if not review_path.exists():
+                write_object(review_path, predecessor)
+            predecessor_digest = review_digest(predecessor)
+            integration_failure = {"headSha": head, "digest": predecessor_digest, "reviewRef": _relative(repo, review_path), "targetFindingIds": [finding_id], "evidence": failure, "evidenceDigest": evidence_digest}
             task.setdefault("execution", {})["integrationFailure"] = integration_failure
             task["revision"] += 1
             failure_revision = task["revision"]
@@ -262,7 +284,9 @@ def prepare_phase(repo: Path, output: Path, brief: Mapping[str, Any], profile: M
     for child in brief["tasks"]:
         if not isinstance(child, Mapping):
             raise ValueError("PhaseBrief tasks must contain TaskBrief objects")
-        _validate_brief(child)
+        _, child_decision, _ = _validate_brief(child)
+        if child_decision.get("resolvedMode") != "strict":
+            raise ValueError("every Phase TaskBrief must resolve to Strict mode")
         task_id = str(child.get("taskId"))
         if task_id in ids:
             raise ValueError("PhaseBrief taskIds must be unique")
@@ -413,7 +437,7 @@ def replan_flow(repo: Path, owner_path: Path, amendment: Mapping[str, Any], prof
         raise ValueError("flow replan requires an owner in Replan Required state")
     if _pending(owner):
         raise ValueError("cannot replan while an invocation is active")
-    allowed = {"goal", "acceptance", "risks", "validation", "ownership", "contracts", "taskDag", "maxConcurrentWriters"}
+    allowed = {"goal", "acceptance", "risks", "validation", "ownership", "workspace", "requestedMode", "riskClass", "workerRequired", "reviewRequired", "modeReasons", "contracts", "taskDag", "maxConcurrentWriters"}
     unknown = set(amendment) - allowed
     if unknown:
         raise ValueError("unsupported replan fields: " + ", ".join(sorted(unknown)))
@@ -432,6 +456,18 @@ def replan_flow(repo: Path, owner_path: Path, amendment: Mapping[str, Any], prof
     proposed["reviewSpec"] = None
     proposed["revision"] = int(owner.get("revision", 0)) + 1
     if proposed.get("taskId"):
+        scope_fields = {"goal", "acceptance", "ownership", "workspace", "requestedMode", "riskClass", "workerRequired", "reviewRequired", "modeReasons"}
+        if set(amendment).intersection(scope_fields):
+            proposed.pop("effectiveConfig", None)
+            proposed.setdefault("models", {})["actual"] = None
+        resolved = resolve_auto_mode({"riskClass": proposed.get("riskClass"), "modeReasons": proposed.get("modeReasons"),
+                                      "ownership": proposed.get("ownership"), "workspace": proposed.get("workspace"),
+                                      "writerCount": proposed.get("writerCount"), "ownershipDomainCount": proposed.get("ownershipDomainCount"),
+                                      "workerRequired": proposed.get("workerRequired"), "reviewRequired": proposed.get("reviewRequired")},
+                                     requested=str(proposed.get("requestedMode") or "auto"))
+        proposed["resolvedMode"] = resolved["resolvedMode"]
+        proposed["modeReasons"] = resolved["reasons"]
+        proposed["modeFloor"] = resolved["resolvedMode"]
         proposed["state"] = "Ready"
         proposed.setdefault("commits", {})["candidate"] = None
         proposed["commits"]["fix"] = []
