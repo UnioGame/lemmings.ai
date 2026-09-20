@@ -45,6 +45,8 @@ from .invocations import (
     task_lock,
 )
 from .readiness import prepare_candidate
+from .review_workflow import ReviewWorkflowError, start_review, submit_review
+from .task_workflow import TaskBriefError, prepare_task, submit_candidate
 from .bundle import skill_root
 from .models import (
     advance_recovery_route,
@@ -671,7 +673,7 @@ def command_invocation(args: argparse.Namespace) -> int:
         emit(record_invocation(repo, task_path, profile, args.role, args.attempt, args.expected_revision, args.objective, preset=args.preset, freeze=True,
                                subject_kind=getattr(args, "subject_kind", None), dispatch_kind=getattr(args, "dispatch_kind", None),
                                retry_of=getattr(args, "retry_of", None), repair_cycle=getattr(args, "repair_cycle", None),
-                               review_lane=getattr(args, "review_lane", None)))
+                               review_lane=getattr(args, "review_lane", None), accounting_mode=getattr(args, "accounting_mode", None)))
     elif args.invocation_command == "extend":
         emit(extend_task_budget(task_path, expected_revision=args.expected_revision, kind=args.kind, role=args.role, amount=args.amount, unresolved_question=args.unresolved_question, progress=args.progress))
     elif args.invocation_command == "context-use":
@@ -689,7 +691,27 @@ def command_invocation(args: argparse.Namespace) -> int:
         if result_path is None or not result_path.is_file():
             raise ValueError("invocation accept requires an existing AgentResult")
         receipt = read_object(resolve_path(repo, args.host_receipt)) if getattr(args, "host_receipt", None) else None
-        emit(accept_result(repo, task_path, profile, read_object(result_path), args.expected_revision, trusted_usage=receipt))
+        emit(accept_result(repo, task_path, profile, read_object(result_path), args.expected_revision, trusted_usage=receipt,
+                           invocation_id=getattr(args, "invocation_id", None)))
+    return 0
+
+
+def command_task(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    task_path = resolve_path(repo, args.task)
+    brief_path = resolve_path(repo, args.input)
+    if task_path is None or brief_path is None or not brief_path.is_file():
+        raise TaskBriefError("task prepare requires an input JSON and a target Task path")
+    profile = load_profile(repo, args.profile) or {}
+    try:
+        brief = read_object(brief_path)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise TaskBriefError(f"cannot read TaskBrief: {error}") from error
+    try:
+        emit(prepare_task(repo, task_path, brief, profile=profile))
+    except TaskBriefError as error:
+        emit(error.as_dict())
+        return 1
     return 0
 
 
@@ -698,6 +720,19 @@ def command_candidate(args: argparse.Namespace) -> int:
     task_path = resolve_path(repo, args.task)
     if task_path is None or not task_path.is_file():
         raise ValueError("candidate prepare requires an existing Task")
+    if args.candidate_command == "submit":
+        profile = load_profile(repo, args.profile) or {}
+        report_path = resolve_path(repo, args.result)
+        if report_path is None or not report_path.is_file():
+            raise TaskBriefError("candidate submit requires an existing AgentResult", kind="artifact")
+        receipt = read_object(resolve_path(repo, args.host_receipt)) if args.host_receipt else None
+        try:
+            output = submit_candidate(repo, task_path, profile, read_object(report_path), invocation_id=args.invocation_id, host_receipt=receipt)
+        except TaskBriefError as error:
+            emit(error.as_dict())
+            return 1
+        emit(output)
+        return 0 if output.get("ok") else 1
     debts = []
     for value in getattr(args, "debt", []) or []:
         target = resolve_path(repo, value)
@@ -733,6 +768,22 @@ def command_repair(args: argparse.Namespace) -> int:
 def command_review(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
     task_path = resolve_path(repo, args.task)
+    if args.review_command in {"start", "submit"}:
+        if task_path is None or not task_path.is_file():
+            raise ReviewWorkflowError("review requires an existing Task")
+        profile = load_profile(repo, args.profile) or {}
+        if args.review_command == "start":
+            output = start_review(repo, task_path, profile, expected_head=args.head, review_lane=args.review_lane)
+        else:
+            try:
+                report = read_object(resolve_path(repo, args.result))
+            except (OSError, ValueError) as error:
+                raise ReviewWorkflowError(f"cannot read review result: {error}") from error
+            receipt = read_object(resolve_path(repo, args.host_receipt)) if args.host_receipt else None
+            output = submit_review(repo, task_path, profile, report, resolve_path(repo, args.review), host_receipt=receipt,
+                                   invocation_id=args.invocation_id)
+        emit(output)
+        return 0 if output.get("ok") else 1
     review_path = resolve_path(repo, args.review)
     if task_path is None or not task_path.is_file() or review_path is None or not review_path.is_file():
         raise ValueError("review apply requires existing Task and immutable Review")
@@ -821,21 +872,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lemmings", description="Optional tooling for the Lemmings smart skill")
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check", help="validate lifecycle contracts once per artifact"); add_common(check); check.add_argument("--task", action="append"); check.add_argument("--phase"); check.add_argument("--review"); check.add_argument("--all", action="store_true"); check.add_argument("--distribution", action="store_true", help="also compare the installed bundle with the package"); check.add_argument("--dispatchable", action="store_true"); check.add_argument("--batch", action="append"); check.add_argument("--available-slots", type=int); check.add_argument("--active-writers", type=int, default=0); check.add_argument("--active-readers", type=int, default=0); check.set_defaults(run=command_check)
+    task = sub.add_parser("task", help="prepare one canonical Task from a TaskBrief v1"); task_sub = task.add_subparsers(dest="task_command", required=True)
+    task_prepare = task_sub.add_parser("prepare", help="validate and write a TaskBrief v1 once"); add_common(task_prepare); task_prepare.add_argument("--input", required=True); task_prepare.add_argument("--task", required=True); task_prepare.set_defaults(run=command_task)
     doctor = sub.add_parser("doctor", help="verify the installed self-contained runtime"); doctor.add_argument("--repo", default="."); doctor.set_defaults(run=command_doctor)
     invocation = sub.add_parser("invocation", help="persist dispatch and accept matching AgentResult"); invocation_sub = invocation.add_subparsers(dest="invocation_command", required=True)
-    invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.add_argument("--preset", help="named role preset for this new Task"); invocation_create.set_defaults(run=command_invocation)
+    invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.add_argument("--preset", help="named role preset for this new Task"); invocation_create.add_argument("--accounting-mode", choices=["host-v1", "invocation-v1"], help="freeze accounting mode before the first invocation"); invocation_create.set_defaults(run=command_invocation)
     invocation_create.add_argument("--subject-kind", choices=["candidate", "plan", "baseline"]); invocation_create.add_argument("--dispatch-kind", choices=["initial", "review", "repair", "retry", "context-correction", "schema-correction"]); invocation_create.add_argument("--retry-of"); invocation_create.add_argument("--repair-cycle", type=int)
     invocation_create.add_argument("--review-lane", help="stable reviewer host::model identity for cross-review lanes")
-    invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--host-receipt"); invocation_accept.add_argument("--expected-revision", type=int, required=True); invocation_accept.set_defaults(run=command_invocation)
+    invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--host-receipt"); invocation_accept.add_argument("--expected-revision", type=int); invocation_accept.set_defaults(run=command_invocation)
+    invocation_accept.add_argument("--invocation-id", help="saved invocation when the report omits its transport identity")
     invocation_fail = invocation_sub.add_parser("fail"); add_common(invocation_fail); invocation_fail.add_argument("--task", required=True); invocation_fail.add_argument("--failure", required=True); invocation_fail.add_argument("--trusted-tool-calls", type=int); invocation_fail.add_argument("--host-receipt"); invocation_fail.add_argument("--expected-revision", type=int, required=True); invocation_fail.set_defaults(run=command_invocation)
     invocation_extend = invocation_sub.add_parser("extend"); add_common(invocation_extend); invocation_extend.add_argument("--task", required=True); invocation_extend.add_argument("--kind", required=True, choices=["toolCalls", "maxPacketBytes", "maxWorkingSetItems", "maxExpansions"]); invocation_extend.add_argument("--role", choices=["worker", "reviewer", "explorer"]); invocation_extend.add_argument("--amount", type=int, required=True); invocation_extend.add_argument("--unresolved-question", required=True); invocation_extend.add_argument("--progress", required=True); invocation_extend.add_argument("--expected-revision", type=int, required=True); invocation_extend.set_defaults(run=command_invocation)
     invocation_context = invocation_sub.add_parser("context-use"); add_common(invocation_context); invocation_context.add_argument("--task", required=True); invocation_context.add_argument("--amount", type=int, default=1); invocation_context.add_argument("--expected-revision", type=int, required=True); invocation_context.set_defaults(run=command_invocation)
     candidate = sub.add_parser("candidate", help="prepare and validate one immutable candidate"); candidate_sub = candidate.add_subparsers(dest="candidate_command", required=True)
     candidate_prepare = candidate_sub.add_parser("prepare"); add_common(candidate_prepare); candidate_prepare.add_argument("--task", required=True); candidate_prepare.add_argument("--expected-revision", type=int, required=True); candidate_prepare.add_argument("--expected-revision-head", dest="expected_revision_head"); candidate_prepare.add_argument("--debt", action="append", default=[]); candidate_prepare.set_defaults(run=command_candidate)
+    candidate_submit = candidate_sub.add_parser("submit", help="accept, promote, and prepare one worker result"); add_common(candidate_submit); candidate_submit.add_argument("--task", required=True); candidate_submit.add_argument("--invocation-id", required=True); candidate_submit.add_argument("--result", required=True); candidate_submit.add_argument("--host-receipt"); candidate_submit.set_defaults(run=command_candidate)
     repair = sub.add_parser("repair", help="authorize one bounded semantic repair cycle"); repair_sub = repair.add_subparsers(dest="repair_command", required=True)
     repair_start = repair_sub.add_parser("start"); add_common(repair_start); repair_start.add_argument("--task", required=True); repair_start.add_argument("--review"); repair_start.add_argument("--readiness-failure"); repair_start.add_argument("--finding-id", action="append", default=[]); repair_start.add_argument("--progress", required=True); repair_start.add_argument("--plan", required=True); repair_start.add_argument("--narrowed-cause", action="store_true"); repair_start.add_argument("--scope-changed", action="store_true"); repair_start.add_argument("--approach-invalid", action="store_true"); repair_start.add_argument("--expected-revision", type=int, required=True); repair_start.set_defaults(run=command_repair)
     review = sub.add_parser("review", help="apply immutable Review evidence with Task CAS"); review_sub = review.add_subparsers(dest="review_command", required=True)
     review_apply = review_sub.add_parser("apply"); add_common(review_apply); review_apply.add_argument("--task", required=True); review_apply.add_argument("--review", required=True); review_apply.add_argument("--expected-revision", type=int, required=True); review_apply.set_defaults(run=command_review)
+    review_start = review_sub.add_parser("start", help="prepare candidate and reserve reviewer once"); add_common(review_start)
+    review_start.add_argument("--task", required=True); review_start.add_argument("--head", required=True); review_start.add_argument("--review-lane")
+    review_start.set_defaults(run=command_review)
+    review_submit = review_sub.add_parser("submit", help="record reviewer result and build/apply immutable Review"); add_common(review_submit)
+    review_submit.add_argument("--task", required=True); review_submit.add_argument("--result", required=True)
+    review_submit.add_argument("--review", required=True); review_submit.add_argument("--host-receipt")
+    review_submit.add_argument("--invocation-id", help="saved invocation when the report omits its transport identity")
+    review_submit.set_defaults(run=command_review)
     integration = sub.add_parser("integration", help="run declared checks on the exact merged tree"); integration_sub = integration.add_subparsers(dest="integration_command", required=True)
     integration_validate = integration_sub.add_parser("validate"); integration_validate.add_argument("--repo", default="."); integration_validate.add_argument("--task", required=True); integration_validate.add_argument("--expected-revision", type=int, required=True); integration_validate.set_defaults(run=command_integration)
     status = sub.add_parser("status", help="inspect runtime and contract status"); add_common(status, True); status.set_defaults(run=command_status)
@@ -890,6 +953,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
         return int(args.run(args))
+    except TaskBriefError as error:
+        emit(error.as_dict())
+        return 1
+    except (ReviewWorkflowError, TaskBriefError) as error:
+        emit(error.as_dict())
+        return 1
     except (OSError, ValueError, json.JSONDecodeError) as error:
         emit({"ok": False, "error": str(error)})
         return 1

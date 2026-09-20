@@ -52,11 +52,30 @@ Acceptance is the stopping condition: the requested criteria and required checks
 
 Three repair cycles are a ceiling, not a target, and permit at most four candidate checks: the initial candidate and one after each repair. Before a candidate reviewer receives a budget, `candidate prepare` records the exact candidate SHA, plan/validation digests, worker result, ownership, clean-tree checks, bounded command diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt, and readiness is invalidated when the SHA or requirements change. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. Acceptance alone is not integration; declared checks must pass while `HEAD` equals the recorded `close.mergeCommit`.
 
+## 5.0.3
+
+The five-stage workflow remains **Discover → Plan → Refine → Implement → Verify**, with less protocol work for agents. `task prepare` builds a schema-v4 Task from an explicit compact brief, `candidate submit` accepts and prepares a worker result without hand-editing state, and candidate review remains recoverable through `review start` and `review submit`.
+
+Hosts with trusted usage receipts keep `host-v1`. Hosts without them can freeze `invocation-v1`, which counts real invocations across retry, repair, recovery, and replan without pretending unknown tool calls were measured. Reviewer identity comes from the saved reviewer route and is used consistently for dispatch and Review.
+
 ## 5.0.2
 
 Review stops when acceptance and required checks pass with no concrete blocking defect. P3 suggestions remain optional, repeat reviews focus on repairs, and unchanged evidence is reused. Optional suggestions no longer count as progress on an unresolved blocker.
 
 ## Quick Start
+
+The ordinary path uses four manager operations. `task prepare` records the manager's semantic decisions once. `candidate submit` accepts and prepares a worker result. `review start` records the reviewer invocation, and `review submit` constructs and applies immutable Review evidence. The tools manage revisions, Git bindings, digests, and cycle numbers. Repeating an operation reuses saved progress. A malformed report is corrected locally for the same invocation, without restarting implementation or review. Low-level commands remain available for integrations.
+
+Workers can return compact reports: ingestion supplies omitted schema/attempt fields, derives changed paths from Git, and accepts missing empty optional lists. The invocation must still be explicitly identified. Candidate review accepts `id` as `findingId`; priorities, findings, and substantive acceptance/validation evidence are preserved. Missing substantive evidence is requested on its own, not treated as a reason to redo the task.
+
+```text
+lemmings task prepare --input task-brief.json --task docs/tasks/change.task.json
+lemmings candidate submit --task docs/tasks/change.task.json --invocation-id <worker-id> --result <worker-report.json>
+lemmings review start --task docs/tasks/change.task.json --head <candidate-sha>
+lemmings review submit --task docs/tasks/change.task.json --result <report.json> --review <allowed-artifact-path.json> --host-receipt <receipt.json>
+```
+
+`TaskBrief v1` contains the goal, acceptance, risks, risk-to-test mapping, ownership, minimal working set, declared checks, and an explicit manager decision block for mode, review, workspace, role routes, and accounting mode. The tool hashes references and fills technical Task fields; it never chooses those decisions and never overwrites an existing Task. See [the reusable brief template](skills/lemmings/templates/task-brief.json).
 
 Lemmings requires Git and Python 3.10+. Provider TOML discovery additionally requires Python 3.11+. Engine SDKs and external provider CLIs are optional and are needed only for tasks that use them.
 
@@ -204,7 +223,7 @@ lemmings runtime activate --task docs/tasks/change.task.json
 lemmings runtime deactivate
 ```
 
-Task selection freezes the resolved profile, rule references, content hashes, and budget policy. Low-level invocation commands persist this boundary and accept only a matching result:
+Task selection freezes the resolved profile, rule references, content hashes, reviewer route, and budget policy. `host-v1` verifies host receipts. `invocation-v1` counts invocation creation with default task limits of worker 5, reviewer 7, and explorer 5; replay of the same invocation is free, and model-authored usage is never trusted. Low-level invocation commands persist this boundary and accept only a matching result:
 
 ```text
 lemmings invocation create --task docs/tasks/change.task.json --role worker --attempt 1 --expected-revision 0 --preset balanced
@@ -246,7 +265,7 @@ Validation preserves the real exit status and returns bounded diagnostics with a
 
 ## Version and Reference
 
-The package is **5.0.2** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
+The package is **5.0.3** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
 
 Authoritative details live in:
 

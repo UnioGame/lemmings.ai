@@ -144,7 +144,7 @@ class EvidenceTests(unittest.TestCase):
 
 
 class InvocationTests(unittest.TestCase):
-    def test_dispatch_is_persisted_and_late_or_changed_results_are_rejected(self) -> None:
+    def test_dispatch_is_persisted_and_result_replay_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             base = init_repo(repo)
@@ -171,8 +171,13 @@ class InvocationTests(unittest.TestCase):
             self.assertIn("result.profile", {item.code for item in result_findings(repo, stored, changed_profile, result).findings})
             accepted = accept_result(repo, packet, profile(), result, 1)
             self.assertEqual(2, accepted["revision"])
+            snapshot = packet.read_bytes()
+            self.assertTrue(accept_result(repo, packet, profile(), result, 2)["reused"])
+            self.assertEqual(snapshot, packet.read_bytes())
             with self.assertRaisesRegex(ValueError, "revision"):
-                accept_result(repo, packet, profile(), result, 2)
+                accept_result(repo, packet, profile(), result, 1)
+            with self.assertRaisesRegex(ValueError, "different recorded result"):
+                accept_result(repo, packet, profile(), {**result, "acceptanceEvidence": ["changed"]}, 2)
 
 
 if __name__ == "__main__":

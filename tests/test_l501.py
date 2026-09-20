@@ -18,7 +18,13 @@ from lemmings.readiness import prepare_candidate, readiness_digest, result_diges
 
 
 def profile() -> dict:
-    return json.loads((ROOT / "skills/lemmings/defaults.json").read_text(encoding="utf-8"))
+    value = json.loads((ROOT / "skills/lemmings/defaults.json").read_text(encoding="utf-8"))
+    value["modelRoutes"] = {"native": {"reviewer": [
+        {"providerId": "native", "modelId": "reviewer"},
+        {"providerId": "native", "modelId": "a"},
+        {"providerId": "native", "modelId": "b"},
+    ]}}
+    return value
 
 
 def template() -> dict:
@@ -156,14 +162,14 @@ class CandidateGateTests(unittest.TestCase):
             value["execution"]["candidateReadiness"]["workerResultDigest"] = result_digest(value["execution"]["agentResults"][0])
             value["execution"]["candidateReadiness"]["digest"] = readiness_digest(value["execution"]["candidateReadiness"]); packet.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "git HEAD"):
-                record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::reviewer")
+                record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::native/reviewer")
             self.assertEqual([], json.loads(packet.read_text(encoding="utf-8"))["budget"]["reservations"])
 
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); _, packet, _, _ = ready_repo_task(repo)
             (repo / "owned.txt").write_text("dirty\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "clean tree"):
-                record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::reviewer")
+                record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::native/reviewer")
             self.assertEqual([], json.loads(packet.read_text(encoding="utf-8"))["budget"]["reservations"])
 
     def test_host_v1_review_spec_binding_and_legacy_review_compatibility(self) -> None:
@@ -175,9 +181,9 @@ class CandidateGateTests(unittest.TestCase):
             worker = {"invocationId": "worker-1", "role": "worker"}; result = {"invocationId": "worker-1", "status": "succeeded", "candidateHead": head}; task["execution"]["invocations"] = [worker]; task["execution"]["agentResults"] = [result]
             readiness = {"version": 1, "status": "passed", "candidateHead": head, "baseSha": base, "planDigest": plan_digest(task), "validationDigest": validation_digest(task), "workerInvocationId": "worker-1", "workerResultDigest": result_digest(result), "checks": [], "debt": [], "cleanBefore": True, "cleanAfter": True}; readiness["digest"] = readiness_digest(readiness); task["execution"]["candidateReadiness"] = readiness
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            invocation = record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::reviewer")
+            invocation = record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::native/reviewer")
             current = json.loads(packet.read_text(encoding="utf-8"))
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "Accepted", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
+            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "Accepted", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": current["taskId"], "baseSha": base, "headSha": head}, "reviewSpec": dict(invocation["reviewSpec"]), "findings": [], "validation": []}
             self.assertTrue(validate_review(review, current, profile()).ok, validate_review(review, current, profile()).as_dict())
             spec_less = {key: value for key, value in review.items() if key != "reviewSpec"}
@@ -192,7 +198,7 @@ class CandidateGateTests(unittest.TestCase):
 class RepairAndReviewChainTests(unittest.TestCase):
     def test_repair_start_is_idempotent_and_delta_requires_dispositions(self) -> None:
         task = template(); task.update({"state": "Candidate", "previousState": "Active", "baseSha": "base"}); task["commits"]["candidate"] = "head"; task["budget"] = new_task_budget(profile())
-        review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
+        review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                   "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": "base", "headSha": "head"}, "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}], "validation": []}
         with tempfile.TemporaryDirectory() as temp:
             packet = Path(temp) / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
@@ -206,7 +212,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
         readiness = candidate_readiness(task); task["execution"]["candidateReadiness"] = readiness; task["models"]["actual"] = task["models"]["assigned"]
         previous = {**review, "status": "Accepted", "reviewSpec": {"mode": "full", "fullBaseSha": "base", "candidateHead": "head", "readinessDigest": readiness["digest"], "planDigest": plan_digest(task), "validationDigest": validation_digest(task)}}
         previous_for_delta = {**previous, "subject": {**previous["subject"], "headSha": "old"}, "findings": [{**previous["findings"][0], "priority": "P2"}]}
-        delta = {"schemaVersion": 4, "revision": 0, "reviewId": "R2", "status": "Accepted", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
+        delta = {"schemaVersion": 4, "revision": 0, "reviewId": "R2", "status": "Accepted", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                  "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": "base", "headSha": "head"}, "reviewSpec": {"mode": "delta", "fullBaseSha": "base", "candidateHead": "head", "readinessDigest": readiness["digest"], "planDigest": plan_digest(task), "validationDigest": validation_digest(task), "previousReviewRef": "r1.json", "previousReviewDigest": __import__("lemmings.contracts", fromlist=["review_digest"]).review_digest(previous_for_delta), "previousHead": "old", "findingIds": ["F1"], "inspectionRange": {"from": "old", "to": "head"}}, "previousReview": previous_for_delta, "findingDispositions": {"F1": "resolved"}, "findings": [], "validation": []}
         self.assertTrue(validate_review(delta, task).ok, validate_review(delta, task).as_dict())
         missing_disposition = {**delta, "findingDispositions": {}}
@@ -229,7 +235,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
             repo = Path(temp); base = init_repo(repo)
             task = template(); task.update({"state": "Candidate", "baseSha": base}); task["commits"]["candidate"] = "head"; task["budget"] = new_task_budget(profile())
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
+            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "head"},
                       "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}, {"findingId": "F2", "priority": "P1", "origin": "validation", "summary": "also fix"}], "validation": []}
             review_path = repo / "r1.json"; review_path.write_text(json.dumps(review), encoding="utf-8")
@@ -262,7 +268,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
             repo = Path(temp); base = init_repo(repo)
             task = template(); task.update({"state": "Candidate", "baseSha": base}); task["commits"]["candidate"] = "head"; task["budget"] = new_task_budget(profile())
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
+            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "head"},
                       "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}], "validation": []}
             path = repo / "r1.json"; path.write_text(json.dumps(review), encoding="utf-8")
@@ -278,10 +284,10 @@ class RepairAndReviewChainTests(unittest.TestCase):
             repo = Path(temp); base = init_repo(repo)
             task = template(); task.update({"state": "Candidate", "baseSha": base, "reviewPolicy": "cross"}); task["commits"]["candidate"] = "head"
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            predecessor = {"schemaVersion": 4, "revision": 0, "reviewId": "P", "status": "Accepted", "hostId": "native", "reviewerModel": "a",
+            predecessor = {"schemaVersion": 4, "revision": 0, "reviewId": "P", "status": "Accepted", "hostId": "native", "reviewerModel": "native/a",
                           "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "old"}, "findings": [], "validation": []}
             predecessor_path = repo / "previous.json"; predecessor_path.write_text(json.dumps(predecessor), encoding="utf-8")
-            delta = {"schemaVersion": 4, "revision": 0, "reviewId": "D", "status": "Accepted", "hostId": "native", "reviewerModel": "a", "cycle": 1,
+            delta = {"schemaVersion": 4, "revision": 0, "reviewId": "D", "status": "Accepted", "hostId": "native", "reviewerModel": "native/a", "cycle": 1,
                      "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "head"},
                      "reviewSpec": {"mode": "delta", "fullBaseSha": base, "candidateHead": "head", "previousReviewRef": "previous.json", "previousReviewDigest": review_digest(predecessor), "previousHead": "old", "findingIds": ["N"], "inspectionRange": {"from": "old", "to": "head"}}, "findings": [], "validation": []}
             delta_path = repo / "delta.json"; delta_path.write_text(json.dumps(delta), encoding="utf-8")
@@ -291,14 +297,14 @@ class RepairAndReviewChainTests(unittest.TestCase):
             delta["reviewSpec"]["previousReviewRef"] = "../outside.json"; delta_path.write_text(json.dumps(delta), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "immutable predecessor"):
                 apply_review(repo, packet, delta_path, expected_revision=0, profile=profile())
-            first = {**delta, "reviewId": "A", "reviewSpec": {"mode": "full", "fullBaseSha": base, "candidateHead": "head", "reviewLane": "native::a"}, "reviewerModel": "a"}
+            first = {**delta, "reviewId": "A", "reviewSpec": {"mode": "full", "fullBaseSha": base, "candidateHead": "head", "reviewLane": "native::native/a"}, "reviewerModel": "native/a"}
             mismatched = {**first, "reviewId": "M", "reviewSpec": {**first["reviewSpec"], "reviewLane": "native::b"}}
             mismatched_path = repo / "mismatch.json"; mismatched_path.write_text(json.dumps(mismatched), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "reviewLane must match"):
                 apply_review(repo, packet, mismatched_path, expected_revision=0, profile=profile())
             first_path = repo / "a.json"; first_path.write_text(json.dumps(first), encoding="utf-8"); first_result = apply_review(repo, packet, first_path, expected_revision=0, profile=profile())
             self.assertEqual("Candidate", first_result["state"])
-            second = {**first, "reviewId": "B", "reviewerModel": "b", "reviewSpec": {**first["reviewSpec"], "reviewLane": "native::b"}}
+            second = {**first, "reviewId": "B", "reviewerModel": "native/b", "reviewSpec": {**first["reviewSpec"], "reviewLane": "native::native/b"}}
             second_path = repo / "b.json"; second_path.write_text(json.dumps(second), encoding="utf-8"); second_result = apply_review(repo, packet, second_path, expected_revision=1, profile=profile())
             self.assertEqual("Accepted", second_result["state"])
 
@@ -317,7 +323,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
                 "validationDigest": validation_digest(task), "workerInvocationId": "worker-1", "workerResultDigest": result_digest(worker_result), "checks": [], "debt": [], "cleanBefore": True, "cleanAfter": True}
             task["execution"]["candidateReadiness"]["digest"] = readiness_digest(task["execution"]["candidateReadiness"])
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            first = record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::a")
+            first = record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::native/a")
             first_result = {"schemaVersion": 4, "invocationId": first["invocationId"], "attempt": 1, "status": "succeeded",
                             "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [],
                             "blockers": [], "remainingRisks": []}
@@ -325,10 +331,10 @@ class RepairAndReviewChainTests(unittest.TestCase):
                 "trusted": True, "source": "host-v1", "invocationId": first["invocationId"],
                 "grant": first["limits"]["maxToolCalls"], "toolCalls": 0,
             })
-            second = record_invocation(repo, packet, profile(), "reviewer", 1, 2, review_lane="native::b")
+            second = record_invocation(repo, packet, profile(), "reviewer", 1, 2, review_lane="native::native/b")
             self.assertEqual("full", first["reviewSpec"]["mode"]); self.assertEqual("full", second["reviewSpec"]["mode"])
             with self.assertRaisesRegex(ValueError, "already dispatched"):
-                record_invocation(repo, packet, profile(), "reviewer", 1, 3, review_lane="native::a")
+                record_invocation(repo, packet, profile(), "reviewer", 1, 3, review_lane="native::native/a")
 
     def test_applied_review_builds_lane_delta_and_plan_change_forces_full(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -337,19 +343,19 @@ class RepairAndReviewChainTests(unittest.TestCase):
             old_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
             task = template(); task.update({"state": "Candidate", "baseSha": base, "workingSet": [{"ref": "owned.txt", "purpose": "input"}], "ownership": {"owned": ["owned.txt"], "shared": [], "forbidden": []}, "validation": {"riskToTest": [], "commands": [], "allowedOutputs": ["r1.json"], "debt": []}}); task["commits"]["candidate"] = old_head; task["budget"] = new_task_budget(profile())
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
-                      "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": old_head}, "reviewSpec": {"mode": "full", "fullBaseSha": base, "candidateHead": old_head, "reviewLane": "native::reviewer", "reviewerHost": "native", "reviewerModel": "reviewer", "planDigest": plan_digest(task), "validationDigest": validation_digest(task)},
+            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
+                      "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": old_head}, "reviewSpec": {"mode": "full", "fullBaseSha": base, "candidateHead": old_head, "reviewLane": "native::native/reviewer", "reviewerHost": "native", "reviewerModel": "native/reviewer", "planDigest": plan_digest(task), "validationDigest": validation_digest(task)},
                       "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}], "validation": []}
             review_path = repo / "r1.json"; review_path.write_text(json.dumps(review), encoding="utf-8"); apply_review(repo, packet, review_path, expected_revision=0, profile=profile())
             current = json.loads(packet.read_text(encoding="utf-8")); (repo / "owned.txt").write_text("fixed\n", encoding="utf-8"); subprocess.run(["git", "add", "owned.txt"], cwd=repo, check=True); subprocess.run(["git", "commit", "-qm", "fix"], cwd=repo, check=True)
             new_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip(); current["state"] = "Candidate"; current["previousState"] = "Repair"; current["commits"]["candidate"] = new_head; current["revision"] = current["revision"]
             current["execution"]["invocations"].append({"invocationId": "worker-new", "role": "worker"}); current["execution"]["agentResults"].append({"invocationId": "worker-new", "status": "succeeded", "candidateHead": new_head}); packet.write_text(json.dumps(current), encoding="utf-8")
             prepared = prepare_candidate(repo, packet, expected_revision=current["revision"])
-            self.assertTrue(prepared["ok"], prepared); saved = json.loads(packet.read_text(encoding="utf-8")); chain = saved["execution"]["reviewChains"]["native::reviewer"]["reviewSpec"]
+            self.assertTrue(prepared["ok"], prepared); saved = json.loads(packet.read_text(encoding="utf-8")); chain = saved["execution"]["reviewChains"]["native::native/reviewer"]["reviewSpec"]
             self.assertEqual("delta", chain["mode"]); self.assertEqual("r1.json", chain["previousReviewRef"]); self.assertEqual(old_head, chain["previousHead"]); self.assertEqual({"F1"}, set(chain["findingIds"]))
             saved["acceptance"].append("new contract"); (repo / "owned.txt").write_text("fixed again\n", encoding="utf-8"); subprocess.run(["git", "add", "owned.txt"], cwd=repo, check=True); subprocess.run(["git", "commit", "-qm", "contract"], cwd=repo, check=True)
             second_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip(); saved["commits"]["candidate"] = second_head; saved["revision"] += 1; saved["execution"]["invocations"].append({"invocationId": "worker-new-2", "role": "worker"}); saved["execution"]["agentResults"].append({"invocationId": "worker-new-2", "status": "succeeded", "candidateHead": second_head}); packet.write_text(json.dumps(saved), encoding="utf-8")
-            prepared_again = prepare_candidate(repo, packet, expected_revision=saved["revision"]); self.assertTrue(prepared_again["ok"], prepared_again); final_spec = json.loads(packet.read_text(encoding="utf-8"))["execution"]["reviewChains"]["native::reviewer"]["reviewSpec"]
+            prepared_again = prepare_candidate(repo, packet, expected_revision=saved["revision"]); self.assertTrue(prepared_again["ok"], prepared_again); final_spec = json.loads(packet.read_text(encoding="utf-8"))["execution"]["reviewChains"]["native::native/reviewer"]["reviewSpec"]
             self.assertEqual("full", final_spec["mode"]); self.assertIsNone(final_spec["previousReviewRef"])
 
 

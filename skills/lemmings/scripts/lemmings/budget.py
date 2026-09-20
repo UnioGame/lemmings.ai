@@ -14,9 +14,11 @@ HARD_CONTEXT_CEILINGS = {
 HARD_TOOL_CALL_CEILINGS = {"explorer": 24, "reviewer": 32, "worker": 48}
 INITIAL_CONTEXT = {"maxPacketBytes": 16384, "maxWorkingSetItems": 12, "maxExpansions": 1}
 INITIAL_TOOL_CALLS = {"explorer": 12, "reviewer": 16, "worker": 24}
+DEFAULT_INVOCATION_LIMITS = {"worker": 5, "reviewer": 7, "explorer": 5}
+ACCOUNTING_MODES = {"host-v1", "invocation-v1"}
 
 
-def policy_from_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+def policy_from_profile(profile: Mapping[str, Any], accounting_mode: str | None = None) -> dict[str, Any]:
     context = profile.get("contextPolicy") if isinstance(profile.get("contextPolicy"), Mapping) else {}
     ceilings = context.get("ceilings") if isinstance(context.get("ceilings"), Mapping) else {}
     configured_tools = profile.get("invocationBudgets") if isinstance(profile.get("invocationBudgets"), Mapping) else {}
@@ -27,7 +29,19 @@ def policy_from_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
             "initial": int(configured.get("initialToolCalls", INITIAL_TOOL_CALLS[role])),
             "ceiling": int(configured.get("maxToolCalls", hard)),
         }
+    selected_mode = accounting_mode or profile.get("accountingMode") or profile.get("budgetAccountingMode") or "host-v1"
+    if selected_mode not in ACCOUNTING_MODES:
+        raise ValueError("accountingMode must be host-v1 or invocation-v1")
+    configured_limits = profile.get("invocationLimits") if isinstance(profile.get("invocationLimits"), Mapping) else {}
+    invocation_limits = {
+        role: int(configured_limits.get(role, DEFAULT_INVOCATION_LIMITS[role]))
+        for role in DEFAULT_INVOCATION_LIMITS
+    }
+    if any(value < 1 for value in invocation_limits.values()):
+        raise ValueError("invocationLimits must contain positive integers")
     return {
+        "accountingMode": selected_mode,
+        "invocationLimits": invocation_limits,
         "context": {
             name: {"initial": int(context.get(name, INITIAL_CONTEXT[name])), "ceiling": int(ceilings.get(name, hard))}
             for name, hard in HARD_CONTEXT_CEILINGS.items()
@@ -37,12 +51,14 @@ def policy_from_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def new_task_budget(profile: Mapping[str, Any]) -> dict[str, Any]:
+def new_task_budget(profile: Mapping[str, Any], accounting_mode: str | None = None) -> dict[str, Any]:
+    policy = policy_from_profile(profile, accounting_mode)
     return {
-        "policy": policy_from_profile(profile),
+        "policy": policy,
         "usage": {
             "contextExpansions": 0,
             "toolCalls": {role: 0 for role in HARD_TOOL_CALL_CEILINGS},
+            "invocations": {role: 0 for role in DEFAULT_INVOCATION_LIMITS},
             "repairCycles": 0,
         },
         "reservations": [],
@@ -64,6 +80,23 @@ def approved_tool_calls(budget: Mapping[str, Any], role: str) -> int:
 
 
 def reserve_tool_calls(budget: dict[str, Any], role: str, invocation_id: str) -> int:
+    mode = ((budget.get("policy") or {}).get("accountingMode") or "host-v1")
+    if role not in HARD_TOOL_CALL_CEILINGS:
+        return 0
+    existing = [item for item in budget.get("grants") or [] if isinstance(item, Mapping) and item.get("invocationId") == invocation_id]
+    if len(existing) == 1:
+        return int(existing[0].get("amount", 0))
+    if mode == "invocation-v1":
+        limits = ((budget.get("policy") or {}).get("invocationLimits") or {})
+        used = int(((budget.get("usage") or {}).get("invocations") or {}).get(role, 0))
+        if used >= int(limits.get(role, DEFAULT_INVOCATION_LIMITS[role])):
+            return 0
+        grant = int((((budget.get("policy") or {}).get("toolCalls") or {}).get(role) or {}).get("initial", INITIAL_TOOL_CALLS[role]))
+        budget.setdefault("usage", {}).setdefault("invocations", {})[role] = used + 1
+        budget.setdefault("reservations", []).append({"invocationId": invocation_id, "role": role, "amount": grant})
+        budget.setdefault("grants", []).append({"invocationId": invocation_id, "role": role, "amount": grant})
+        budget["stop"] = None
+        return grant
     if role in (budget.get("lockedRoles") or []):
         return 0
     used = int(((budget.get("usage") or {}).get("toolCalls") or {}).get(role, 0))
@@ -88,6 +121,12 @@ def settle_tool_calls(budget: dict[str, Any], invocation_id: str, usage: Mapping
         raise ValueError("AgentResult has no unique budget reservation")
     reservation = matches[0]
     role, grant = str(reservation.get("role")), int(reservation.get("amount", 0))
+    mode = ((budget.get("policy") or {}).get("accountingMode") or "host-v1")
+    if mode == "invocation-v1":
+        budget["reservations"] = [item for item in reservations if item is not reservation]
+        if budget.get("stop") and budget["stop"].get("invocationId") == invocation_id:
+            budget["stop"] = None
+        return 0
     trusted = bool(isinstance(usage, Mapping) and usage.get("trusted") is True)
     reported = usage.get("toolCalls") if isinstance(usage, Mapping) else None
     if trusted:

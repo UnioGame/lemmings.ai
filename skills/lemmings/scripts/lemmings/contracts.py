@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .budget import (
+    ACCOUNTING_MODES, DEFAULT_INVOCATION_LIMITS as CUMULATIVE_INVOCATION_LIMITS,
     HARD_CONTEXT_CEILINGS, HARD_TOOL_CALL_CEILINGS, approved_tool_calls,
 )
 
 SCHEMA_VERSION = 4
-DISTRIBUTION_VERSION = "5.0.2"
-PLUGIN_VERSION = "5.0.2"
+DISTRIBUTION_VERSION = "5.0.3"
+PLUGIN_VERSION = "5.0.3"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -485,6 +486,17 @@ def validate_task_budget(task: Mapping[str, Any]) -> ValidationResult:
     if not isinstance(policy, Mapping):
         result.error("budget.policy", "budget.policy is required")
         return result
+    accounting_mode = policy.get("accountingMode", "host-v1")
+    if accounting_mode not in ACCOUNTING_MODES:
+        result.error("budget.accounting_mode", "budget.policy.accountingMode must be host-v1 or invocation-v1")
+    invocation_limits = policy.get("invocationLimits")
+    if accounting_mode == "invocation-v1" and (not isinstance(invocation_limits, Mapping) or set(invocation_limits) != set(CUMULATIVE_INVOCATION_LIMITS)):
+        result.error("budget.invocation_limits", "invocation-v1 budget.policy.invocationLimits must contain explorer, reviewer, and worker")
+    elif isinstance(invocation_limits, Mapping):
+        for role in CUMULATIVE_INVOCATION_LIMITS:
+            value = invocation_limits.get(role)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                result.error("budget.invocation_limits", f"budget.policy.invocationLimits.{role} must be positive")
     context = policy.get("context")
     tools = policy.get("toolCalls")
     if not isinstance(context, Mapping) or set(context) != set(HARD_CONTEXT_CEILINGS):
@@ -574,8 +586,23 @@ def validate_task_budget(task: Mapping[str, Any]) -> ValidationResult:
             for role in HARD_TOOL_CALL_CEILINGS:
                 outstanding = sum(item.get("amount", 0) for item in reservations if isinstance(item, Mapping) and item.get("role") == role and isinstance(item.get("amount"), int) and not isinstance(item.get("amount"), bool))
                 role_usage = usage["toolCalls"].get(role, 0)
-                if isinstance(role_usage, int) and not isinstance(role_usage, bool) and role_usage + outstanding > approved_tool_calls(budget, role):
+                if accounting_mode == "host-v1" and isinstance(role_usage, int) and not isinstance(role_usage, bool) and role_usage + outstanding > approved_tool_calls(budget, role):
                     result.error("budget.over.reservations", f"settled and reserved {role} calls exceed the approved budget")
+    if isinstance(usage, Mapping):
+        invocations = usage.get("invocations")
+        if not isinstance(invocations, Mapping):
+            if accounting_mode == "invocation-v1":
+                result.error("budget.usage", "invocation-v1 requires usage.invocations")
+        else:
+            for role in CUMULATIVE_INVOCATION_LIMITS:
+                value = invocations.get(role)
+                limit = invocation_limits.get(role) if isinstance(invocation_limits, Mapping) else None
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    result.error("budget.usage", f"invocation usage for {role} must be non-negative")
+                elif accounting_mode == "invocation-v1" and isinstance(limit, int) and value > limit:
+                    result.error("budget.ceiling", f"invocation usage for {role} exceeds its frozen limit")
+    if accounting_mode == "invocation-v1" and budget.get("lockedRoles"):
+        result.error("budget.locked_roles", "invocation-v1 never locks roles for missing receipts")
     return result
 
 def validate_budget_ledger(task: Mapping[str, Any]) -> ValidationResult:
@@ -593,6 +620,9 @@ def validate_budget_ledger(task: Mapping[str, Any]) -> ValidationResult:
     if not isinstance(policy, Mapping):
         result.error("budget.ledger", "budget policy is missing from a budgeted invocation ledger")
         return result
+    accounting_mode = policy.get("accountingMode", "host-v1")
+    if accounting_mode not in ACCOUNTING_MODES:
+        result.error("budget.ledger", "budget policy accountingMode is invalid")
     expected_policy_digest = hashlib.sha256(
         json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -604,6 +634,7 @@ def validate_budget_ledger(task: Mapping[str, Any]) -> ValidationResult:
     if any(str(item.get("invocationId") or "") not in marked_ids for item in grants):
         result.error("budget.ledger", "budget grant has no matching budgeted invocation")
     expected_usage = {role: 0 for role in HARD_TOOL_CALL_CEILINGS}
+    expected_invocations = {role: 0 for role in CUMULATIVE_INVOCATION_LIMITS}
     expected_locked: set[str] = set()
     for invocation in marked:
         invocation_id = str(invocation.get("invocationId") or "")
@@ -620,6 +651,8 @@ def validate_budget_ledger(task: Mapping[str, Any]) -> ValidationResult:
             continue
         if invocation.get("budgetPolicyDigest") != expected_policy_digest:
             result.error("budget.policy_drift", f"budget policy changed after invocation {invocation_id}")
+        if accounting_mode == "invocation-v1" and role in expected_invocations:
+            expected_invocations[role] += 1
         results = [item for item in agent_results if item.get("invocationId") == invocation_id]
         failures = [item for item in route_failures if item.get("invocationId") == invocation_id]
         reserved = [item for item in reservations if item.get("invocationId") == invocation_id]
@@ -636,13 +669,17 @@ def validate_budget_ledger(task: Mapping[str, Any]) -> ValidationResult:
             usage = results[0].get("usage")
             trusted = bool(isinstance(usage, Mapping) and usage.get("trusted") is True)
             consumed = usage.get("toolCalls") if trusted else amount
-            if not trusted:
+            if accounting_mode == "invocation-v1":
+                consumed = 0
+            if not trusted and accounting_mode == "host-v1":
                 expected_locked.add(role)
         else:
             usage = failures[0].get("usage")
             trusted = bool(isinstance(usage, Mapping) and usage.get("trusted") is True)
             consumed = usage.get("toolCalls") if isinstance(usage, Mapping) else None
-            if not trusted:
+            if accounting_mode == "invocation-v1":
+                consumed = 0
+            if not trusted and accounting_mode == "host-v1":
                 expected_locked.add(role)
         if not isinstance(consumed, int) or isinstance(consumed, bool) or not 0 <= consumed <= amount:
             result.error("budget.ledger", f"invocation {invocation_id} has invalid settled usage")
@@ -653,9 +690,15 @@ def validate_budget_ledger(task: Mapping[str, Any]) -> ValidationResult:
         if actual_usage.get(role) != expected_usage[role]:
             result.error("budget.ledger", f"cumulative {role} usage does not match settled grants")
         outstanding = sum(item.get("amount", 0) for item in reservations if item.get("role") == role)
-        if expected_usage[role] + outstanding > approved_tool_calls(budget, role):
+        if accounting_mode == "host-v1" and expected_usage[role] + outstanding > approved_tool_calls(budget, role):
             result.error("budget.ledger", f"settled and reserved {role} calls exceed the approved budget")
-    if not expected_locked.issubset(set(as_list(budget.get("lockedRoles")))):
+    actual_invocations = ((budget.get("usage") or {}).get("invocations") or {})
+    for role in CUMULATIVE_INVOCATION_LIMITS:
+        if accounting_mode == "invocation-v1" and actual_invocations.get(role) != expected_invocations[role]:
+            result.error("budget.ledger", f"cumulative {role} invocation usage does not match invocations")
+        if accounting_mode == "invocation-v1" and isinstance(policy.get("invocationLimits"), Mapping) and expected_invocations[role] > int(policy["invocationLimits"].get(role, 0)):
+            result.error("budget.ledger", f"cumulative {role} invocations exceed the frozen limit")
+    if accounting_mode == "host-v1" and not expected_locked.issubset(set(as_list(budget.get("lockedRoles")))):
         result.error("budget.ledger", "untrusted settled roles must remain locked")
     return result
 
@@ -913,8 +956,8 @@ def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
     if invocation.get("role") not in {"worker", "reviewer", "explorer"}:
         result.error("invocation.role", "invocation role must be worker, reviewer, or explorer")
     accounting = invocation.get("usageAccounting")
-    if accounting is not None and accounting not in {"host-v1", "legacy-v0"}:
-        result.error("invocation.usage_accounting", "usageAccounting must be host-v1 or legacy-v0")
+    if accounting is not None and accounting not in ACCOUNTING_MODES | {"legacy-v0"}:
+        result.error("invocation.usage_accounting", "usageAccounting must be host-v1, invocation-v1, or legacy-v0")
     dispatch_kind = invocation.get("dispatchKind")
     if dispatch_kind is not None and dispatch_kind not in {"initial", "review", "repair", "retry", "context-correction", "schema-correction"}:
         result.error("invocation.dispatch_kind", "dispatchKind is invalid")
@@ -1425,6 +1468,7 @@ def validate_review(
     task: Mapping[str, Any] | None = None,
     phase: Mapping[str, Any] | None = None,
     profile: Mapping[str, Any] | None = None,
+    *, applying: bool = False,
 ) -> ValidationResult:
     result = ValidationResult()
     if not schema_supported(review):
@@ -1636,7 +1680,7 @@ def validate_review(
             result.error("review.range", "review range must be non-empty")
         if task.get("state") in {"Accepted", "Integrated"} and review.get("status") != "Accepted":
             result.error("review.verdict", "Accepted and Integrated tasks require an Accepted review")
-        if review.get("status") == "ChangesRequested" and cycle == max_repairs + 1 and task.get("state") != "Replan Required":
+        if not applying and review.get("status") == "ChangesRequested" and cycle == max_repairs + 1 and task.get("state") != "Replan Required":
             result.error("review.replan", "the final permitted candidate check requires Replan Required")
     elif kind == "baseline":
         if not phase:

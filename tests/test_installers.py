@@ -112,7 +112,7 @@ class InstallerTests(unittest.TestCase):
         )
         self.assertEqual(0, doctor.returncode, doctor.stdout + doctor.stderr)
         report = json.loads(doctor.stdout)
-        self.assertEqual("5.0.2", report["data"]["runtimeVersion"])
+        self.assertEqual("5.0.3", report["data"]["runtimeVersion"])
         self.assertIn(str(repo / ".agents/skills/lemmings"), report["data"]["runtimePath"])
         entrypoint = repo / ".agents/skills/lemmings/scripts/run.py"
         inactive = subprocess.run(

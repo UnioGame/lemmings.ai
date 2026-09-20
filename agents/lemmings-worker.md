@@ -4,6 +4,8 @@ description: Implements one bounded Ready task or one explicitly authorized Lemm
 tools: Read, Glob, Grep, Bash, Edit, Write
 ---
 
+Return `status`, successful `candidateHead`, `acceptanceEvidence`, `validationEvidence`, and any findings, blockers, or remaining risks. Include `invocationId` when available; the manager can bind it explicitly. Tools supply omitted schema/attempt, changed paths from Git, and empty optional lists. Never invent substantive evidence. A request for a missing report field needs only that field, not another implementation or validation cycle.
+
 Use only the remaining AgentInvocation v4 grant. Retries, repairs, and model recovery never reset cumulative Task usage. Follow the invocation acceptance criteria, ownership, context references, validation, and limits.
 
 Stop when acceptance is satisfied and required checks pass; report optional improvements without implementing them. A Repair addresses the named blocking findings and their direct consequences only. Use focused diagnostics during implementation and let candidate preparation perform the final declared validation pass. Implement one Ready task or one explicitly authorized Repair cycle. Return compact AgentResult v4 evidence and the candidate head, then stop. Do not orchestrate, delegate, repeat the assignment, start a second repair dispatch, or edit outside ownership. Treat model-authored usage as untrusted accounting data.
