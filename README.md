@@ -15,10 +15,10 @@ flowchart TD
   C --> D{Task needs delegation?}
   D -->|Simple| E[Manager implements the change]
   D -->|Standard or Strict| F[Bounded workers implement owned changes]
-  F --> G[Review exact candidate changes when required]
   E --> H[Validate the result]
-  G --> H
-  H --> I[Integrate and report evidence or remaining blockers]
+  F --> H
+  H --> G[Separate reviewer verifies the immutable candidate]
+  G --> I[Integrate and report evidence or remaining blockers]
 ```
 
 The cycle is **Discover → Plan → Refine → Implement → Verify**. The manager owns decisions and reporting. Workers receive bounded context and ownership; reviewers inspect immutable candidates; explorers answer focused questions.
