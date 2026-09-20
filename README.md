@@ -54,23 +54,14 @@ Acceptance is the stopping condition: the requested criteria and required checks
 
 Three repair cycles are a ceiling, not a target, and permit at most four candidate checks: the initial candidate and one after each repair. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. On the runtime path, candidate readiness also binds the exact SHA, plan and validation digests, worker result, ownership, clean-tree checks, bounded diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt. Acceptance alone is not integration; declared checks must pass on the integrated state.
 
-## 6.0.0
+## Current Release
 
-Lemmings 6.0 adds the schema-v5 `flow` facade for Task and Strict Phase owners. `flow start|advance|submit|replan|finish|status` performs deterministic lifecycle transitions, preserves idempotent dispatch, opens repair from P0-P2 findings, keeps P3 as follow-up, and uses delta review after repair. Low-level commands remain available for diagnostics.
+The current release is **Lemmings 6.0.0**. It adds the schema-v5 `flow` facade for Task and Strict Phase owners. `flow start|advance|submit|replan|finish|status` performs deterministic lifecycle transitions, preserves idempotent dispatch, opens repair from P0-P2 findings, keeps P3 as follow-up, and uses delta review after repair. Low-level commands remain available for diagnostics.
 
 New runtime owners use `invocation-v1` by default. Explicit `host-v1` is accepted only when the brief freezes trusted usage-accounting capability for every executing host, so an unsupported host fails before work starts. Existing v4 artifacts move through explicit digest-confirmed `migrate propose` and `migrate apply`; migration never overwrites the originals or resets budgets and locks.
 
 The complete **Discover → Plan → Refine → Implement → Verify** process remains in `SKILL.md` and needs no Python. Missing runtime dependencies trigger one installation offer; installation requires explicit approval, and declining continues in skill-only mode. Inactive hooks return before looking for Python, while an active marker still fails closed when Python is unavailable.
 
-## 5.0.3
-
-The five-stage workflow remains **Discover → Plan → Refine → Implement → Verify**, with less protocol work for agents. `task prepare` builds a schema-v5 Task from an explicit compact brief, `candidate submit` accepts and prepares a worker result without hand-editing state, and candidate review remains recoverable through `review start` and `review submit`.
-
-Hosts with trusted usage receipts keep `host-v1`. Hosts without them can freeze `invocation-v1`, which counts real invocations across retry, repair, recovery, and replan without pretending unknown tool calls were measured. Reviewer identity comes from the saved reviewer route and is used consistently for dispatch and Review.
-
-## 5.0.2
-
-Review stops when acceptance and required checks pass with no concrete blocking defect. P3 suggestions remain optional, repeat reviews focus on repairs, and unchanged evidence is reused. Optional suggestions no longer count as progress on an unresolved blocker.
 
 ## Quick Start
 
@@ -92,7 +83,7 @@ Strict work accepts a `PhaseBrief v1` through the same `flow start` command. Exp
 
 The skill-only path requires only the repository tools needed by the task, normally Git. The optional runtime requires Python 3.10+; provider TOML discovery requires Python 3.11+. Engine SDKs and provider CLIs remain task-specific.
 
-Open the target repository in your coding agent and ask it to install Lemmings from a local package path. If the package is not local, ask it to obtain [the Git repository](https://github.com/UnioGame/unigame.ai.lemmings.git) in a separate tools directory first. The agent should run the installer and `doctor`, preserve manual settings, and report whether the skill is ready.
+Open the target repository in your coding agent and ask it to install Lemmings from a local package path. If the package is not local, ask it to obtain [the Git repository](https://github.com/UnioGame/lemmings.ai.git) in a separate tools directory first. The agent should run the installer and `doctor`, preserve manual settings, and report whether the skill is ready.
 
 From the package root, use the launcher when Python is available:
 
@@ -175,7 +166,7 @@ Initial budgets can be extended only with an unresolved question and evidence of
 | Worker tool calls | 24 | 48 |
 | Repair cycles | 0 | 3 |
 
-On the runtime path, each invocation receives only the approved remainder. New runtime owners use `invocation-v1` by default. When explicitly capability-gated, `host-v1` uses only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Historical v5.0.0 invocations retain their legacy read path. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
+On the runtime path, each invocation receives only the approved remainder. New runtime owners use `invocation-v1` by default. When explicitly capability-gated, `host-v1` uses only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
 
 ### Project Rules
 
