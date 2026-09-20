@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-A2",
   "taskId": "L5-A2",
   "taskRevision": 8,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
   "contextDigest": "4c5c4145e25b489459f820a5ed967f102a0210ae64f5681e82dd5e8a3b3e4ab7",
-  "objective": "Review immutable A2 range against accepted two-invariant replan: idempotent claim original branch/base and actual managed source identity; complete stored pool Task/path/revision/release evidence before direct remove and eviction, no synthesized authority. Reuse reported expanded focused suite. Inspect inherited range only as needed. Return AgentResult v4 verdict with material findings only; no broad tests.",
+  "objective": "Review immutable A2 range against accepted two-invariant replan: idempotent claim original branch/base and actual managed source identity; complete stored pool Task/path/revision/release evidence before direct remove and eviction, no synthesized authority. Reuse reported expanded focused suite. Inspect inherited range only as needed. Return AgentResult v5 verdict with material findings only; no broad tests.",
   "acceptanceCriteria": [
     "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
   ],
@@ -47,5 +47,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-A2",
+  "ownerRevision": 8
 }

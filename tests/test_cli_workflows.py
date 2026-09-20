@@ -49,7 +49,7 @@ class CliWorkflowTests(unittest.TestCase):
                 self.assertEqual("balanced",frozen["profile"]["name"])
                 self.assertEqual([],frozen["rules"]["ruleRefs"])
                 changed=copy.deepcopy(profile);changed["modelRoutes"]={};config.write_text(json.dumps(changed))
-                result={"schemaVersion":4,"invocationId":invocation["invocationId"],"attempt":1,"status":"succeeded",
+                result={"schemaVersion":5,"invocationId":invocation["invocationId"],"attempt":1,"status":"succeeded",
                         **{key:[] for key in ("changedPaths","acceptanceEvidence","validationEvidence","findings","blockers","remainingRisks")}}
                 (repo/"result.json").write_text(json.dumps(result))
                 accepted=run("invocation","accept","--task","task.json","--result","result.json","--expected-revision","1")

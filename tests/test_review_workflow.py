@@ -42,7 +42,7 @@ class ReviewWorkflowTests(unittest.TestCase):
         return start_review(self.repo, self.task_path, self.profile, expected_head=self.head, review_lane="native::native/reviewer")
 
     def report(self, invocation):
-        return {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"],
+        return {"schemaVersion": 5, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"],
                 "status": "succeeded", "changedPaths": [], "acceptanceEvidence": ["acceptance checked"],
                 "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": [],
                 "verdict": "Accepted", "hostId": "native", "reviewerModel": "native/reviewer"}

@@ -19,7 +19,7 @@ class ReviewAcceptanceTests(unittest.TestCase):
         self.task.update({"state": "Candidate", "baseSha": "base"})
         self.task["commits"]["candidate"] = "head"
         self.review = {
-            "schemaVersion": 4, "revision": 0, "reviewId": "R1",
+            "schemaVersion": 5, "revision": 0, "reviewId": "R1",
             "subject": {"kind": "candidate", "taskId": self.task["taskId"], "baseSha": "base", "headSha": "head"},
             "status": "Accepted", "hostId": "native", "reviewerModel": "reviewer", "cycle": 1,
             "findings": [], "validation": [],

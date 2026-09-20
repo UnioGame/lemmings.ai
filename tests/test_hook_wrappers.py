@@ -75,7 +75,7 @@ class HookWrapperTests(unittest.TestCase):
         if not bash:
             self.skipTest("bash is unavailable")
         self.marker.parent.mkdir(parents=True)
-        self.marker.write_text('{"schemaVersion":4}\n', encoding="utf-8")
+        self.marker.write_text('{"schemaVersion":5}\n', encoding="utf-8")
         environment = os.environ.copy()
         environment["PATH"] = self.restricted_path(bash)
 
@@ -102,7 +102,7 @@ class HookWrapperTests(unittest.TestCase):
         self.assertEqual({}, json.loads(inactive.stdout))
 
         self.marker.parent.mkdir(parents=True)
-        self.marker.write_text('{"schemaVersion":4}\n', encoding="utf-8")
+        self.marker.write_text('{"schemaVersion":5}\n', encoding="utf-8")
         active = subprocess.run(command, cwd=self.repo, input="{", capture_output=True, text=True, check=False)
         self.assertNotEqual(0, active.returncode)
         self.assertIn("invalid Lemmings hook input", active.stdout + active.stderr)

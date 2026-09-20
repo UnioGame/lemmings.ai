@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-A2",
   "taskId": "L5-A2",
   "taskRevision": 11,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
   "contextDigest": "d9523e2f3bd69fbb5d22a07a02618acdb52d30e6e5e8d91c3e1cc53d29a3e279",
-  "objective": "One bounded repair: bind pooled release record to original declared validation commands and exact integration evidence via snapshot or deterministic digest. Require stored binding for remove/eviction and compare canonical Task evidence even when Task revision/candidate/merge are unchanged. Add missing/altered current and stored evidence regressions, retain valid cleanup. No other scope changes; commit owned files and return full AgentResult v4 arrays.",
+  "objective": "One bounded repair: bind pooled release record to original declared validation commands and exact integration evidence via snapshot or deterministic digest. Require stored binding for remove/eviction and compare canonical Task evidence even when Task revision/candidate/merge are unchanged. Add missing/altered current and stored evidence regressions, retain valid cleanup. No other scope changes; commit owned files and return full AgentResult v5 arrays.",
   "acceptanceCriteria": [
     "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
   ],
@@ -50,5 +50,8 @@
     "maxToolCalls": 24,
     "deadlineSeconds": 2700
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-A2",
+  "ownerRevision": 11
 }

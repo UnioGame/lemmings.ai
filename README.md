@@ -32,7 +32,7 @@ The cycle is **Discover → Plan → Refine → Implement → Verify**. The mana
 
 Parallel work uses complete waves: dispatch independent tasks with separate ownership, wait for every current writer, then accept and integrate. Dependent work starts after its dependencies are integrated.
 
-With the optional runtime, those controls are persisted as the following schema-v4 lifecycle:
+With the optional runtime, those controls are persisted as the following schema-v5 lifecycle:
 
 ```mermaid
 flowchart LR
@@ -54,15 +54,17 @@ Acceptance is the stopping condition: the requested criteria and required checks
 
 Three repair cycles are a ceiling, not a target, and permit at most four candidate checks: the initial candidate and one after each repair. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. On the runtime path, candidate readiness also binds the exact SHA, plan and validation digests, worker result, ownership, clean-tree checks, bounded diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt. Acceptance alone is not integration; declared checks must pass on the integrated state.
 
-## 5.1.0
+## 6.0.0
 
-`SKILL.md` now contains the complete **Discover → Plan → Refine → Implement → Verify** process. An explicit no-Python or no-runtime request uses conversation state or one concise Markdown task note, ordinary structured worker results, immutable Git/diff review, and the same acceptance threshold without schema-v4 ceremony.
+Lemmings 6.0 adds the schema-v5 `flow` facade for Task and Strict Phase owners. `flow start|advance|submit|replan|finish|status` performs deterministic lifecycle transitions, preserves idempotent dispatch, opens repair from P0-P2 findings, keeps P3 as follow-up, and uses delta review after repair. Low-level commands remain available for diagnostics.
 
-The Python runtime remains fully supported and gains shell entrypoints for plugin hooks. Inactive hooks return without starting Python. An active marker delegates to the existing Python policy handler and fails explicitly if the interpreter is unavailable. Runtime mechanics now live in [the optional runtime reference](skills/lemmings/references/python-runtime.md), while all worker, reviewer, and explorer definitions accept either skill-only assignments or runtime-bound AgentInvocation v4 work.
+New runtime owners use `invocation-v1` by default. Explicit `host-v1` is accepted only when the brief freezes trusted usage-accounting capability for every executing host, so an unsupported host fails before work starts. Existing v4 artifacts move through explicit digest-confirmed `migrate propose` and `migrate apply`; migration never overwrites the originals or resets budgets and locks.
+
+The complete **Discover → Plan → Refine → Implement → Verify** process remains in `SKILL.md` and needs no Python. Missing runtime dependencies trigger one installation offer; installation requires explicit approval, and declining continues in skill-only mode. Inactive hooks return before looking for Python, while an active marker still fails closed when Python is unavailable.
 
 ## 5.0.3
 
-The five-stage workflow remains **Discover → Plan → Refine → Implement → Verify**, with less protocol work for agents. `task prepare` builds a schema-v4 Task from an explicit compact brief, `candidate submit` accepts and prepares a worker result without hand-editing state, and candidate review remains recoverable through `review start` and `review submit`.
+The five-stage workflow remains **Discover → Plan → Refine → Implement → Verify**, with less protocol work for agents. `task prepare` builds a schema-v5 Task from an explicit compact brief, `candidate submit` accepts and prepares a worker result without hand-editing state, and candidate review remains recoverable through `review start` and `review submit`.
 
 Hosts with trusted usage receipts keep `host-v1`. Hosts without them can freeze `invocation-v1`, which counts real invocations across retry, repair, recovery, and replan without pretending unknown tool calls were measured. Reviewer identity comes from the saved reviewer route and is used consistently for dispatch and Review.
 
@@ -74,14 +76,17 @@ Review stops when acceptance and required checks pass with no concrete blocking 
 
 Ask the agent to use Lemmings and describe the result plus observable acceptance. Add “do not use Python or the Lemmings runtime” to force the skill-only path. The manager then keeps a compact task contract, passes bounded ownership and context to workers, reviews an immutable result when required, and reports evidence. Durable work may use one Markdown task note; JSON protocol artifacts are not required.
 
-When a working runtime is already known, or one initial `doctor` check succeeds, the manager may use four recoverable operations. `task prepare` records semantic decisions, `candidate submit` accepts and prepares the worker result, and `review start`/`review submit` bind and apply independent review. Repetition resumes saved progress without duplicating budget or state.
+When a working runtime is known, or one bounded `doctor` succeeds, use the high-level flow. Repeating a command resumes saved progress without duplicating budget, invocations, review, or state.
 
 ```text
-lemmings task prepare --input task-brief.json --task docs/tasks/change.task.json
-lemmings candidate submit --task docs/tasks/change.task.json --invocation-id <worker-id> --result <worker-report.json>
-lemmings review start --task docs/tasks/change.task.json --head <candidate-sha>
-lemmings review submit --task docs/tasks/change.task.json --result <report.json> --review <allowed-artifact-path.json> --host-receipt <receipt.json>
+lemmings flow start --input task-brief.json --output docs/tasks/change.task.json
+lemmings flow advance --owner docs/tasks/change.task.json
+lemmings flow submit --owner docs/tasks/change.task.json --invocation-id <id> --result <agent-result.json>
+lemmings flow finish --owner docs/tasks/change.task.json
+lemmings flow status --owner docs/tasks/change.task.json
 ```
+
+Strict work accepts a `PhaseBrief v1` through the same `flow start` command. Explicit v4 migration uses `migrate propose --owner ... --output ...` followed by `migrate apply --proposal ... --confirm <digest> --output-root ...`.
 
 `TaskBrief v1` contains the goal, acceptance, risks, risk-to-test mapping, ownership, minimal working set, declared checks, and an explicit manager decision block for mode, review, workspace, role routes, and accounting mode. The tool hashes references and fills technical Task fields; it never chooses those decisions and never overwrites an existing Task. See [the reusable brief template](skills/lemmings/templates/task-brief.json).
 
@@ -105,7 +110,7 @@ python .agents/skills/lemmings/scripts/run.py doctor
 
 Without Python, install the Codex or Claude plugin through its host, or copy `skills/lemmings/` into the host's skill directory and copy the matching role definitions when delegation is needed. Do not run the Python installer. The workflow remains available; runtime hooks, JSON state, receipts, and atomic recovery are not.
 
-The Python installer preserves schema-v4 manual settings and rolls back owned files on failure. Active Lemmings work blocks replacement. Cached hosts may need a new agent session; plugin hooks are configured separately.
+The Python installer preserves schema-v5 manual settings and rolls back owned files on failure. Active Lemmings work blocks replacement. Cached hosts may need a new agent session; plugin hooks are configured separately.
 
 For an update, ask the agent to compare the source version and Git commit with the repository bundle, update only when no Lemmings work is active, preserve manual settings, and run `doctor` again.
 
@@ -170,7 +175,7 @@ Initial budgets can be extended only with an unresolved question and evidence of
 | Worker tool calls | 24 | 48 |
 | Repair cycles | 0 | 3 |
 
-On the runtime path, each invocation receives only the approved remainder. New invocations use `usageAccounting=host-v1`: only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Historical v5.0.0 invocations retain their legacy read path. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
+On the runtime path, each invocation receives only the approved remainder. New runtime owners use `invocation-v1` by default. When explicitly capability-gated, `host-v1` uses only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Historical v5.0.0 invocations retain their legacy read path. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
 
 ### Project Rules
 
@@ -277,7 +282,7 @@ Validation preserves the real exit status and returns bounded diagnostics with a
 
 ## Version and Reference
 
-The package is **5.1.0** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Runtime Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
+The package is **6.0.0** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Runtime Task, Phase, and Review remain **schema v5**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
 
 Authoritative details live in:
 

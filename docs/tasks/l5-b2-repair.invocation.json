@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B2",
   "taskId": "L5-B2",
   "taskRevision": 14,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
   "contextDigest": "99eda8891093eadb144a072d0e3707185699010315efaeb01d6de19ab33580d9",
-  "objective": "One repair of B2 candidate: fix three P1 provenance/auth findings and P2 digest regression in manager-provided review. Resolve endpoint/auth atomically by provenance, scope Go protocol proof to documented endpoint or verified catalog, authenticate metadata GET only to trusted Go with proper session/client headers. Add exact negative fixtures and stable repeated scan/proposal test. Preserve APIs/manual priority/state locks; commit owned files only, return AgentResult v4.",
+  "objective": "One repair of B2 candidate: fix three P1 provenance/auth findings and P2 digest regression in manager-provided review. Resolve endpoint/auth atomically by provenance, scope Go protocol proof to documented endpoint or verified catalog, authenticate metadata GET only to trusted Go with proper session/client headers. Add exact negative fixtures and stable repeated scan/proposal test. Preserve APIs/manual priority/state locks; commit owned files only, return AgentResult v5.",
   "acceptanceCriteria": [
     "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
   ],
@@ -58,5 +58,8 @@
     "maxToolCalls": 24,
     "deadlineSeconds": 2700
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B2",
+  "ownerRevision": 14
 }

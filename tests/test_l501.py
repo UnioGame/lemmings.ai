@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from lemmings.readiness import prepare_candidate, readiness_digest, result_diges
 
 def profile() -> dict:
     value = json.loads((ROOT / "skills/lemmings/defaults.json").read_text(encoding="utf-8"))
+    value["accountingMode"] = "host-v1"
     value["modelRoutes"] = {"native": {"reviewer": [
         {"providerId": "native", "modelId": "reviewer"},
         {"providerId": "native", "modelId": "a"},
@@ -28,7 +30,11 @@ def profile() -> dict:
 
 
 def template() -> dict:
-    return json.loads((ROOT / "skills/lemmings/templates/task.json").read_text(encoding="utf-8"))
+    value = json.loads((ROOT / "skills/lemmings/templates/task.json").read_text(encoding="utf-8"))
+    capabilities = {"hosts": {"native": {"usageAccounting": True}}}
+    capabilities["digest"] = hashlib.sha256(json.dumps(capabilities, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    value["accountingCapabilities"] = capabilities
+    return value
 
 
 def init_repo(root: Path) -> str:
@@ -64,7 +70,7 @@ class CandidateGateTests(unittest.TestCase):
             (repo / "owned.txt").write_text("candidate\n", encoding="utf-8")
             subprocess.run(["git", "commit", "-qam", "candidate"], cwd=repo, check=True)
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
-            result = {"schemaVersion": 4, "invocationId": first["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": head,
+            result = {"schemaVersion": 5, "invocationId": first["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": head,
                       "changedPaths": ["owned.txt"], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": [],
                       "usage": {"trusted": True, "toolCalls": 0}}
             accept_result(repo, packet, profile(), result, 1)
@@ -103,7 +109,7 @@ class CandidateGateTests(unittest.TestCase):
             (repo / "owned.txt").write_text("candidate\n", encoding="utf-8")
             subprocess.run(["git", "commit", "-qam", "candidate"], cwd=repo, check=True)
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
-            accept_result(repo, packet, profile(), {"schemaVersion": 4, "invocationId": worker["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": head,
+            accept_result(repo, packet, profile(), {"schemaVersion": 5, "invocationId": worker["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": head,
                 "changedPaths": ["owned.txt"], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": [],
                 "usage": {"trusted": True, "toolCalls": 0}}, 1)
             current = json.loads(packet.read_text(encoding="utf-8")); current.update({"state": "Candidate", "previousState": "Active"}); current["commits"]["candidate"] = head
@@ -132,7 +138,7 @@ class CandidateGateTests(unittest.TestCase):
             task = template(); task.update({"baseSha": base, "workingSet": [{"ref": "owned.txt", "purpose": "input"}], "ownership": {"owned": ["owned.txt"], "shared": [], "forbidden": []}})
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
             invocation = record_invocation(repo, packet, profile(), "worker", 1, 0)
-            result = {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": 1, "status": "blocked", "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": ["stop"], "remainingRisks": [], "usage": {"trusted": True, "toolCalls": 0}}
+            result = {"schemaVersion": 5, "invocationId": invocation["invocationId"], "attempt": 1, "status": "blocked", "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": ["stop"], "remainingRisks": [], "usage": {"trusted": True, "toolCalls": 0}}
             accept_result(repo, packet, profile(), result, 1)
             stored = json.loads(packet.read_text(encoding="utf-8"))
             self.assertEqual(24, stored["budget"]["usage"]["toolCalls"]["worker"])
@@ -183,7 +189,7 @@ class CandidateGateTests(unittest.TestCase):
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
             invocation = record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::native/reviewer")
             current = json.loads(packet.read_text(encoding="utf-8"))
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "Accepted", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
+            review = {"schemaVersion": 5, "revision": 0, "reviewId": "R1", "status": "Accepted", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": current["taskId"], "baseSha": base, "headSha": head}, "reviewSpec": dict(invocation["reviewSpec"]), "findings": [], "validation": []}
             self.assertTrue(validate_review(review, current, profile()).ok, validate_review(review, current, profile()).as_dict())
             spec_less = {key: value for key, value in review.items() if key != "reviewSpec"}
@@ -198,7 +204,7 @@ class CandidateGateTests(unittest.TestCase):
 class RepairAndReviewChainTests(unittest.TestCase):
     def test_repair_start_is_idempotent_and_delta_requires_dispositions(self) -> None:
         task = template(); task.update({"state": "Candidate", "previousState": "Active", "baseSha": "base"}); task["commits"]["candidate"] = "head"; task["budget"] = new_task_budget(profile())
-        review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
+        review = {"schemaVersion": 5, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                   "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": "base", "headSha": "head"}, "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}], "validation": []}
         with tempfile.TemporaryDirectory() as temp:
             packet = Path(temp) / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
@@ -212,7 +218,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
         readiness = candidate_readiness(task); task["execution"]["candidateReadiness"] = readiness; task["models"]["actual"] = task["models"]["assigned"]
         previous = {**review, "status": "Accepted", "reviewSpec": {"mode": "full", "fullBaseSha": "base", "candidateHead": "head", "readinessDigest": readiness["digest"], "planDigest": plan_digest(task), "validationDigest": validation_digest(task)}}
         previous_for_delta = {**previous, "subject": {**previous["subject"], "headSha": "old"}, "findings": [{**previous["findings"][0], "priority": "P2"}]}
-        delta = {"schemaVersion": 4, "revision": 0, "reviewId": "R2", "status": "Accepted", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
+        delta = {"schemaVersion": 5, "revision": 0, "reviewId": "R2", "status": "Accepted", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                  "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": "base", "headSha": "head"}, "reviewSpec": {"mode": "delta", "fullBaseSha": "base", "candidateHead": "head", "readinessDigest": readiness["digest"], "planDigest": plan_digest(task), "validationDigest": validation_digest(task), "previousReviewRef": "r1.json", "previousReviewDigest": __import__("lemmings.contracts", fromlist=["review_digest"]).review_digest(previous_for_delta), "previousHead": "old", "findingIds": ["F1"], "inspectionRange": {"from": "old", "to": "head"}}, "previousReview": previous_for_delta, "findingDispositions": {"F1": "resolved"}, "findings": [], "validation": []}
         self.assertTrue(validate_review(delta, task).ok, validate_review(delta, task).as_dict())
         missing_disposition = {**delta, "findingDispositions": {}}
@@ -235,7 +241,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
             repo = Path(temp); base = init_repo(repo)
             task = template(); task.update({"state": "Candidate", "baseSha": base}); task["commits"]["candidate"] = "head"; task["budget"] = new_task_budget(profile())
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
+            review = {"schemaVersion": 5, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "head"},
                       "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}, {"findingId": "F2", "priority": "P1", "origin": "validation", "summary": "also fix"}], "validation": []}
             review_path = repo / "r1.json"; review_path.write_text(json.dumps(review), encoding="utf-8")
@@ -268,7 +274,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
             repo = Path(temp); base = init_repo(repo)
             task = template(); task.update({"state": "Candidate", "baseSha": base}); task["commits"]["candidate"] = "head"; task["budget"] = new_task_budget(profile())
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
+            review = {"schemaVersion": 5, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "head"},
                       "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}], "validation": []}
             path = repo / "r1.json"; path.write_text(json.dumps(review), encoding="utf-8")
@@ -284,10 +290,10 @@ class RepairAndReviewChainTests(unittest.TestCase):
             repo = Path(temp); base = init_repo(repo)
             task = template(); task.update({"state": "Candidate", "baseSha": base, "reviewPolicy": "cross"}); task["commits"]["candidate"] = "head"
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            predecessor = {"schemaVersion": 4, "revision": 0, "reviewId": "P", "status": "Accepted", "hostId": "native", "reviewerModel": "native/a",
+            predecessor = {"schemaVersion": 5, "revision": 0, "reviewId": "P", "status": "Accepted", "hostId": "native", "reviewerModel": "native/a",
                           "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "old"}, "findings": [], "validation": []}
             predecessor_path = repo / "previous.json"; predecessor_path.write_text(json.dumps(predecessor), encoding="utf-8")
-            delta = {"schemaVersion": 4, "revision": 0, "reviewId": "D", "status": "Accepted", "hostId": "native", "reviewerModel": "native/a", "cycle": 1,
+            delta = {"schemaVersion": 5, "revision": 0, "reviewId": "D", "status": "Accepted", "hostId": "native", "reviewerModel": "native/a", "cycle": 1,
                      "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": "head"},
                      "reviewSpec": {"mode": "delta", "fullBaseSha": base, "candidateHead": "head", "previousReviewRef": "previous.json", "previousReviewDigest": review_digest(predecessor), "previousHead": "old", "findingIds": ["N"], "inspectionRange": {"from": "old", "to": "head"}}, "findings": [], "validation": []}
             delta_path = repo / "delta.json"; delta_path.write_text(json.dumps(delta), encoding="utf-8")
@@ -324,7 +330,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
             task["execution"]["candidateReadiness"]["digest"] = readiness_digest(task["execution"]["candidateReadiness"])
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
             first = record_invocation(repo, packet, profile(), "reviewer", 1, 0, review_lane="native::native/a")
-            first_result = {"schemaVersion": 4, "invocationId": first["invocationId"], "attempt": 1, "status": "succeeded",
+            first_result = {"schemaVersion": 5, "invocationId": first["invocationId"], "attempt": 1, "status": "succeeded",
                             "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [],
                             "blockers": [], "remainingRisks": []}
             accept_result(repo, packet, profile(), first_result, 1, trusted_usage={
@@ -343,7 +349,7 @@ class RepairAndReviewChainTests(unittest.TestCase):
             old_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
             task = template(); task.update({"state": "Candidate", "baseSha": base, "workingSet": [{"ref": "owned.txt", "purpose": "input"}], "ownership": {"owned": ["owned.txt"], "shared": [], "forbidden": []}, "validation": {"riskToTest": [], "commands": [], "allowedOutputs": ["r1.json"], "debt": []}}); task["commits"]["candidate"] = old_head; task["budget"] = new_task_budget(profile())
             packet = repo / "task.json"; packet.write_text(json.dumps(task), encoding="utf-8")
-            review = {"schemaVersion": 4, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
+            review = {"schemaVersion": 5, "revision": 0, "reviewId": "R1", "status": "ChangesRequested", "hostId": "native", "reviewerModel": "native/reviewer", "cycle": 1,
                       "subject": {"kind": "candidate", "taskId": task["taskId"], "baseSha": base, "headSha": old_head}, "reviewSpec": {"mode": "full", "fullBaseSha": base, "candidateHead": old_head, "reviewLane": "native::native/reviewer", "reviewerHost": "native", "reviewerModel": "native/reviewer", "planDigest": plan_digest(task), "validationDigest": validation_digest(task)},
                       "findings": [{"findingId": "F1", "priority": "P1", "origin": "implementation", "summary": "fix"}], "validation": []}
             review_path = repo / "r1.json"; review_path.write_text(json.dumps(review), encoding="utf-8"); apply_review(repo, packet, review_path, expected_revision=0, profile=profile())

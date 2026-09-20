@@ -13,10 +13,10 @@ The five stages and quality bar are identical on both paths.
 
 - If the user says not to use Python or the Lemmings runtime, use the **skill-only path**. Do not probe, install, invoke, or activate the runtime.
 - If this session already proved the runtime works, the manager may use the **runtime path**.
-- If the bundled runtime is available but its state is unknown, perform one bounded `doctor` check before creating task state. Success selects the runtime path. Missing Python or a pre-activation failure selects the skill-only path. Do not repeat the probe at later stages.
+- If runtime state is unknown, perform one bounded `doctor` check before creating task state. Success selects the runtime path. If Python, the bundle, or a compatible runtime is missing, explain the missing dependency and ask once whether the user wants it installed. Install only after explicit approval; otherwise continue immediately on the skill-only path. Do not repeat the probe at later stages.
 - Once a runtime Task is active, a runtime failure is a blocker, not permission to bypass hooks or silently change paths. Follow the controlled handoff in [python-runtime.md](references/python-runtime.md) only when the user explicitly requests skill-only continuation.
 
-Never install Python automatically. Do not scan providers, enable telemetry, or alter model settings merely to choose a path. Execution path does not change risk, acceptance, reviewer requirements, isolation, permissions, or user authorization.
+Never install Python or runtime dependencies automatically. A declined or unanswered installation offer selects skill-only and is not a blocker. Do not scan providers, enable telemetry, or alter model settings merely to choose a path. Execution path does not change risk, acceptance, reviewer requirements, isolation, permissions, or user authorization.
 
 ## Resolve proportional mode
 
@@ -85,7 +85,7 @@ Every new Git branch created by Lemmings must be named `task/<slug>`, using a sh
 
 Read only the reference needed for the current decision:
 
-- [python-runtime.md](references/python-runtime.md): optional schema-v4 CLI, hooks, accounting, recovery, and controlled handoff.
+- [python-runtime.md](references/python-runtime.md): optional schema-v5 CLI, hooks, accounting, recovery, and controlled handoff.
 - [contracts.md](references/contracts.md): detailed artifacts, lifecycle, Auto signals, and review rules used by the runtime.
 - [context-contract.md](references/context-contract.md): runtime AgentInvocation/AgentResult and hard context ceilings.
 - [game-projects.md](references/game-projects.md): isolated workspace registry and safe cleanup.

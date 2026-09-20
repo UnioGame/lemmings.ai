@@ -22,14 +22,14 @@ class EffectiveTests(unittest.TestCase):
             profile=json.loads((ROOT/"skills/lemmings/defaults.json").read_text())
             task=json.loads((ROOT/"skills/lemmings/templates/task.json").read_text())
             task.update(baseSha="base",workingSet=[{"ref":"owned.txt","purpose":"owned source"}])
-            snapshot={"schemaVersion":4,"name":"balanced","roleRoutes":{},"sources":{},"digest":"preset"}
+            snapshot={"schemaVersion":5,"name":"balanced","roleRoutes":{},"sources":{},"digest":"preset"}
             modules={"lemmings.profiles":types.SimpleNamespace(resolve_profile=lambda *a,**k:copy.deepcopy(snapshot)),"lemmings.rules":types.SimpleNamespace(resolve_rules=lambda *a,**k:copy.deepcopy(rules))}
             path=repo/"task.json";path.write_text(json.dumps(task))
             with patch.dict(sys.modules,modules):
                 invocation=record_invocation(repo,path,profile,"reviewer",1,0,preset="balanced",freeze=True)
                 task=json.loads(path.read_text())
                 changed=copy.deepcopy(profile);changed["modelRoutes"]={"future":{}}
-                result={"schemaVersion":4,"invocationId":invocation["invocationId"],"attempt":1,"status":"succeeded",**{key:[] for key in ("changedPaths","acceptanceEvidence","validationEvidence","findings","blockers","remainingRisks")}}
+                result={"schemaVersion":5,"invocationId":invocation["invocationId"],"attempt":1,"status":"succeeded",**{key:[] for key in ("changedPaths","acceptanceEvidence","validationEvidence","findings","blockers","remainingRisks")}}
                 self.assertTrue(result_findings(repo,task,changed,result).ok)
                 with self.assertRaisesRegex(ValueError,"cannot switch"):
                     capture_effective(repo,task,profile,preset="new")
@@ -47,7 +47,7 @@ class EffectiveTests(unittest.TestCase):
             h=hashlib.sha256(b"a").hexdigest()
             task=json.loads((ROOT/"skills/lemmings/templates/task.json").read_text())
             task.update(baseSha="base",workingSet=[{"ref":"file#"+str(i),"purpose":"source"} for i in range(12)])
-            frozen={"schemaVersion":4,"profile":{"roleRoutes":{}},"rules":{"ruleRefs":[{"ref":"file","purpose":"rules","contentHash":h}]}}
+            frozen={"schemaVersion":5,"profile":{"roleRoutes":{}},"rules":{"ruleRefs":[{"ref":"file","purpose":"rules","contentHash":h}]}}
             frozen["digest"]=digest(frozen);task["effectiveConfig"]=frozen
             with self.assertRaisesRegex(ValueError,"12 context"):
                 build_invocation(repo,task,{},"worker",attempt=1)
@@ -59,7 +59,7 @@ class EffectiveTests(unittest.TestCase):
             task=json.loads((ROOT/"skills/lemmings/templates/task.json").read_text())
             task.update(baseSha="base",workingSet=[])
             task["models"].update(hostId="native",assigned="current-host/default")
-            frozen={"schemaVersion":4,"profile":{"roleRoutes":{"reviewer":[{"hostId":"opencode","providerId":"review-provider","modelId":"review-model"}]}},"rules":{"ruleRefs":[]}}
+            frozen={"schemaVersion":5,"profile":{"roleRoutes":{"reviewer":[{"hostId":"opencode","providerId":"review-provider","modelId":"review-model"}]}},"rules":{"ruleRefs":[]}}
             frozen["digest"]=digest(frozen);task["effectiveConfig"]=frozen
             invocation=build_invocation(repo,task,{},"reviewer",attempt=1)
             self.assertEqual("review-provider/review-model",invocation["assignedModel"])
@@ -70,7 +70,7 @@ class EffectiveTests(unittest.TestCase):
         profile=json.loads((ROOT/"skills/lemmings/defaults.json").read_text())
         task=json.loads((ROOT/"skills/lemmings/templates/task.json").read_text())
         task.update(baseSha="base",workingSet=[])
-        frozen={"schemaVersion":4,"profile":{"roleRoutes":{}},"rules":{"ruleRefs":[]}}
+        frozen={"schemaVersion":5,"profile":{"roleRoutes":{}},"rules":{"ruleRefs":[]}}
         frozen["digest"]=digest(frozen);task["effectiveConfig"]=frozen
         task["execution"]["invocations"]=[derive_context_packet(task,None,"worker",{"profile":profile})]
         changed=copy.deepcopy(profile)
@@ -96,7 +96,7 @@ class EffectiveTests(unittest.TestCase):
 
     def test_engine_scope_includes_owned_paths_and_explicit_override_wins(self):
         calls=[]
-        modules={"lemmings.profiles":types.SimpleNamespace(resolve_profile=lambda *a,**k:{"schemaVersion":4,"roleRoutes":{},"sources":{}}),
+        modules={"lemmings.profiles":types.SimpleNamespace(resolve_profile=lambda *a,**k:{"schemaVersion":5,"roleRoutes":{},"sources":{}}),
                  "lemmings.rules":types.SimpleNamespace(resolve_rules=lambda *a,**k:calls.append(k) or {"projects":[],"ruleRefs":[],"digest":"rules"})}
         with tempfile.TemporaryDirectory() as d, patch.dict(sys.modules,modules):
             task={"workingSet":[{"ref":"docs/plan.md"}],"ownership":{"owned":["GameClient/Assets/**/*.cs"]}}

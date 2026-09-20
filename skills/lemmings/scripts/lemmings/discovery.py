@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 PROTOCOLS = {"responses", "chat-completions", "messages", "unknown"}
 EXECUTORS = {"native", "codex", "opencode"}
 ROUTE_KEYS = ("hostId", "providerId", "modelId", "variantId", "executor", "profileName", "protocol", "configured", "catalogued", "compatible", "authConfigured", "probed", "quotaGroup", "source")

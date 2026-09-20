@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 12,
   "taskId": "L5-C",
   "goal": "Implement scoped technology detection and seven rule packs",
@@ -107,7 +107,7 @@
     "attempts": [],
     "invocations": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-C",
         "taskId": "L5-C",
         "taskRevision": 5,
@@ -169,7 +169,7 @@
     ],
     "agentResults": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "abe58ee641262a712f4d9fbb",
         "attempt": 1,
         "status": "succeeded",

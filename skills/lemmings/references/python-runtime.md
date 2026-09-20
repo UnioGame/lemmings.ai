@@ -1,12 +1,12 @@
 # Optional Python runtime
 
-Use this reference only after the manager selects the runtime path. The runtime requires Git and Python 3.10 or newer; provider TOML discovery requires Python 3.11 or newer. It adds atomic schema-v4 state, hooks, receipts, resumable transitions, and deterministic readiness checks. It does not make planning or acceptance decisions.
+Use this reference only after the manager selects the runtime path. The runtime requires Git and Python 3.10 or newer; provider TOML discovery requires Python 3.11 or newer. It adds atomic schema-v5 state, hooks, receipts, resumable transitions, and deterministic readiness checks. It does not make planning or acceptance decisions.
 
 ## Selection and activation
 
-If runtime availability is unknown, run one bounded `lemmings doctor` or `python .agents/skills/lemmings/scripts/run.py doctor --repo <repo>` check. Do not create state during the probe. A pre-activation failure selects the skill-only path unless the user required runtime. Never install Python automatically.
+If runtime availability is unknown, run one bounded `lemmings doctor` or `python .agents/skills/lemmings/scripts/run.py doctor --repo <repo>` check. Do not create state during the probe. A pre-activation failure identifies the missing dependency. Ask once whether the user wants installation; install only after explicit approval. A declined or unanswered offer selects skill-only unless the user required runtime.
 
-Use schema v4 only. Reject v2 Task, Phase, Review, profile, or marker data with `schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle`; do not migrate it silently. Standard and Strict activate the exact Task with `runtime activate`; Simple does not need a marker. Only an active manager-owned marker enables enforcement hooks.
+Use schema v5 only. Reject v2 Task, Phase, Review, profile, or marker data with `schemaVersion 2 is unsupported by the schema-v5 runtime; replace the legacy bundle`; do not migrate it silently. Standard and Strict activate the exact Task with `runtime activate`; Simple does not need a marker. Only an active manager-owned marker enables enforcement hooks.
 
 Create the ordinary Task with:
 
@@ -18,11 +18,15 @@ TaskBrief v1 contains the goal, acceptance, ownership, dependencies, risks and e
 
 The runtime lifecycle is `Draft → Ready → Active → Candidate → Accepted → Integrated`. The manager alone changes canonical Task/Phase state through compare-and-set operations. Task, Phase, and immutable Review remain the only canonical protocol artifacts.
 
+The high-level interface is `flow start|advance|submit|replan|finish|status`. It returns `status`, `revision`, and deterministic `actions`; low-level commands remain available for diagnosis. `flow` never chooses scope, models, ownership, verdict, or acceptance.
+
+New owners default to `invocation-v1`. `host-v1` is accepted only when TaskBrief/PhaseBrief freezes `hostCapabilities.<host>.usageAccounting=true` for every executing host; unsupported configurations fail before Task/Phase creation.
+
 ## Dispatch and results
 
 Create each invocation against the target worker checkout so hashes describe its actual bytes. Freeze the effective profile, selected rules, routes, limits, base SHA, Task revision, and context hashes. Initial context is limited to 12 references and 16 KiB; recorded expansion may reach the frozen ceilings of 24 references and 32 KiB.
 
-AgentInvocation v4 supplies one objective, acceptance, owned and forbidden paths, purposeful references, validation, remaining grant, dispatch kind, and retry/repair bindings. AgentResult v4 returns status, candidate head when applicable, changed paths, acceptance and validation evidence, findings, blockers, and remaining risks. Do not transfer conversation history between invocations.
+AgentInvocation v5 supplies one objective, acceptance, owned and forbidden paths, purposeful references, validation, remaining grant, dispatch kind, and retry/repair bindings. AgentResult v5 returns status, candidate head when applicable, changed paths, acceptance and validation evidence, findings, blockers, and remaining risks. Do not transfer conversation history between invocations.
 
 Reports may omit schema version, attempt, empty optional lists, and worker changed paths; ingestion derives those from the explicitly selected invocation and Git. Never select an invocation by recency. Preserve explicit values and reject conflicts. A malformed envelope is corrected and resubmitted for the same invocation without rereading code. Missing evidence requires that evidence or check, not another implementation cycle.
 
@@ -69,7 +73,7 @@ Interpret failures locally:
 
 An explicit user request may move an active Task to the skill-only path. Stop new dispatch, wait for current agents, and preserve candidate identity, evidence, findings, assignments, attempts, and remaining blockers in the Task or one compact Markdown continuation note. Do not reset budgets or modify frozen policies.
 
-Deactivate only a marker owned by this manager after confirming no invocation or workspace is active. Prefer `lemmings runtime deactivate`. If Python use itself is forbidden, locate the marker through `git rev-parse --path-format=absolute --git-common-dir`, verify its Task identity and idle state from existing records, then remove only `<git-common-dir>/lemmings/active.json`. If ownership or idleness cannot be proven, stop and report the blocker. Keep all schema-v4 artifacts as history and continue from the current five-stage position.
+Deactivate only a marker owned by this manager after confirming no invocation or workspace is active. Prefer `lemmings runtime deactivate`. If Python use itself is forbidden, locate the marker through `git rev-parse --path-format=absolute --git-common-dir`, verify its Task identity and idle state from existing records, then remove only `<git-common-dir>/lemmings/active.json`. If ownership or idleness cannot be proven, stop and report the blocker. Keep all schema-v5 artifacts as history and continue from the current five-stage position.
 
 ## Commands
 

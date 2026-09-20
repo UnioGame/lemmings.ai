@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-A2",
   "taskId": "L5-A2",
   "taskRevision": 16,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
   "contextDigest": "70045a5760e3d18e3545c66581d005887ec0e787a377fded181e2e48392c9566",
-  "objective": "Review immutable A2 repair only against remaining pool-command-evidence-not-bound P1: successful release stores exact declared commands and integration evidence; direct removal and eviction reject missing/changed stored or canonical bindings even with unchanged task identity/revision. Reuse reported focused suite; inspect regressions and return complete AgentResult v4 verdict, material findings only. At most 8 tool calls; no edits.",
+  "objective": "Review immutable A2 repair only against remaining pool-command-evidence-not-bound P1: successful release stores exact declared commands and integration evidence; direct removal and eviction reject missing/changed stored or canonical bindings even with unchanged task identity/revision. Reuse reported focused suite; inspect regressions and return complete AgentResult v5 verdict, material findings only. At most 8 tool calls; no edits.",
   "acceptanceCriteria": [
     "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
   ],
@@ -47,5 +47,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-A2",
+  "ownerRevision": 16
 }

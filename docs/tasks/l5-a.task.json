@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 13,
   "taskId": "L5-A",
   "goal": "Implement canonical workspace provisioning and lifecycle safety",
@@ -91,7 +91,7 @@
     "attempts": [],
     "invocations": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A",
         "taskId": "L5-A",
         "taskRevision": 2,
@@ -140,7 +140,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A",
         "taskId": "L5-A",
         "taskRevision": 4,
@@ -151,7 +151,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "2cc9dc6b95d2cfa15bab0a6711e765fac7a681fc3a61a1c67e0f3afd73225799",
         "contextDigest": "bee747c1ecf927aba1a397236915ae2dd548332cba67f0d6efb5edcc5436959d",
-        "objective": "Review A immutable candidate base..head against frozen workspace contract. Check required recorded prepare repo/destination/branch/fullSHA, real size vs understated estimate, package registry identity, primary and same-task claim checks, release/remove actual lifecycle evidence, relative git operation paths, active process/lease records and eviction. Reuse 8 passing focused tests; no full suite. Return AgentResult v4 plus Accepted/ChangesRequested.",
+        "objective": "Review A immutable candidate base..head against frozen workspace contract. Check required recorded prepare repo/destination/branch/fullSHA, real size vs understated estimate, package registry identity, primary and same-task claim checks, release/remove actual lifecycle evidence, relative git operation paths, active process/lease records and eviction. Reuse 8 passing focused tests; no full suite. Return AgentResult v5 plus Accepted/ChangesRequested.",
         "acceptanceCriteria": [
           "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
         ],
@@ -191,7 +191,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A",
         "taskId": "L5-A",
         "taskRevision": 6,
@@ -245,7 +245,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A",
         "taskId": "L5-A",
         "taskRevision": 9,
@@ -256,7 +256,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "1c9ac23850e9dab0a18053b96c1af98eabd7ea2754665daf6d5a370481136de1",
         "contextDigest": "855caac55b30eb7f7fe8f3bd39500bbe5bd4a191baa2e14c0254b596d99cf844",
-        "objective": "Review immutable repaired A range. Focus same-task claim safety parity, pool stored prior Task/revision/evidence, coverage of all declared validation commands at merge SHA, actual size approval. Reuse reported14tests. Return AgentResult v4 and verdict; no broad suite.",
+        "objective": "Review immutable repaired A range. Focus same-task claim safety parity, pool stored prior Task/revision/evidence, coverage of all declared validation commands at merge SHA, actual size approval. Reuse reported14tests. Return AgentResult v5 and verdict; no broad suite.",
         "acceptanceCriteria": [
           "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
         ],
@@ -298,7 +298,7 @@
     ],
     "agentResults": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "af2daa3baf23f2dd024f782d",
         "attempt": 1,
         "status": "succeeded",
@@ -318,7 +318,7 @@
         "remainingRisks": []
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "836b37e420a3fabd493aae2a",
         "attempt": 1,
         "status": "succeeded",
@@ -357,7 +357,7 @@
         "verdict": "ChangesRequested"
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "e8dfceea9edd0304f4486c26",
         "attempt": 2,
         "status": "succeeded",
@@ -377,7 +377,7 @@
         "remainingRisks": []
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "d86b6262bf0ae33705f951e9",
         "attempt": 2,
         "status": "succeeded",

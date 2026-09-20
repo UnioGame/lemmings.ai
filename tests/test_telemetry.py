@@ -68,7 +68,7 @@ def task(state: str = "Active", cohort: str | None = "feature-small") -> dict:
 
 def quality() -> dict:
     return {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "taskId": "TASK-17",
         "baseSha": "base",
         "headSha": "head",
@@ -306,7 +306,7 @@ class TelemetryTests(unittest.TestCase):
             first.write_text(json.dumps({**task(), "taskId": "TASK-1"}), encoding="utf-8")
             second.write_text(json.dumps({**task(), "taskId": "TASK-2"}), encoding="utf-8")
             marker = runtime_marker(repo); marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text(json.dumps({"schemaVersion": 4, "taskPaths": ["TASK-1.json"]}), encoding="utf-8")
+            marker.write_text(json.dumps({"schemaVersion": 5, "taskPaths": ["TASK-1.json"]}), encoding="utf-8")
             bind_run(repo, repo, task_id="TASK-2", task_path=str(second))
             hydrated = hooks.hydrate({"cwd": str(repo), "hook_event_name": "SubagentStart"})
             self.assertEqual("TASK-1", hydrated["task"]["taskId"])

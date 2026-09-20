@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 4,
-  "distributionVersion": "5.1.0",
+  "schemaVersion": 5,
+  "distributionVersion": "6.0.0",
   "mode": "auto",
   "roadmap": "docs/tasks/ROADMAP.md",
   "taskGlobs": [
@@ -60,7 +60,7 @@
       "maxToolCalls": 48
     }
   },
-  "accountingMode": "host-v1",
+  "accountingMode": "invocation-v1",
   "invocationLimits": {
     "worker": 5,
     "reviewer": 7,

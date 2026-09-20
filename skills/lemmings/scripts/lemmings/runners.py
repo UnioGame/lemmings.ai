@@ -23,7 +23,7 @@ CODEX_DISABLED = ("multi_agent", "multi_agent_v2", "plugins", "hooks", "apps", "
 
 
 def _result(invocation, status, reason=None):
-    result = {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"], "status": status, **{key: [] for key in ARRAYS}}
+    result = {"schemaVersion": 5, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"], "status": status, **{key: [] for key in ARRAYS}}
     if reason:
         result["blockers"] = [reason]
     return result
@@ -32,7 +32,7 @@ def _result(invocation, status, reason=None):
 def _prompt(invocation):
     value = ("Execute only this saved Lemmings invocation. Read its referenced files within the stated budget. "
              "Do not delegate, resume history, change providers, publish, or use unrelated tools. "
-             "Return only an AgentResult v4 JSON object with matching invocationId/attempt, status succeeded|failed|blocked|cancelled, "
+             "Return only an AgentResult v5 JSON object with matching invocationId/attempt, status succeeded|failed|blocked|cancelled, "
              "candidateHead when applicable, and arrays changedPaths, acceptanceEvidence, validationEvidence, findings, blockers, remainingRisks. "
              "For reviewer/explorer return changedPaths=[]. Keep evidence compact. Never claim trusted tool usage in AgentResult; host-v1 accounting accepts only a separate host receipt. "
              "Follow reviewSpec full or delta bindings when the role is reviewer.\n" + json.dumps(invocation, separators=(",", ":")))
@@ -52,8 +52,8 @@ def build_launch(repo, invocation, route) -> dict:
     role = invocation.get("role")
     if role not in {"worker", "reviewer", "explorer", "manager"}:
         raise ValueError("unsupported invocation role")
-    if invocation.get("schemaVersion") != 4 or not invocation.get("invocationId") or not isinstance(invocation.get("attempt"), int):
-        raise ValueError("runner requires a saved invocation v4")
+    if invocation.get("schemaVersion") != 5 or not invocation.get("invocationId") or not isinstance(invocation.get("attempt"), int):
+        raise ValueError("runner requires a saved schema-v5 invocation")
     executor = route.get("executor") or ("native" if route.get("hostId") == "native" else route.get("hostId"))
     reader = role in {"reviewer", "explorer"}
     launch = {"executor": executor, "argv": [], "env": {}, "stdin": _prompt(invocation), "readOnly": reader,
@@ -238,7 +238,7 @@ def _parse_output(path, executor):
     clean = "\n".join(text.splitlines()[1:-1]) if text.startswith("```") else text
     try:
         value = json.loads(clean)
-        if isinstance(value, dict) and value.get("schemaVersion") == 4:
+        if isinstance(value, dict) and value.get("schemaVersion") == 5:
             return value
     except ValueError:
         pass
@@ -256,7 +256,7 @@ def _parse_output(path, executor):
             clean = "\n".join(clean.splitlines()[1:-1])
         try:
             value = json.loads(clean)
-            if isinstance(value, dict) and value.get("schemaVersion") == 4:
+            if isinstance(value, dict) and value.get("schemaVersion") == 5:
                 return value
         except ValueError: continue
     raise ValueError("no final AgentResult JSON")

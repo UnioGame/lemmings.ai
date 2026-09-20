@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-A2",
   "taskId": "L5-A2",
   "taskRevision": 5,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
   "contextDigest": "ce11b2bb8a62385b4d5c6cefda33a0d41eb8e927b29dd53199a64b57aacd0d80",
-  "objective": "Implement only reviewed workspace completion plan: original registry branch/base and actual managed source identity required for idempotent claim; complete prior pool lifecycle required for remove/eviction, never synthesize missing authority. Preserve APIs. Add focused regression matrix, run tests, commit only workspace.py/test_workspace_safety.py, return AgentResult v4.",
+  "objective": "Implement only reviewed workspace completion plan: original registry branch/base and actual managed source identity required for idempotent claim; complete prior pool lifecycle required for remove/eviction, never synthesize missing authority. Preserve APIs. Add focused regression matrix, run tests, commit only workspace.py/test_workspace_safety.py, return AgentResult v5.",
   "acceptanceCriteria": [
     "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
   ],
@@ -50,5 +50,8 @@
     "maxToolCalls": 24,
     "deadlineSeconds": 2700
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-A2",
+  "ownerRevision": 5
 }

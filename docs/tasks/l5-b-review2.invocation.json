@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B",
   "taskId": "L5-B",
   "taskRevision": 8,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "828da5c4674df96a21c1c943411299ecc143b5f43f5c31401e370a93bede2c32",
   "contextDigest": "b90b66da928c06c182d861499677c776ba9efb8519bf89b8ad90552d45d5213b",
-  "objective": "Review immutable repaired B head against previous four P1 findings. Check new real Go catalog response parsing/protocol evidence; probe exact returned model/auth and unsupported cases; shared state transaction locks and digest stability across repeat scans; manual active precedence and inventory matching. Reuse reported7+6tests, no broad suite. Return AgentResult v4 plus Accepted/ChangesRequested.",
+  "objective": "Review immutable repaired B head against previous four P1 findings. Check new real Go catalog response parsing/protocol evidence; probe exact returned model/auth and unsupported cases; shared state transaction locks and digest stability across repeat scans; manual active precedence and inventory matching. Reuse reported7+6tests, no broad suite. Return AgentResult v5 plus Accepted/ChangesRequested.",
   "acceptanceCriteria": [
     "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
   ],
@@ -48,5 +48,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B",
+  "ownerRevision": 8
 }

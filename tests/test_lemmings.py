@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def profile() -> dict:
     return {
-        "schemaVersion": 4,
-        "distributionVersion": "5.1.0",
+        "schemaVersion": 5,
+        "distributionVersion": "6.0.0",
         "mode": "auto",
         "modelRoutes": {"codex": {
             "worker": [{"providerId": "openai", "modelId": "gpt-5.6-luna", "variantId": "max"}],
@@ -54,7 +54,7 @@ def ready_candidate(value: dict) -> dict:
     invocation = derive_context_packet(value, None, "worker", {"profile": profile()})
     value["execution"]["invocations"].append(invocation)
     worker_id = invocation["invocationId"]
-    worker = {"schemaVersion": 4, "invocationId": worker_id, "attempt": 1, "status": "succeeded", "candidateHead": value["commits"]["candidate"], "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+    worker = {"schemaVersion": 5, "invocationId": worker_id, "attempt": 1, "status": "succeeded", "candidateHead": value["commits"]["candidate"], "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
     value["execution"]["agentResults"] = [worker]
     evidence = {"version": 1, "status": "passed", "candidateHead": value["commits"]["candidate"], "baseSha": value["baseSha"],
                 "planDigest": __import__("lemmings.contracts", fromlist=["plan_digest"]).plan_digest(value), "validationDigest": validation_digest(value),
@@ -70,7 +70,7 @@ def init_repo(path: Path) -> None:
 
 class SchemaOnlyTests(unittest.TestCase):
     def test_v2_artifacts_have_one_breaking_error(self):
-        expected = "schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle"
+        expected = "schemaVersion 2 is unsupported by the schema-v5 runtime; replace the legacy bundle"
         for validator, value in ((validate_profile, {"schemaVersion": 2}), (validate_task, {"schemaVersion": 2}), (validate_phase, {"schemaVersion": 2}), (validate_review, {"schemaVersion": 2})):
             with self.subTest(validator=validator.__name__):
                 checked = validator(value)
@@ -82,9 +82,9 @@ class SchemaOnlyTests(unittest.TestCase):
         plugin = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         claude_plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         claude_marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
-        self.assertEqual("5.1.0", package["version"])
-        self.assertEqual("5.1.0", plugin["version"])
-        self.assertEqual("5.1.0", claude_plugin["version"])
+        self.assertEqual("6.0.0", package["version"])
+        self.assertEqual("6.0.0", plugin["version"])
+        self.assertEqual("6.0.0", claude_plugin["version"])
         self.assertEqual("unigame-ai", claude_marketplace["name"])
         self.assertEqual("UnioGame/unigame.ai.lemmings", claude_marketplace["plugins"][0]["source"]["repo"])
         for role in ("worker", "reviewer", "explorer"):
@@ -123,7 +123,7 @@ class SchemaOnlyTests(unittest.TestCase):
         accepted["execution"]["validationEvidence"] = ["ok"]
 
         def evidence(review_id: str, model: str) -> dict:
-            return {"schemaVersion": 4, "revision": 0, "reviewId": review_id, "subject": {"kind": "candidate", "taskId": accepted["taskId"], "baseSha": "base", "headSha": "head"}, "status": "Accepted", "hostId": "codex", "reviewerModel": model, "cycle": 1, "findings": [], "validation": []}
+            return {"schemaVersion": 5, "revision": 0, "reviewId": review_id, "subject": {"kind": "candidate", "taskId": accepted["taskId"], "baseSha": "base", "headSha": "head"}, "status": "Accepted", "hostId": "codex", "reviewerModel": model, "cycle": 1, "findings": [], "validation": []}
 
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp); init_repo(repo)
@@ -156,7 +156,7 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(0, cli.main(["runtime", "activate", "--repo", str(repo), "--task", "docs/tasks/task.json"]))
                 self.assertEqual(0, cli.main(["runtime", "status", "--repo", str(repo)]))
             marker = runtime_marker(repo)
-            self.assertEqual({"schemaVersion": 4, "profilePath": ".agents/lemmings.json", "taskPaths": ["docs/tasks/task.json"]}, json.loads(marker.read_text(encoding="utf-8")))
+            self.assertEqual({"schemaVersion": 5, "profilePath": ".agents/lemmings.json", "taskPaths": ["docs/tasks/task.json"]}, json.loads(marker.read_text(encoding="utf-8")))
             with redirect_stdout(StringIO()):
                 self.assertEqual(0, cli.main(["runtime", "deactivate", "--repo", str(repo)]))
                 self.assertEqual(0, cli.main(["runtime", "deactivate", "--repo", str(repo)]))
@@ -282,7 +282,7 @@ class HookPolicyTests(unittest.TestCase):
             value["commits"]["candidate"] = head
             invocation = derive_context_packet(value, {}, "worker", {"profile": profile()})
             value["execution"]["invocations"].append(invocation)
-            result = {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"], "status": "succeeded", "candidateHead": head, "changedPaths": ["wrong.txt"], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+            result = {"schemaVersion": 5, "invocationId": invocation["invocationId"], "attempt": invocation["attempt"], "status": "succeeded", "candidateHead": head, "changedPaths": ["wrong.txt"], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
             payload = {"event": "SubagentStop", "cwd": str(repo), "task": value, "profile": profile(), "task_name": "lemmings-worker", "agentInvocation": invocation, "agentResult": result}
             self.assertEqual("block", handle(payload)["decision"])
             result["changedPaths"] = ["owned.txt"]
@@ -344,7 +344,7 @@ class CheckEfficiencyTests(unittest.TestCase):
                 path.write_text(json.dumps(task(task_id=task_id)), encoding="utf-8")
                 paths.append(str(path))
             phase_path = repo / "phase.json"
-            phase_path.write_text(json.dumps({"schemaVersion": 4}), encoding="utf-8")
+            phase_path.write_text(json.dumps({"schemaVersion": 5}), encoding="utf-8")
             args = argparse.Namespace(repo=str(repo), profile=None, task=paths, phase=str(phase_path), review=None, all=True, distribution=False, dispatchable=False, batch=None)
             calls = []
             with patch.object(cli, "check_task_repository", side_effect=lambda *values, **kwargs: calls.append(values[2]["taskId"]) or ValidationResult()), patch.object(cli, "validate_wave", return_value=ValidationResult()) as wave:

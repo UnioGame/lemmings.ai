@@ -143,7 +143,7 @@ def submit_review(repo: Path, task_path: Path, profile: Mapping[str, Any], repor
         if result.get("candidateHead") not in (None, spec.get("candidateHead")):
             raise ReviewWorkflowError("reported candidate head differs from the saved invocation", "evidence")
         review = {
-            "schemaVersion": 4, "revision": 0,
+            "schemaVersion": 5, "revision": 0,
             "reviewId": "review-" + hashlib.sha256(str(invocation["invocationId"]).encode()).hexdigest()[:24],
             "subject": {"kind": "candidate", "taskId": task["taskId"],
                         "baseSha": spec.get("fullBaseSha"), "headSha": spec.get("candidateHead")},

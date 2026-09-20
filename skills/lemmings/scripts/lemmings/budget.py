@@ -29,7 +29,7 @@ def policy_from_profile(profile: Mapping[str, Any], accounting_mode: str | None 
             "initial": int(configured.get("initialToolCalls", INITIAL_TOOL_CALLS[role])),
             "ceiling": int(configured.get("maxToolCalls", hard)),
         }
-    selected_mode = accounting_mode or profile.get("accountingMode") or profile.get("budgetAccountingMode") or "host-v1"
+    selected_mode = accounting_mode or profile.get("accountingMode") or profile.get("budgetAccountingMode") or "invocation-v1"
     if selected_mode not in ACCOUNTING_MODES:
         raise ValueError("accountingMode must be host-v1 or invocation-v1")
     configured_limits = profile.get("invocationLimits") if isinstance(profile.get("invocationLimits"), Mapping) else {}
@@ -80,7 +80,7 @@ def approved_tool_calls(budget: Mapping[str, Any], role: str) -> int:
 
 
 def reserve_tool_calls(budget: dict[str, Any], role: str, invocation_id: str) -> int:
-    mode = ((budget.get("policy") or {}).get("accountingMode") or "host-v1")
+    mode = ((budget.get("policy") or {}).get("accountingMode") or "invocation-v1")
     if role not in HARD_TOOL_CALL_CEILINGS:
         return 0
     existing = [item for item in budget.get("grants") or [] if isinstance(item, Mapping) and item.get("invocationId") == invocation_id]
@@ -121,7 +121,7 @@ def settle_tool_calls(budget: dict[str, Any], invocation_id: str, usage: Mapping
         raise ValueError("AgentResult has no unique budget reservation")
     reservation = matches[0]
     role, grant = str(reservation.get("role")), int(reservation.get("amount", 0))
-    mode = ((budget.get("policy") or {}).get("accountingMode") or "host-v1")
+    mode = ((budget.get("policy") or {}).get("accountingMode") or "invocation-v1")
     if mode == "invocation-v1":
         budget["reservations"] = [item for item in reservations if item is not reservation]
         if budget.get("stop") and budget["stop"].get("invocationId") == invocation_id:

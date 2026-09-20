@@ -24,7 +24,7 @@ def effective_profile(task: Mapping, profile: Mapping) -> dict:
 
 
 def checked_effective(value: Mapping) -> None:
-    if value.get("schemaVersion") != 4 or value.get("digest") != digest({k:v for k,v in value.items() if k != "digest"}):
+    if value.get("schemaVersion") != 5 or value.get("digest") != digest({k:v for k,v in value.items() if k != "digest"}):
         raise ValueError("frozen effectiveConfig digest is invalid")
     if not isinstance(value.get("profile"), Mapping) or not isinstance(value.get("rules"), Mapping):
         raise ValueError("effectiveConfig requires profile and rules")
@@ -61,7 +61,7 @@ def capture_effective(repo: Path, task: dict, profile: Mapping, *, preset: str |
                 paths.append(prefix.rstrip("/"))
         paths = list(dict.fromkeys(paths))
     rules = resolve_rules(repo, paths=paths or None, technologies=scope.get("technologies"), platforms=scope.get("platforms"))
-    value = {"schemaVersion":4,"profile":selected,"rules":rules}
+    value = {"schemaVersion":5,"profile":selected,"rules":rules}
     value["digest"] = digest(value)
     task["effectiveConfig"] = copy.deepcopy(value)
     return value

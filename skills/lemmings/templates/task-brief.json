@@ -54,6 +54,7 @@
       "worker": "native::current-host/default",
       "reviewer": "native::current-host/default"
     },
-    "accountingMode": "host-v1"
+    "accountingMode": "invocation-v1",
+    "hostCapabilities": {}
   }
 }

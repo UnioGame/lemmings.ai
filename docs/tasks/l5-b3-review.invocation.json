@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B3",
   "taskId": "L5-B3",
   "taskRevision": 4,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "42c783485f7cd43aa9de3601be70ac6075b1687bbbf163de83db7c2a4ae32232",
   "contextDigest": "903d5ebb5ec5039e3d910a327595997b059ebcdb94b22eeda979fc9700bf1705",
-  "objective": "Review only40-line B3 bounded performance/provider-identity followup at7b09..191bc. Ordinary JSON fast path, linear JSONC trailing commas, provider cache key retains slash-bearing model identity, shared cache excludes unconnected providers when configured/auth providers exist. Reuse16+9 tests and measured0.868second real scan. No broader re-review; full AgentResult v4 verdict, readonly changedPaths[], max6calls.",
+  "objective": "Review only40-line B3 bounded performance/provider-identity followup at7b09..191bc. Ordinary JSON fast path, linear JSONC trailing commas, provider cache key retains slash-bearing model identity, shared cache excludes unconnected providers when configured/auth providers exist. Reuse16+9 tests and measured0.868second real scan. No broader re-review; full AgentResult v5 verdict, readonly changedPaths[], max6calls.",
   "acceptanceCriteria": [
     "Ordinary JSON uses the standard parser; JSONC trailing commas scan linearly; 4.5MB production-shaped cache completes a bounded scan.",
     "Provider-keyed OpenCode cache retains provider identity when model IDs contain vendor slashes; no invented provider from model prefix."
@@ -44,5 +44,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B3",
+  "ownerRevision": 4
 }

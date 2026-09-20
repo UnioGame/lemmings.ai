@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-A",
   "taskId": "L5-A",
   "taskRevision": 4,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "2cc9dc6b95d2cfa15bab0a6711e765fac7a681fc3a61a1c67e0f3afd73225799",
   "contextDigest": "bee747c1ecf927aba1a397236915ae2dd548332cba67f0d6efb5edcc5436959d",
-  "objective": "Review A immutable candidate base..head against frozen workspace contract. Check required recorded prepare repo/destination/branch/fullSHA, real size vs understated estimate, package registry identity, primary and same-task claim checks, release/remove actual lifecycle evidence, relative git operation paths, active process/lease records and eviction. Reuse 8 passing focused tests; no full suite. Return AgentResult v4 plus Accepted/ChangesRequested.",
+  "objective": "Review A immutable candidate base..head against frozen workspace contract. Check required recorded prepare repo/destination/branch/fullSHA, real size vs understated estimate, package registry identity, primary and same-task claim checks, release/remove actual lifecycle evidence, relative git operation paths, active process/lease records and eviction. Reuse 8 passing focused tests; no full suite. Return AgentResult v5 plus Accepted/ChangesRequested.",
   "acceptanceCriteria": [
     "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
   ],
@@ -47,5 +47,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-A",
+  "ownerRevision": 4
 }

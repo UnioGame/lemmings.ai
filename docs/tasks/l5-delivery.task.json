@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 23,
   "taskId": "L5-DELIVERY",
   "goal": "Deliver zero-config Lemmings with provider discovery, named presets, execution adapters, safe workspaces and seven technology rule packs.",
@@ -139,7 +139,7 @@
     "attempts": [],
     "invocations": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-DELIVERY",
         "taskId": "L5-DELIVERY",
         "taskRevision": 1,
@@ -150,7 +150,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "9b8de166b83d64b99df11fbe0341f2ff01a59992907a5b4a613e78fa36aa9df7",
         "contextDigest": "7ba8bcdb09b97c16dd420dede2fe12d27b706961a234063c4e51575388df1952",
-        "objective": "Review the recorded delivery plan and frozen implementation interfaces. Identify only material gaps before isolated writers start. Return AgentResult v4 and accepted/changes-requested verdict; also assess baseline risks in workspace.py.",
+        "objective": "Review the recorded delivery plan and frozen implementation interfaces. Identify only material gaps before isolated writers start. Return AgentResult v5 and accepted/changes-requested verdict; also assess baseline risks in workspace.py.",
         "acceptanceCriteria": [
           "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
           "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
@@ -215,7 +215,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-DELIVERY",
         "taskId": "L5-DELIVERY",
         "taskRevision": 3,
@@ -226,7 +226,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "bcc7037435eb066f26253efd5a4dc902879aea69565c758e77ed16c8566b8c8f",
         "contextDigest": "500a8512a87b0dcf165e34c962211160d3d661adecd9f4e4ae5547bba0de3e58",
-        "objective": "Review only the revised hashed docs/context/l5-contracts.md against previous material findings. Do not rerun baseline tests. Return AgentResult v4 and plan Accepted/ChangesRequested plus baseline Accepted for use as migration baseline if appropriate.",
+        "objective": "Review only the revised hashed docs/context/l5-contracts.md against previous material findings. Do not rerun baseline tests. Return AgentResult v5 and plan Accepted/ChangesRequested plus baseline Accepted for use as migration baseline if appropriate.",
         "acceptanceCriteria": [
           "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
           "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
@@ -261,7 +261,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-DELIVERY",
         "taskId": "L5-DELIVERY",
         "taskRevision": 6,
@@ -307,7 +307,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-DELIVERY",
         "taskId": "L5-DELIVERY",
         "taskRevision": 9,
@@ -318,7 +318,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "e68c4cf1474748a5ff304bc8acbd56e2040784966add00b3dd4227d210ec961a",
         "contextDigest": "9536077c5d3f679bf287361a091e3484322aa4fa14742228765aacb918c04357",
-        "objective": "Review only integration plan deltas: A and B are terminal Replan Required, replaced by independently Accepted bounded A2 and B2 plans; whole-wave topology remains A2+B2 then C+D. B2 adds optional repo argument to probe, manager CLI passes canonical repo. Original frozen contract applies otherwise; no configuration requirement added. Phase master is umbrella task with no dependencies, C/D depend A2/B2. Return AgentResult v4 verdict. No code/test rereads.",
+        "objective": "Review only integration plan deltas: A and B are terminal Replan Required, replaced by independently Accepted bounded A2 and B2 plans; whole-wave topology remains A2+B2 then C+D. B2 adds optional repo argument to probe, manager CLI passes canonical repo. Original frozen contract applies otherwise; no configuration requirement added. Phase master is umbrella task with no dependencies, C/D depend A2/B2. Return AgentResult v5 verdict. No code/test rereads.",
         "acceptanceCriteria": [
           "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
           "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
@@ -365,7 +365,7 @@
     ],
     "agentResults": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "81bf4b581099431a3f801b04",
         "attempt": 2,
         "status": "succeeded",
@@ -384,7 +384,7 @@
         "verdict": "Accepted"
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "29ecba0086cf8a2e59a49e95",
         "attempt": 1,
         "status": "succeeded",
@@ -402,7 +402,7 @@
         ]
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "640c638db6620889f3b23ce9",
         "attempt": 3,
         "status": "succeeded",

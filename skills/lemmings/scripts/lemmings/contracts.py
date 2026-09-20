@@ -1,4 +1,4 @@
-"""Canonical schema-v4 orchestration contracts for Lemmings."""
+"""Canonical schema-v5 orchestration contracts for Lemmings."""
 
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ from .budget import (
     HARD_CONTEXT_CEILINGS, HARD_TOOL_CALL_CEILINGS, approved_tool_calls,
 )
 
-SCHEMA_VERSION = 4
-DISTRIBUTION_VERSION = "5.1.0"
-PLUGIN_VERSION = "5.1.0"
+SCHEMA_VERSION = 5
+DISTRIBUTION_VERSION = "6.0.0"
+PLUGIN_VERSION = "6.0.0"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {
@@ -39,7 +39,7 @@ TRANSITIONS = {
 }
 REVIEW_STATES = {"Pending", "ChangesRequested", "Accepted"}
 REVIEW_POLICIES = {"single", "cross"}
-REVIEW_SUBJECT_KINDS = {"candidate", "baseline", "plan"}
+REVIEW_SUBJECT_KINDS = {"candidate", "task-plan", "phase-gate"}
 CROSS_REVIEW_DEGRADATION = "cross-review-unavailable"
 STRICT_RISKS = {
     "parallelWriters", "sharedContracts", "unitySerializedAssets", "submodules",
@@ -130,6 +130,13 @@ def read_object(path: str | Path) -> dict[str, Any]:
 def write_object(path: str | Path, value: Mapping[str, Any]) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(value, dict) and isinstance(value.get("owner"), dict):
+        owner = value["owner"]
+        owner["revision"] = value.get("revision", owner.get("revision", 0))
+        if value.get("taskId"):
+            owner.update(kind="task", id=value.get("taskId"))
+        elif value.get("phaseId"):
+            owner.update(kind="phase", id=value.get("phaseId"))
     temporary = target.with_suffix(target.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(temporary, target)
@@ -155,8 +162,8 @@ def schema_supported(value: Mapping[str, Any]) -> bool:
 def schema_error(kind: str, value: Mapping[str, Any]) -> str:
     version = value.get("schemaVersion")
     if version == 2:
-        return "schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle"
-    return f"unsupported schemaVersion: {version!r}; expected 4"
+        return "schemaVersion 2 is unsupported by the schema-v5 runtime; replace the legacy bundle"
+    return f"unsupported schemaVersion: {version!r}; expected 5"
 
 
 def normalize_path(value: str) -> str:
@@ -831,7 +838,7 @@ def validate_models(task: Mapping[str, Any], profile: Mapping[str, Any] | None =
         return result
     host_id = models.get("hostId")
     if not isinstance(host_id, str) or not host_id.strip():
-        result.error("model.host", "v4 models.hostId is required")
+        result.error("model.host", "schema-v5 models.hostId is required")
         return result
     roles = (profile.get("modelRoutes") or {}).get(host_id, {})
     choices = roles.get(role) if isinstance(roles, Mapping) else None
@@ -930,12 +937,12 @@ def validate_workspace_v4(task: Mapping[str, Any], workspace: Mapping[str, Any],
     if isolated and state not in {"Blocked", "Cancelled"} and not workspace.get("workspaceId"):
         result.error("workspace.id", f"{backend} requires workspaceId")
     if workspace.get("path"):
-        result.error("workspace.path", "v4 Task stores workspaceId, not an absolute workspace path")
+        result.error("workspace.path", "v5 Task stores workspaceId, not an absolute workspace path")
     close = task.get("close") if isinstance(task.get("close"), Mapping) else {}
     if state == "Integrated":
         disposition = close.get("workspaceDisposition")
         if not isinstance(disposition, Mapping):
-            result.error("workspace.disposition", "Integrated v4 Task requires close.workspaceDisposition")
+            result.error("workspace.disposition", "Integrated schema-v5 Task requires close.workspaceDisposition")
         else:
             action = disposition.get("releaseAction")
             if action not in WORKSPACE_RELEASE_ACTIONS:
@@ -950,7 +957,7 @@ def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
     if schema_version(invocation) != SCHEMA_VERSION:
         result.error("invocation.schema", schema_error("AgentInvocation", invocation))
         return result
-    for field_name in ("runId", "taskId", "invocationId", "role", "baseSha", "profileDigest", "taskDigest", "contextDigest", "objective", "outputSchemaVersion"):
+    for field_name in ("runId", "ownerKind", "ownerId", "taskId", "invocationId", "role", "baseSha", "profileDigest", "taskDigest", "contextDigest", "objective", "outputSchemaVersion"):
         if not invocation.get(field_name):
             result.error("invocation.missing", f"missing invocation field: {field_name}")
     if invocation.get("role") not in {"worker", "reviewer", "explorer"}:
@@ -968,7 +975,11 @@ def validate_invocation(invocation: Mapping[str, Any]) -> ValidationResult:
         result.error("invocation.retry_of", "retryOf must be an invocation id")
     if invocation.get("reviewLane") is not None and (not isinstance(invocation.get("reviewLane"), str) or not invocation.get("reviewLane").strip()):
         result.error("invocation.review_lane", "reviewLane must be a non-empty reviewer identity")
-    for field_name in ("taskRevision", "attempt"):
+    if invocation.get("ownerKind") not in {"task", "phase"}:
+        result.error("invocation.owner", "ownerKind must be task or phase")
+    if invocation.get("ownerKind") == "task" and invocation.get("ownerId") != invocation.get("taskId"):
+        result.error("invocation.owner", "task invocation ownerId must equal taskId")
+    for field_name in ("ownerRevision", "taskRevision", "attempt"):
         value = invocation.get(field_name)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             result.error("invocation.counter", f"{field_name} must be a non-negative integer")
@@ -1049,7 +1060,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
         return result
     revision = task.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-        result.error("task.revision", "v4 Task requires non-negative integer revision")
+        result.error("task.revision", "v5 Task requires non-negative integer revision")
     specialization = task.get("specialization")
     if specialization is not None and (not isinstance(specialization, str) or not specialization.strip()):
         result.error("task.specialization", "specialization must be null or a non-empty string")
@@ -1070,7 +1081,7 @@ def validate_task(task: Mapping[str, Any], profile: Mapping[str, Any] | None = N
     result.extend(validate_mode_decision(task))
     domains = task.get("ownershipDomainCount")
     if not isinstance(domains, int) or isinstance(domains, bool) or domains < 1:
-        result.error("ownership.domains", "v4 Task requires positive ownershipDomainCount")
+        result.error("ownership.domains", "v5 Task requires positive ownershipDomainCount")
     for name in ("taskId", "goal", "acceptance", "dependencies", "risks", "state", "ownership", "models", "workspace", "workingSet", "validation", "execution", "reviewHistory", "close"):
         if name not in task or task.get(name) is None:
             result.error("task.missing", f"missing task field: {name}")
@@ -1347,10 +1358,10 @@ def validate_phase(phase: Mapping[str, Any]) -> ValidationResult:
         return result
     revision = phase.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-        result.error("phase.revision", "v4 Phase requires non-negative integer revision")
+        result.error("phase.revision", "v5 Phase requires non-negative integer revision")
     workspaces = (phase.get("close") or {}).get("workspaceDispositions") if isinstance(phase.get("close"), Mapping) else None
     if not isinstance(workspaces, list):
-        result.error("phase.workspaces", "v4 Phase close requires workspaceDispositions array")
+        result.error("phase.workspaces", "v5 Phase close requires workspaceDispositions array")
     else:
         for index, disposition in enumerate(workspaces):
             if not isinstance(disposition, Mapping) or disposition.get("releaseAction") not in WORKSPACE_RELEASE_ACTIONS or not disposition.get("releaseReason"):
@@ -1476,13 +1487,13 @@ def validate_review(
         return result
     revision = review.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
-        result.error("review.revision", "v4 Review requires non-negative integer revision")
+        result.error("review.revision", "v5 Review requires non-negative integer revision")
     if not review.get("reviewId"):
         result.error("review.id", "reviewId is required")
     if review.get("status") not in REVIEW_STATES:
         result.error("review.status", f"review status must be one of {sorted(REVIEW_STATES)}")
     if not review.get("reviewerModel") or not review.get("hostId"):
-        result.error("review.model", "v4 Review requires hostId and actual reviewerModel")
+        result.error("review.model", "v5 Review requires hostId and actual reviewerModel")
     elif profile:
         from .effective import effective_profile
         profile = effective_profile(task or {}, profile)
@@ -1656,7 +1667,7 @@ def validate_review(
         result.error("review.cycle", f"review cycle must be between 1 and {max_repairs + 1}")
     subject = review.get("subject") or {}
     kind = subject.get("kind") if isinstance(subject, Mapping) else None
-    if kind in {"candidate", "plan"}:
+    if kind in {"candidate", "task-plan", "phase-gate"}:
         blocking = bool(unresolved_finding_ids(review)) or any(
             isinstance(item, Mapping) and item.get("priority") in BLOCKING_PRIORITIES
             for item in as_list(review.get("findings")))
@@ -1682,17 +1693,19 @@ def validate_review(
             result.error("review.verdict", "Accepted and Integrated tasks require an Accepted review")
         if not applying and review.get("status") == "ChangesRequested" and cycle == max_repairs + 1 and task.get("state") != "Replan Required":
             result.error("review.replan", "the final permitted candidate check requires Replan Required")
-    elif kind == "baseline":
+    elif kind == "phase-gate":
         if not phase:
-            result.error("review.phase_required", "baseline review requires its phase artifact")
+            result.error("review.phase_required", "phase-gate review requires its phase artifact")
             return result
         if subject.get("phaseId") != phase.get("phaseId"):
             result.error("review.phase", "review subject phaseId differs from phase")
         if subject.get("sha") != phase.get("baselineSha"):
             result.error("review.baseline", "review subject sha must equal phase baselineSha")
+        if subject.get("planDigest") is not None and subject.get("planDigest") != plan_digest(phase):
+            result.error("review.plan_stale", "phase-gate plan review digest is stale")
         if review.get("status") != "Accepted":
-            result.error("review.baseline_status", "Strict baseline review must be Accepted")
-    elif kind == "plan":
+            result.error("review.baseline_status", "Strict phase-gate review must be Accepted")
+    elif kind == "task-plan":
         owner = task if subject.get("ownerKind") == "task" else phase if subject.get("ownerKind") == "phase" else None
         owner_id = (owner or {}).get("taskId") or (owner or {}).get("phaseId")
         if not owner or subject.get("ownerId") != owner_id:
@@ -1702,7 +1715,7 @@ def validate_review(
         if review.get("status") != "Accepted":
             result.error("review.plan_status", "plan review must be Accepted")
     else:
-        result.error("review.subject", "review subject.kind must be candidate, baseline, or plan")
+        result.error("review.subject", "review subject.kind must be candidate, task-plan, or phase-gate")
     return result
 
 
@@ -1774,7 +1787,7 @@ def validate_repository_commits(repo: Path, task: Mapping[str, Any], phase: Mapp
     baseline = task.get("baseSha") or (phase or {}).get("baselineSha")
     if phase and task.get("baseSha") and phase.get("baselineSha"):
         if git(repo, "merge-base", "--is-ancestor", str(phase.get("baselineSha")), str(task.get("baseSha"))).returncode:
-            result.error("commit.phase_base", "v4 task baseSha must contain the Phase baseline")
+            result.error("commit.phase_base", "schema-v5 task baseSha must contain the Phase baseline")
     if baseline and head:
         baseline_process = git(repo, "rev-parse", "--verify", f"{baseline}^{{commit}}")
         if baseline_process.returncode:

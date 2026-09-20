@@ -63,7 +63,7 @@ class UpgradeInstallerTests(unittest.TestCase):
                 profile_path = repo / ".agents/lemmings.json"
                 profile_path.parent.mkdir(parents=True)
                 profile_path.write_text(json.dumps({
-                    "schemaVersion": 4,
+                    "schemaVersion": 5,
                     "distributionVersion": version,
                     "modelRoutes": {
                         "codex": {
@@ -83,7 +83,7 @@ class UpgradeInstallerTests(unittest.TestCase):
                 )
                 self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
                 installed = json.loads(profile_path.read_text(encoding="utf-8"))
-                self.assertEqual("5.1.0", installed["distributionVersion"])
+                self.assertEqual("6.0.0", installed["distributionVersion"])
                 self.assertEqual(1 if version == "5.0.0" else 3, installed["orchestration"]["maxRepairs"])
                 self.assertEqual(32768, installed["contextPolicy"]["ceilings"]["maxPacketBytes"])
                 self.assertEqual(48, installed["invocationBudgets"]["worker"]["maxToolCalls"])

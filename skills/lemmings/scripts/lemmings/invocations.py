@@ -79,13 +79,12 @@ def _review_lane(
     lane = f"{route.get('hostId', 'native')}::{route_name(route) or 'current-host/default'}"
     if explicit and str(explicit) != lane:
         allowed: list[Mapping[str, Any]] = []
-        if current_recovery_route(task, "reviewer"):
-            allowed = [current_recovery_route(task, "reviewer")]
-        elif isinstance(task.get("reviewerRecovery"), Mapping):
-            allowed = [task["reviewerRecovery"]]
-        elif isinstance(task.get("roleAssignments"), Mapping) and isinstance(task["roleAssignments"].get("reviewer"), Mapping):
-            allowed = [task["roleAssignments"]["reviewer"]]
-        else:
+        # Cross review has two co-equal frozen lanes.
+        assignments = task.get("roleAssignments") if isinstance(task.get("roleAssignments"), Mapping) else {}
+        for candidate in (assignments.get("reviewer"), task.get("reviewerRecovery"), current_recovery_route(task, "reviewer")):
+            if isinstance(candidate, Mapping):
+                allowed.append(candidate)
+        if not allowed:
             effective = task.get("effectiveConfig") if isinstance(task.get("effectiveConfig"), Mapping) else {}
             allowed = list(((effective.get("profile") or {}).get("roleRoutes") or {}).get("reviewer") or [])
             if not allowed and isinstance(profile, Mapping):
@@ -240,10 +239,13 @@ def build_invocation(
     validation = task.get("validation") if isinstance(task.get("validation"), Mapping) else {}
     seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
     kind = dispatch_kind or ("review" if role == "reviewer" else "repair" if task.get("state") == "Repair" else "initial")
-    review_kind = subject_kind or ("candidate" if task.get("state") == "Candidate" else "plan" if role == "reviewer" else None)
+    review_kind = subject_kind or ("candidate" if task.get("state") == "Candidate" else "task-plan" if role == "reviewer" else None)
     invocation = {
         "schemaVersion": SCHEMA_VERSION,
         "runId": str(task.get("runId") or task.get("taskId")),
+        "ownerKind": "task",
+        "ownerId": task.get("taskId"),
+        "ownerRevision": task.get("revision"),
         "taskId": task.get("taskId"),
         "taskRevision": task.get("revision"),
         "invocationId": invocation_id or hashlib.sha256(seed.encode()).hexdigest()[:24],
@@ -260,7 +262,7 @@ def build_invocation(
         "contextRefs": references,
         "validationCommands": as_list(validation.get("commands")),
         "candidateHead": candidate_head(task) if role == "reviewer" else None,
-        "usageAccounting": "host-v1",
+        "usageAccounting": "invocation-v1",
         "dispatchKind": kind,
         "retryOf": retry_of,
         "repairCycle": repair_cycle,
@@ -288,7 +290,7 @@ def build_invocation(
             invocation["reviewSpec"] = dict(current_spec)
     task_budget_frozen = isinstance(task.get("budget"), Mapping)
     invocation_budget = task.get("budget") if task_budget_frozen else new_task_budget(profile)
-    invocation["usageAccounting"] = str((invocation_budget.get("policy") or {}).get("accountingMode") or "host-v1")
+    invocation["usageAccounting"] = str((invocation_budget.get("policy") or {}).get("accountingMode") or "invocation-v1")
     if task_budget_frozen:
         invocation["budgetPolicyDigest"] = stable_digest(invocation_budget["policy"])
     reservations = [item for item in invocation_budget.get("reservations", []) if item.get("invocationId") == invocation["invocationId"]]
@@ -454,7 +456,7 @@ def record_invocation(
                 # Execute the first already-ordered user selection; never rank alternatives.
                 models.update(assigned=route_name(chain[0]), hostId=chain[0]["hostId"])
                 task["models"] = models
-        resolved_subject = subject_kind or ("candidate" if role == "reviewer" and task.get("state") == "Candidate" else "plan" if role == "reviewer" else None)
+        resolved_subject = subject_kind or ("candidate" if role == "reviewer" and task.get("state") == "Candidate" else "task-plan" if role == "reviewer" else None)
         resolved_kind = dispatch_kind or ("review" if role == "reviewer" else "repair" if task.get("state") == "Repair" else "initial")
         resolved_lane = _review_lane(task, profile, explicit=review_lane) if role == "reviewer" and resolved_subject == "candidate" else None
         if role == "reviewer" and resolved_subject == "candidate":
@@ -493,10 +495,26 @@ def record_invocation(
                 settled = settled or any(isinstance(item, Mapping) and item.get("invocationId") == prior.get("invocationId") for item in as_list((task.get("execution") or {}).get("routeFailures")))
                 if not settled:
                     raise ValueError("one worker dispatch is already open for this repair cycle")
+        chosen_mode = accounting_mode or (((task.get("budget") or {}).get("policy") or {}).get("accountingMode")) or profile.get("accountingMode") or profile.get("budgetAccountingMode") or "invocation-v1"
+        if chosen_mode == "host-v1":
+            if role == "worker":
+                dispatch_host = str((task.get("models") or {}).get("hostId") or "native")
+            elif role == "reviewer" and resolved_lane and "::" in resolved_lane:
+                dispatch_host = resolved_lane.split("::", 1)[0]
+            else:
+                assigned = ((task.get("roleAssignments") or {}).get(role) or {})
+                dispatch_host = str(assigned.get("hostId") or "native")
+            snapshot = task.get("accountingCapabilities") if isinstance(task.get("accountingCapabilities"), Mapping) else {}
+            material = {"hosts": snapshot.get("hosts") if isinstance(snapshot.get("hosts"), Mapping) else {}}
+            if snapshot.get("digest") != stable_digest(material):
+                raise ValueError("host-v1 capability snapshot digest is missing or invalid")
+            hosts = snapshot.get("hosts") if isinstance(snapshot.get("hosts"), Mapping) else {}
+            if (hosts.get(dispatch_host) or {}).get("usageAccounting") is not True:
+                raise ValueError(f"host-v1 requires a frozen trusted usageAccounting capability for executing host: {dispatch_host}")
         task["revision"] = expected_revision + 1
         if not task.get("budget"):
             task["budget"] = new_task_budget(profile, accounting_mode)
-        elif accounting_mode and ((task.get("budget") or {}).get("policy") or {}).get("accountingMode", "host-v1") != accounting_mode:
+        elif accounting_mode and ((task.get("budget") or {}).get("policy") or {}).get("accountingMode", "invocation-v1") != accounting_mode:
             raise ValueError("accounting mode is frozen by the Task budget")
         seed = f"{task.get('taskId')}:{task.get('revision')}:{role}:{attempt}:{task.get('baseSha')}"
         invocation_id = hashlib.sha256(seed.encode()).hexdigest()[:24]
@@ -754,14 +772,15 @@ def start_repair(
     review: Mapping[str, Any] | None = None,
     review_ref: str | None = None,
     readiness_failure: Mapping[str, Any] | None = None,
+    integration_failure: Mapping[str, Any] | None = None,
     target_finding_ids: list[str] | None = None,
     narrowed_cause: bool = False,
     scope_changed: bool = False,
     approach_invalid: bool = False,
 ) -> dict[str, Any]:
     """Atomically authorize one semantic repair cycle or require replanning."""
-    if not progress.strip() or not plan.strip():
-        raise ValueError("repair start requires concrete progress and plan")
+    if not plan.strip():
+        raise ValueError("repair start requires a concrete plan")
     with task_lock(task_path):
         task = read_object(task_path)
         if task.get("revision") != expected_revision:
@@ -807,8 +826,16 @@ def start_repair(
             source_digest = str(stored["digest"])
             source_head = stored.get("candidateHead") or candidate_head(task)
             source_ref = "readiness:" + source_digest
+        elif integration_failure is not None:
+            stored = ((task.get("execution") or {}).get("integrationFailure") if isinstance(task.get("execution"), Mapping) else None)
+            if not isinstance(stored, Mapping) or stored.get("digest") != integration_failure.get("digest"):
+                raise ValueError("repair integration source must match stored integrationFailure evidence")
+            source_ids = [str(item) for item in as_list(stored.get("targetFindingIds")) if item]
+            source_digest = str(stored.get("digest") or "")
+            source_head = stored.get("headSha")
+            source_ref = "integration:" + source_digest
         else:
-            raise ValueError("repair start requires an immutable review or failed readiness evidence")
+            raise ValueError("repair start requires an immutable review, failed readiness, or integration evidence")
         active = task.setdefault("execution", {}).get("activeRepair")
         if (isinstance(active, Mapping) and active.get("status") == "open"
                 and active.get("sourceDigest") == source_digest and active.get("plan") == plan.strip()):
@@ -834,7 +861,7 @@ def start_repair(
             "sourceDigest": source_digest,
             "sourceHead": source_head,
             "targetFindingIds": ids,
-            "progress": progress.strip(),
+            "progress": progress.strip() or "pending repair result",
             "plan": plan.strip(),
             "resolvedFindingIds": [],
             "remainingFindingIds": remaining,
@@ -844,6 +871,8 @@ def start_repair(
             "status": "open",
         }
         history.append(entry)
+        if integration_failure is not None:
+            task["reviewSpec"] = {"mode": "delta", "fullBaseSha": task.get("baseSha"), "previousReviewRef": source_ref, "previousReviewDigest": source_digest, "previousHead": source_head, "findingIds": list(ids)}
         budget.setdefault("usage", {})["repairCycles"] = cycle
         task.setdefault("execution", {})["activeRepair"] = {
             "cycle": cycle,
@@ -991,9 +1020,14 @@ def apply_review(
             task["reviewSpec"] = dict(spec)
         task["reviewRef"] = relative
         task.setdefault("reviewHistory", []).append(relative)
-        applications.append({"reviewRef": relative, "digest": digest, "status": status, "mode": spec.get("mode", "legacy"),
-                             "candidateHead": candidate_subject.get("headSha"), "reviewLane": lane, "basis": review_basis,
-                             "reviewSpec": dict(spec), "repairOutcome": repair_outcome, "appliedRevision": expected_revision + 1})
+        application = {"reviewRef": relative, "digest": digest, "status": status, "mode": spec.get("mode", "legacy"),
+                       "candidateHead": candidate_subject.get("headSha"), "reviewLane": lane, "basis": review_basis,
+                       "reviewSpec": dict(spec), "repairOutcome": repair_outcome, "appliedRevision": expected_revision + 1}
+        applications.append(application)
+        bindings = task.setdefault("reviewBindings", [])
+        binding = {"subject": "candidate", "reviewRef": relative, "digest": digest, "invocationId": spec.get("invocationId"), "status": status}
+        if binding not in bindings:
+            bindings.append(binding)
         task["revision"] = expected_revision + 1
         write_object(task_path, task)
         return {"ok": True, "idempotent": False, "taskId": task.get("taskId"), "revision": task["revision"], "reviewRef": relative, "digest": digest, "state": task["state"]}

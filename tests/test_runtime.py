@@ -41,8 +41,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def profile() -> dict:
     return {
-        "schemaVersion": 4,
-        "distributionVersion": "5.1.0",
+        "schemaVersion": 5,
+        "distributionVersion": "6.0.0",
         "mode": "auto",
         "modelRoutes": {
             "codex": {
@@ -73,7 +73,7 @@ def ready_candidate(value: dict) -> dict:
     invocation = derive_context_packet(value, None, "worker", {"profile": profile()})
     value["execution"]["invocations"].append(invocation)
     worker_id = invocation["invocationId"]
-    worker = {"schemaVersion": 4, "invocationId": worker_id, "attempt": 1, "status": "succeeded", "candidateHead": value["commits"]["candidate"], "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+    worker = {"schemaVersion": 5, "invocationId": worker_id, "attempt": 1, "status": "succeeded", "candidateHead": value["commits"]["candidate"], "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
     value["execution"]["agentResults"] = [worker]
     evidence = {"version": 1, "status": "passed", "candidateHead": value["commits"]["candidate"], "baseSha": value["baseSha"],
                 "planDigest": plan_digest(value), "validationDigest": validation_digest(value), "workerInvocationId": worker_id, "workerResultDigest": result_digest(worker),
@@ -141,7 +141,7 @@ class AutoAndContractV4Tests(unittest.TestCase):
         too_large = dict(invocation)
         too_large["contextRefs"] = [{"ref": f"p/{i}", "purpose": "x", "contentHash": "h"} for i in range(25)]
         self.assertIn("context.entries", {item.code for item in validate_invocation(too_large).findings})
-        result = {"schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": "head", "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
+        result = {"schemaVersion": 5, "invocationId": invocation["invocationId"], "attempt": 1, "status": "succeeded", "candidateHead": "head", "changedPaths": [], "acceptanceEvidence": [], "validationEvidence": [], "findings": [], "blockers": [], "remainingRisks": []}
         self.assertTrue(validate_agent_result(result, invocation, value).ok)
         value["revision"] += 1
         self.assertIn("result.revision", {item.code for item in validate_agent_result(result, invocation, value).findings})
@@ -352,7 +352,7 @@ class WorkspacePoolV4Tests(unittest.TestCase):
         head = git(repo, "rev-parse", "HEAD")
         task_path = repo / "docs/tasks" / (workspace_id + ".json")
         task_path.parent.mkdir(parents=True, exist_ok=True)
-        task = {"schemaVersion": 4, "revision": 0, "taskId": entry.get("taskId"), "state": task_state,
+        task = {"schemaVersion": 5, "revision": 0, "taskId": entry.get("taskId"), "state": task_state,
                 "workspace": {"workspaceId": workspace_id, "repoRoot": str(repo), "destination": entry["path"], "backend": entry["backend"], "branch": entry.get("branch"), "baseSha": head}, "baseSha": head,
                 "commits": {"candidate": head, "fix": []}, "validation": {"commands": ["git diff --check"]},
                 "close": {"mergeCommit": head, "integrationEvidence": [{"headSha": head, "command": "git diff --check", "passed": True, "exitCode": 0}] if integration_evidence else []}}

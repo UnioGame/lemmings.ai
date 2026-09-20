@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 0,
   "taskId": "TASK-17",
   "goal": "<bounded outcome>",
@@ -101,5 +101,15 @@
     "integrationEvidence": [],
     "workspaceDisposition": null
   },
-  "budget": null
+  "budget": null,
+  "owner": {
+    "kind": "task",
+    "id": "TASK-17",
+    "revision": 0
+  },
+  "accountingCapabilities": {
+    "hosts": {},
+    "digest": "<sha256>"
+  },
+  "reviewBindings": []
 }

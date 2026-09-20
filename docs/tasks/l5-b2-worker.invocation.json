@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B2",
   "taskId": "L5-B2",
   "taskRevision": 8,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
   "contextDigest": "f3a56d8f2d8d72da6cd69e49856a6927f1acb9f91f580c2519c71b1f4c37bed1",
-  "objective": "Implement the reviewed bounded provider completion plan. Own only discovery.py, profiles.py and their two tests. Use real catalog/cache shapes and dated exact Go metadata; optional repo seam for actual scanned route probe, canonical proposal execution fields. Preserve prior manual/state safety. Run declared focused tests, commit exact owned paths, return AgentResult v4. No live paid probes, no personal config changes.",
+  "objective": "Implement the reviewed bounded provider completion plan. Own only discovery.py, profiles.py and their two tests. Use real catalog/cache shapes and dated exact Go metadata; optional repo seam for actual scanned route probe, canonical proposal execution fields. Preserve prior manual/state safety. Run declared focused tests, commit exact owned paths, return AgentResult v5. No live paid probes, no personal config changes.",
   "acceptanceCriteria": [
     "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
   ],
@@ -58,5 +58,8 @@
     "maxToolCalls": 24,
     "deadlineSeconds": 2700
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B2",
+  "ownerRevision": 8
 }

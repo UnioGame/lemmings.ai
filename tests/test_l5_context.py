@@ -40,7 +40,7 @@ class ContextBudgetTests(unittest.TestCase):
 
     def test_invocation_rejects_reference_and_packet_hard_ceilings(self) -> None:
         base = {
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "runId": "run",
             "taskId": "task",
             "taskRevision": 1,

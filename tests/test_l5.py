@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -22,11 +23,17 @@ from lemmings.invocations import accept_result, extend_task_budget, record_invoc
 
 
 def defaults() -> dict:
-    return json.loads((ROOT / "skills/lemmings/defaults.json").read_text(encoding="utf-8"))
+    value = json.loads((ROOT / "skills/lemmings/defaults.json").read_text(encoding="utf-8"))
+    value["accountingMode"] = "host-v1"
+    return value
 
 
 def task() -> dict:
-    return json.loads((ROOT / "skills/lemmings/templates/task.json").read_text(encoding="utf-8"))
+    value = json.loads((ROOT / "skills/lemmings/templates/task.json").read_text(encoding="utf-8"))
+    capabilities = {"hosts": {"native": {"usageAccounting": True}}}
+    capabilities["digest"] = hashlib.sha256(json.dumps(capabilities, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    value["accountingCapabilities"] = capabilities
+    return value
 
 
 class ProfileBudgetTests(unittest.TestCase):
@@ -79,7 +86,7 @@ class InvocationLedgerTests(unittest.TestCase):
     @staticmethod
     def result(invocation: dict, *, trusted: bool | None = None, calls: int = 0) -> dict:
         value = {
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "invocationId": invocation["invocationId"],
             "attempt": invocation["attempt"],
             "status": "blocked",
@@ -225,7 +232,7 @@ class RepairAndWaveTests(unittest.TestCase):
     @staticmethod
     def review(value: dict, cycle: int, ids: list[str]) -> dict:
         return {
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "revision": 0,
             "reviewId": f"R{cycle}",
             "subject": {"kind": "candidate", "taskId": value["taskId"], "baseSha": "base", "headSha": "head"},

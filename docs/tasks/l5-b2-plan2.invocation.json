@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B2",
   "taskId": "L5-B2",
   "taskRevision": 4,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
   "contextDigest": "a0a47bc7f15e91e62a29c7fc138341098296a96c81c8af1c5eb4c9845e00050c",
-  "objective": "Plan refinement review only: optional canonical repo parameter resolves repo-local probe context, CLI passes repo, exact route matched to fresh local scan and trusted config; two-repo collision test. Check preceding single P1 is resolved. No implementation/tests reread. Return AgentResult v4 verdict.",
+  "objective": "Plan refinement review only: optional canonical repo parameter resolves repo-local probe context, CLI passes repo, exact route matched to fresh local scan and trusted config; two-repo collision test. Check preceding single P1 is resolved. No implementation/tests reread. Return AgentResult v5 verdict.",
   "acceptanceCriteria": [
     "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
   ],
@@ -53,5 +53,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B2",
+  "ownerRevision": 4
 }

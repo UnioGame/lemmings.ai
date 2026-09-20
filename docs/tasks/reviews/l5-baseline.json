@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 0,
   "reviewId": "L5-BASELINE",
   "subject": {
-    "kind": "baseline",
+    "kind": "phase-gate",
     "phaseId": "L5",
     "sha": "f228b2056bcb3d2161daa4006343340724c7613c"
   },

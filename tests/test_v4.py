@@ -105,9 +105,9 @@ class EvidenceTests(unittest.TestCase):
             value = task()
             value.update({"planReviewRequired": True, "planReviewRef": "reviews/plan.json"})
             review = {
-                "schemaVersion": 4, "revision": 0, "reviewId": "PLAN-1", "status": "Accepted",
+                "schemaVersion": 5, "revision": 0, "reviewId": "PLAN-1", "status": "Accepted",
                 "hostId": "native", "reviewerModel": "openai/gpt-5.6-sol:high", "cycle": 1,
-                "subject": {"kind": "plan", "ownerKind": "task", "ownerId": value["taskId"], "planDigest": plan_digest(value)},
+                "subject": {"kind": "task-plan", "ownerKind": "task", "ownerId": value["taskId"], "planDigest": plan_digest(value)},
                 "findings": [], "validation": [],
             }
             target = repo / value["planReviewRef"]
@@ -162,7 +162,7 @@ class InvocationTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(repo), "commit", "-qam", "candidate"], check=True)
             head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
             result = {
-                "schemaVersion": 4, "invocationId": invocation["invocationId"], "attempt": 1, "status": "succeeded",
+                "schemaVersion": 5, "invocationId": invocation["invocationId"], "attempt": 1, "status": "succeeded",
                 "candidateHead": head, "changedPaths": ["owned.txt"], "acceptanceEvidence": [], "validationEvidence": [],
                 "findings": [], "blockers": [], "remainingRisks": [],
             }

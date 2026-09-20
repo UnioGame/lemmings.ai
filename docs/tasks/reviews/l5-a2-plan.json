@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 0,
   "reviewId": "L5-A2-PLAN",
   "subject": {
-    "kind": "plan",
+    "kind": "task-plan",
     "ownerKind": "task",
     "ownerId": "L5-A2",
     "planDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2"

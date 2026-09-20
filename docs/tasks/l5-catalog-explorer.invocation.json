@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-DELIVERY",
   "taskId": "L5-DELIVERY",
   "taskRevision": 6,
@@ -42,5 +42,8 @@
     "maxToolCalls": 12,
     "deadlineSeconds": 600
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-DELIVERY",
+  "ownerRevision": 6
 }

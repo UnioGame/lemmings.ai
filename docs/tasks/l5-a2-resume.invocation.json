@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-A2",
   "taskId": "L5-A2",
   "taskRevision": 13,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
   "contextDigest": "768f26f9c432d25c36fe5168ca046d1e92bbc101eaf9b68d21909bda00573535",
-  "objective": "Resume the SAME one repair after confirmed host initialization stall/interruption. Preserve partial owned edits. Complete only the recorded first candidate-review findings; no additional repair budget or model change. Run focused declared checks, commit owned files and return complete AgentResult v4 arrays.",
+  "objective": "Resume the SAME one repair after confirmed host initialization stall/interruption. Preserve partial owned edits. Complete only the recorded first candidate-review findings; no additional repair budget or model change. Run focused declared checks, commit owned files and return complete AgentResult v5 arrays.",
   "acceptanceCriteria": [
     "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
   ],
@@ -50,5 +50,8 @@
     "maxToolCalls": 24,
     "deadlineSeconds": 2700
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-A2",
+  "ownerRevision": 13
 }

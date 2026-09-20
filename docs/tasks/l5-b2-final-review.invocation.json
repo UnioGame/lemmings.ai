@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B2",
   "taskId": "L5-B2",
   "taskRevision": 22,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
   "contextDigest": "ca6c8f93390909387ec1f75c2e243504240409ba561a77a48be4b0aefb0b5950",
-  "objective": "Review immutable B2 single repair against prior three P1 source/protocol/auth findings and P2 stable inventory digest. Check standalone Codex profile endpoint identity and sanitized cache parsing as concrete discovery acceptance. Reuse reported 13 discovery+9 profile tests. No edits or broad tests; return full AgentResult v4 with verdict and material findings only, bounded 10 calls.",
+  "objective": "Review immutable B2 single repair against prior three P1 source/protocol/auth findings and P2 stable inventory digest. Check standalone Codex profile endpoint identity and sanitized cache parsing as concrete discovery acceptance. Reuse reported 13 discovery+9 profile tests. No edits or broad tests; return full AgentResult v5 with verdict and material findings only, bounded 10 calls.",
   "acceptanceCriteria": [
     "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
   ],
@@ -53,5 +53,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B2",
+  "ownerRevision": 22
 }

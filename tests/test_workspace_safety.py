@@ -47,7 +47,7 @@ def write_task(
     validation_commands: list[str] | None = None,
 ) -> Path:
     task = {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "revision": 0,
         "taskId": task_id,
         "state": state,

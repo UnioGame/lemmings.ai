@@ -471,7 +471,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
                     return decision("block", "Strict spawn requires an explicit worker, reviewer, or explorer role")
                 role = str(task.get("role", "worker"))
             if role not in {"worker", "reviewer", "explorer"}:
-                return decision("block", "v4 dispatch role must be worker, reviewer, or explorer")
+                return decision("block", "schema-v5 dispatch role must be worker, reviewer, or explorer")
             recovery_status = (task.get("routingRecovery") or {}).get("status")
             if recovery_status in {"pending-confirmation", "paused"}:
                 return decision("block", f"model routing recovery is {recovery_status}; user confirmation is required")
@@ -506,7 +506,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             writer = role == "worker"
             if role == "reviewer":
                 subject_kind = str(payload.get("reviewSubjectKind") or (tool_input.get("subjectKind") if isinstance(tool_input, Mapping) else None) or "candidate")
-                if subject_kind == "plan":
+                if subject_kind == "task-plan":
                     if task.get("state") not in {"Draft", "Planned", "Ready"}:
                         return decision("block", "plan reviewer requires a pre-implementation task")
                 elif task.get("state") != "Candidate":
@@ -631,7 +631,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             return decision("block", task_result.findings[0].message)
         role = requested_role(payload) or str(task.get("role") or "worker")
         if role not in {"worker", "reviewer", "explorer"}:
-            return decision("block", "v4 invocation role must be worker, reviewer, or explorer")
+            return decision("block", "schema-v5 invocation role must be worker, reviewer, or explorer")
         if role == "explorer" and not (payload.get("focus") or payload.get("question")):
             return decision("block", "explorer ContextPacket requires one focus or question")
         context = stored_invocation(task, payload, role)
@@ -665,7 +665,7 @@ def handle(payload: Mapping[str, Any]) -> dict[str, Any]:
             return decision("allow", f"RouteFailure accepted; persist it with invocation fail before {action}", routeFailure=normalized, recoveryAction=action)
         result_value = payload.get("agentResult") or payload.get("agent_result")
         if not isinstance(result_value, Mapping):
-            return decision("block", "v4 subagent stop requires structured AgentResult")
+            return decision("block", "schema-v5 subagent stop requires structured AgentResult")
         try:
             checked = result_findings(
                 Path(str(payload.get("_repoRoot") or payload.get("cwd") or os.getcwd())).resolve(),

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B",
   "taskId": "L5-B",
   "taskRevision": 4,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "04c000bf5886d2552b40d20cd1b9a4acdb0064d4075f5e4a8f51d723149fb49a",
   "contextDigest": "090fb8b693c8cb4c362a7bee1fbaf1953e8a7b4f6425b7ac434fd2f1a9f2cbaf",
-  "objective": "Review only B immutable candidate base..head against discovery/profile section of frozen contract. Inspect true endpoint catalog retrieval/probe behavior, no inference during scan, secret safety, active personal/project precedence, stale-safe state writes, proposal validation against inventory. No repeated full test suite. Return compact AgentResult v4 plus Accepted/ChangesRequested, material findings only.",
+  "objective": "Review only B immutable candidate base..head against discovery/profile section of frozen contract. Inspect true endpoint catalog retrieval/probe behavior, no inference during scan, secret safety, active personal/project precedence, stale-safe state writes, proposal validation against inventory. No repeated full test suite. Return compact AgentResult v5 plus Accepted/ChangesRequested, material findings only.",
   "acceptanceCriteria": [
     "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
   ],
@@ -48,5 +48,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B",
+  "ownerRevision": 4
 }

@@ -326,7 +326,7 @@ def apply_profile_proposal(
 ) -> dict[str, Any]:
     repo_path, home_path = _repo(repo), _home(home)
     if not isinstance(proposal, Mapping) or proposal.get("schemaVersion") != SCHEMA_VERSION:
-        raise ValueError("profile proposal must use schemaVersion 4")
+        raise ValueError("profile proposal must use schemaVersion 5")
     expected = digest(_proposal_body(proposal))
     if proposal.get("proposalDigest") != expected or confirmation != expected:
         raise ValueError("confirmation digest does not match the current profile proposal")

@@ -69,7 +69,8 @@ def _clean(repo: Path, task_path: Path | None, task: Mapping[str, Any]) -> bool:
         path = line[3:].strip() if len(line) > 3 else line.strip()
         if task_relative and normalize_path(path) in {task_relative, task_relative + ".lock"}:
             continue
-        if any(path_matches(path, rule) for rule in allowed):
+        normalized_path = normalize_path(path)
+        if any(path_matches(path, rule) or (line.startswith("?? ") and normalize_path(str(rule)).startswith(normalized_path + "/")) for rule in allowed):
             continue
         return False
     return True
@@ -223,10 +224,11 @@ def validate_candidate_readiness(
         debt_command = str(debt.get("command") or debt.get("check") or "") if isinstance(debt, Mapping) else ""
         if not isinstance(debt, Mapping) or debt_command not in commands or not _debt_for([debt], debt_command, head):
             result.error("candidate.readiness_debt", "readiness debt must be unavailable and bound to an exact command/head with reason, owner, and futureGate")
+    manager_candidate = task.get("workerRequired") is False and readiness.get("managerCandidate") is True
     worker_invocation = readiness.get("workerInvocationId")
-    if not worker_invocation:
+    if not worker_invocation and not manager_candidate:
         result.error("candidate.readiness_worker", "candidate readiness must bind an accepted worker invocation")
-    else:
+    elif worker_invocation:
         invocation = next((item for item in as_list((task.get("execution") or {}).get("invocations"))
                            if isinstance(item, Mapping) and item.get("invocationId") == worker_invocation), None)
         if not isinstance(invocation, Mapping) or invocation.get("role") != "worker":
@@ -281,7 +283,8 @@ def prepare_candidate(
                 worker_result = item
                 invocation_id = str(item.get("invocationId") or "") or None
                 break
-        if worker_result is None:
+        manager_candidate = task.get("workerRequired") is False
+        if worker_result is None and not manager_candidate:
             raise ValueError("candidate prepare requires an accepted successful worker result for candidateHead")
         clean_before = _clean(repo, task_path, task)
         checks: list[dict[str, Any]] = []
@@ -318,7 +321,8 @@ def prepare_candidate(
             "planDigest": plan_digest(task),
             "validationDigest": validation_digest(task),
             "workerInvocationId": invocation_id,
-            "workerResultDigest": result_digest(worker_result),
+            "workerResultDigest": result_digest(worker_result) if worker_result is not None else None,
+            "managerCandidate": manager_candidate,
             "checks": checks,
             "debt": supplied_debt,
             "cleanBefore": clean_before,

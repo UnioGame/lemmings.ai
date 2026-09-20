@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 22,
   "taskId": "L5-A2",
   "goal": "Complete immutable claim identity and pooled cleanup lifecycle binding",
@@ -94,7 +94,7 @@
     "attempts": [],
     "invocations": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A2",
         "taskId": "L5-A2",
         "taskRevision": 1,
@@ -105,7 +105,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
         "contextDigest": "118bc548b6e739798580ee5abb6b7634ae5f91e275a35bf26139b29bcb03e13e",
-        "objective": "Review new bounded workspace completion plan only against previous two P1 findings. No repeated tests or code review. Return AgentResult v4 verdict and material plan gaps.",
+        "objective": "Review new bounded workspace completion plan only against previous two P1 findings. No repeated tests or code review. Return AgentResult v5 verdict and material plan gaps.",
         "acceptanceCriteria": [
           "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
         ],
@@ -145,7 +145,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A2",
         "taskId": "L5-A2",
         "taskRevision": 5,
@@ -156,7 +156,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
         "contextDigest": "ce11b2bb8a62385b4d5c6cefda33a0d41eb8e927b29dd53199a64b57aacd0d80",
-        "objective": "Implement only reviewed workspace completion plan: original registry branch/base and actual managed source identity required for idempotent claim; complete prior pool lifecycle required for remove/eviction, never synthesize missing authority. Preserve APIs. Add focused regression matrix, run tests, commit only workspace.py/test_workspace_safety.py, return AgentResult v4.",
+        "objective": "Implement only reviewed workspace completion plan: original registry branch/base and actual managed source identity required for idempotent claim; complete prior pool lifecycle required for remove/eviction, never synthesize missing authority. Preserve APIs. Add focused regression matrix, run tests, commit only workspace.py/test_workspace_safety.py, return AgentResult v5.",
         "acceptanceCriteria": [
           "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
         ],
@@ -199,7 +199,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A2",
         "taskId": "L5-A2",
         "taskRevision": 8,
@@ -210,7 +210,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
         "contextDigest": "4c5c4145e25b489459f820a5ed967f102a0210ae64f5681e82dd5e8a3b3e4ab7",
-        "objective": "Review immutable A2 range against accepted two-invariant replan: idempotent claim original branch/base and actual managed source identity; complete stored pool Task/path/revision/release evidence before direct remove and eviction, no synthesized authority. Reuse reported expanded focused suite. Inspect inherited range only as needed. Return AgentResult v4 verdict with material findings only; no broad tests.",
+        "objective": "Review immutable A2 range against accepted two-invariant replan: idempotent claim original branch/base and actual managed source identity; complete stored pool Task/path/revision/release evidence before direct remove and eviction, no synthesized authority. Reuse reported expanded focused suite. Inspect inherited range only as needed. Return AgentResult v5 verdict with material findings only; no broad tests.",
         "acceptanceCriteria": [
           "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
         ],
@@ -250,7 +250,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A2",
         "taskId": "L5-A2",
         "taskRevision": 11,
@@ -261,7 +261,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
         "contextDigest": "d9523e2f3bd69fbb5d22a07a02618acdb52d30e6e5e8d91c3e1cc53d29a3e279",
-        "objective": "One bounded repair: bind pooled release record to original declared validation commands and exact integration evidence via snapshot or deterministic digest. Require stored binding for remove/eviction and compare canonical Task evidence even when Task revision/candidate/merge are unchanged. Add missing/altered current and stored evidence regressions, retain valid cleanup. No other scope changes; commit owned files and return full AgentResult v4 arrays.",
+        "objective": "One bounded repair: bind pooled release record to original declared validation commands and exact integration evidence via snapshot or deterministic digest. Require stored binding for remove/eviction and compare canonical Task evidence even when Task revision/candidate/merge are unchanged. Add missing/altered current and stored evidence regressions, retain valid cleanup. No other scope changes; commit owned files and return full AgentResult v5 arrays.",
         "acceptanceCriteria": [
           "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
         ],
@@ -304,7 +304,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A2",
         "taskId": "L5-A2",
         "taskRevision": 13,
@@ -315,7 +315,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
         "contextDigest": "768f26f9c432d25c36fe5168ca046d1e92bbc101eaf9b68d21909bda00573535",
-        "objective": "Resume the SAME one repair after confirmed host initialization stall/interruption. Preserve partial owned edits. Complete only the recorded first candidate-review findings; no additional repair budget or model change. Run focused declared checks, commit owned files and return complete AgentResult v4 arrays.",
+        "objective": "Resume the SAME one repair after confirmed host initialization stall/interruption. Preserve partial owned edits. Complete only the recorded first candidate-review findings; no additional repair budget or model change. Run focused declared checks, commit owned files and return complete AgentResult v5 arrays.",
         "acceptanceCriteria": [
           "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
         ],
@@ -358,7 +358,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-A2",
         "taskId": "L5-A2",
         "taskRevision": 16,
@@ -369,7 +369,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "b1fdce4bec9f16c105ab1ecd4763d91211212927dabbbc1ade762813b502b1a2",
         "contextDigest": "70045a5760e3d18e3545c66581d005887ec0e787a377fded181e2e48392c9566",
-        "objective": "Review immutable A2 repair only against remaining pool-command-evidence-not-bound P1: successful release stores exact declared commands and integration evidence; direct removal and eviction reject missing/changed stored or canonical bindings even with unchanged task identity/revision. Reuse reported focused suite; inspect regressions and return complete AgentResult v4 verdict, material findings only. At most 8 tool calls; no edits.",
+        "objective": "Review immutable A2 repair only against remaining pool-command-evidence-not-bound P1: successful release stores exact declared commands and integration evidence; direct removal and eviction reject missing/changed stored or canonical bindings even with unchanged task identity/revision. Reuse reported focused suite; inspect regressions and return complete AgentResult v5 verdict, material findings only. At most 8 tool calls; no edits.",
         "acceptanceCriteria": [
           "All three sections in docs/context/l5-workspace-replan.md pass; missing or altered registry evidence cannot authorize claim or removal."
         ],
@@ -411,7 +411,7 @@
     ],
     "agentResults": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "218f90b805ca2597f962c8fd",
         "attempt": 1,
         "status": "succeeded",
@@ -428,7 +428,7 @@
         "verdict": "Accepted"
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "c6c2e47b382f8942152f9ee9",
         "attempt": 1,
         "status": "succeeded",
@@ -448,7 +448,7 @@
         "remainingRisks": []
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "cef1d2342ff539451bd0a9ca",
         "attempt": 2,
         "status": "succeeded",
@@ -474,7 +474,7 @@
         "verdict": "ChangesRequested"
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "6c89f2944a182301507865ce",
         "attempt": 2,
         "status": "cancelled",
@@ -490,7 +490,7 @@
         "remainingRisks": []
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "704fc628b9c9fba465780728",
         "attempt": 3,
         "status": "succeeded",
@@ -512,7 +512,7 @@
         ]
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "06790d2b4389bbee547a5975",
         "attempt": 3,
         "status": "succeeded",

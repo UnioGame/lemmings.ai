@@ -1,7 +1,7 @@
 """Low ceremony task preparation and recoverable candidate submission.
 
 The manager supplies a small semantic ``TaskBrief v1`` document. This module
-turns it into the existing schema-v4 Task and keeps transport metadata in the
+turns it into the existing schema-v5 Task and keeps transport metadata in the
 canonical Task. It intentionally does not create a second brief artifact.
 """
 
@@ -233,19 +233,45 @@ def _validate_brief(brief: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str,
         raise TaskBriefError("TaskBrief managerDecision.reviewPolicy must be null, single, or cross")
     if decision.get("reviewRequired") and review_policy is None:
         review_policy = "single"
-    accounting = decision.get("accountingMode", "host-v1")
+    reviewer_recovery = (_route(decision.get("reviewerRecovery"), "managerDecision.reviewerRecovery")
+                         if decision.get("reviewerRecovery") is not None else None)
+    accounting = decision.get("accountingMode", "invocation-v1")
     if accounting not in ACCOUNTING_MODES:
         raise TaskBriefError("TaskBrief managerDecision.accountingMode must be host-v1 or invocation-v1")
+    raw_capabilities = decision.get("hostCapabilities", {})
+    if not isinstance(raw_capabilities, Mapping):
+        raise TaskBriefError("TaskBrief managerDecision.hostCapabilities must be an object keyed by hostId")
+    capabilities: dict[str, dict[str, Any]] = {}
+    for host_id, capability in raw_capabilities.items():
+        if not isinstance(host_id, str) or not host_id.strip() or not isinstance(capability, Mapping):
+            raise TaskBriefError("TaskBrief managerDecision.hostCapabilities entries require a hostId and object")
+        capabilities[host_id.strip()] = copy.deepcopy(dict(capability))
+    if accounting == "host-v1":
+        executing = [owner]
+        if decision.get("reviewRequired") or decision.get("planReviewRequired"):
+            if reviewer is None:
+                raise TaskBriefError("host-v1 review requires an explicit reviewer route")
+            executing.append(reviewer)
+        if review_policy == "cross":
+            if reviewer_recovery is None:
+                raise TaskBriefError("cross review requires a distinct reviewerRecovery route")
+            executing.append(reviewer_recovery)
+        unsupported = sorted({str(route.get("hostId")) for route in executing
+                              if (capabilities.get(str(route.get("hostId"))) or {}).get("usageAccounting") is not True})
+        if unsupported:
+            raise TaskBriefError("host-v1 requires trusted usageAccounting capability for every executing host: " + ", ".join(unsupported))
+    capability_snapshot = {"hosts": capabilities}
+    capability_snapshot["digest"] = hashlib.sha256(json.dumps(capability_snapshot, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     decisions = {
         "requestedMode": requested, "resolvedMode": resolved, "riskClass": risk_class, "modeReasons": mode_reasons,
         "workerRequired": decision["workerRequired"], "reviewRequired": decision["reviewRequired"], "planReviewRequired": decision["planReviewRequired"],
         "reviewPolicy": review_policy, "workspace": workspace_value, "owner": owner, "reviewer": reviewer, "explorer": explorer,
-        "accountingMode": accounting,
+        "accountingMode": accounting, "hostCapabilities": capability_snapshot,
     }
     if decision.get("planReviewRef") is not None:
         decisions["planReviewRef"] = _nonempty(decision.get("planReviewRef"), "managerDecision.planReviewRef")
-    if decision.get("reviewerRecovery") is not None:
-        decisions["reviewerRecovery"] = _route(decision.get("reviewerRecovery"), "managerDecision.reviewerRecovery")
+    if reviewer_recovery is not None:
+        decisions["reviewerRecovery"] = reviewer_recovery
     decisions["writerCount"] = decision.get("writerCount", 1)
     decisions["ownershipDomainCount"] = decision.get("ownershipDomainCount", 1)
     return semantic, decisions, {"worker": owner, "reviewer": reviewer, "explorer": explorer}
@@ -307,6 +333,9 @@ def prepare_task(repo: Path, task_path: Path, brief: Mapping[str, Any], *, profi
         "validation": {**semantic["validation"], "debt": []}, "reviewRef": None, "crossReviewRefs": [], "reviewHistory": [],
         "close": {"mergeCommit": None, "integrationEvidence": [], "workspaceDisposition": None},
         "budget": new_task_budget(profile or {}, accounting_mode=decision["accountingMode"]),
+        "accountingCapabilities": copy.deepcopy(decision["hostCapabilities"]),
+        "owner": {"kind": "task", "id": semantic["taskId"], "revision": 0},
+        "reviewBindings": [],
     }
     if reviewer is not None or decision.get("reviewerRecovery") is not None:
         task["roleAssignments"] = {"worker": owner, "reviewer": reviewer, "explorer": explorer}

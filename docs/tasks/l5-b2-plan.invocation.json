@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B2",
   "taskId": "L5-B2",
   "taskRevision": 1,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "4b042a9ff2bf130eae6ed461c22f8bcddb3144f08bcddcd21f949daf1c8d719d",
   "contextDigest": "7c2ed0cc8f530a18ae2249cb16fbcb2c8edbd65df381680c419e8b876e2bed9f",
-  "objective": "Review bounded B2 plan and source evidence only. Check unchanged contract, protocol provenance, scan-to-probe identity/auth, proposal canonicalization, focused tests. Return AgentResult v4 and Accepted/ChangesRequested. No repeated tests.",
+  "objective": "Review bounded B2 plan and source evidence only. Check unchanged contract, protocol provenance, scan-to-probe identity/auth, proposal canonicalization, focused tests. Return AgentResult v5 and Accepted/ChangesRequested. No repeated tests.",
   "acceptanceCriteria": [
     "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
   ],
@@ -53,5 +53,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B2",
+  "ownerRevision": 1
 }

@@ -21,11 +21,11 @@ class RunnerTests(unittest.TestCase):
         for args in (["init"], ["config", "user.email", "test@example.invalid"], ["config", "user.name", "test"], ["commit", "--allow-empty", "-m", "base"]):
             subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True)
         self.head = subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True).strip()
-        self.inv = {"schemaVersion":4, "invocationId":"inv-1", "attempt":1, "role":"worker", "taskId":"T", "taskRevision":1, "baseSha":self.head, "ownedPaths":["src/**"], "contextRefs":[], "validationCommands":["python -m unittest"], "limits":{"deadlineSeconds":5}}
+        self.inv = {"schemaVersion":5, "invocationId":"inv-1", "attempt":1, "role":"worker", "taskId":"T", "taskRevision":1, "baseSha":self.head, "ownedPaths":["src/**"], "contextRefs":[], "validationCommands":["python -m unittest"], "limits":{"deadlineSeconds":5}}
         self.route = {"hostId":"opencode", "executor":"opencode", "providerId":"demo", "modelId":"model", "protocol":"responses"}
     def tearDown(self): self.temp.cleanup()
     def result(self, **kwargs):
-        return {"schemaVersion":4, "invocationId":"inv-1", "attempt":1, "status":"succeeded", "candidateHead":self.head, **{k:[] for k in runners.ARRAYS}, **kwargs}
+        return {"schemaVersion":5, "invocationId":"inv-1", "attempt":1, "status":"succeeded", "candidateHead":self.head, **{k:[] for k in runners.ARRAYS}, **kwargs}
     def fake(self, code):
         path=self.root/"fake.py"; path.write_text(code, encoding="utf-8")
         return {"executor":"opencode", "argv":[sys.executable,str(path)], "env":{}, "stdin":"{}", "readOnly":False, "capabilities":{}}

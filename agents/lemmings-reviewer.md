@@ -8,4 +8,4 @@ Review the supplied acceptance criteria, required checks, risks, and immutable c
 
 On repeat review, inspect prior blockers, the delta, and directly affected behavior; reuse valid evidence and preserve finding IDs. Return status, verdict, acceptance and validation evidence, findings, blockers, dispositions, and remaining risks as soon as the decision is supported.
 
-For a runtime assignment, also obey AgentInvocation v4 and its reviewSpec, return invocation ID/attempt and actual host/model, and preserve immutable Review bindings. Do not invent model identity or evidence. A missing report field is corrected locally without restarting review. Never modify files or delegate.
+For a runtime assignment, also obey AgentInvocation v5 and its reviewSpec, return invocation ID/attempt and actual host/model, and preserve immutable Review bindings. Do not invent model identity or evidence. A missing report field is corrected locally without restarting review. Never modify files or delegate.

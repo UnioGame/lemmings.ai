@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "5.1.0"
+VERSION = "6.0.0"
 OWNED_AGENTS = (
     "lemmings-worker.toml", "lemmings-reviewer.toml", "lemmings-explorer.toml",
     "lemmings-orchestrator.toml", "lemmings-validator.toml", "lemmings-summarizer.toml",
@@ -140,7 +140,7 @@ def install(args: argparse.Namespace) -> int:
     existing_profile = repo / ".agents/lemmings.json"
     if existing_profile.is_file():
         existing = load_json(existing_profile)
-        if existing.get("schemaVersion") != 4:
+        if existing.get("schemaVersion") != 5:
             raise ValueError("unsupported profile schema; replace the legacy bundle explicitly")
         profile = merge_settings(profile, existing)
         if existing.get("distributionVersion") in {"4.1.1", "4.5.0"} and (existing.get("orchestration") or {}).get("maxRepairs") == 1:
@@ -199,7 +199,7 @@ def install(args: argparse.Namespace) -> int:
         profile_target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(stage / "lemmings.json"), str(profile_target))
         if not package_inside_repo:
-            write_json(environment, {"schemaVersion": 4, "toolRoot": str(package_root)})
+            write_json(environment, {"schemaVersion": 5, "toolRoot": str(package_root)})
         if os.environ.get("LEMMINGS_INSTALL_FAIL_AFTER") == "config":
             raise RuntimeError("injected failure after config replacement")
         if not same_tree(skill_source, skill_target):

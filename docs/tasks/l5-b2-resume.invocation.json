@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-B2",
   "taskId": "L5-B2",
   "taskRevision": 16,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "85506cedabbef80c16905f3f1f11803ed72a109653faebcbf5655480474f61ec",
   "contextDigest": "5ac37507309a15908f738acda2ba720e25214bfc90f420b8e0f5718fbad8820c",
-  "objective": "Resume the SAME one repair after confirmed host initialization stall/interruption. Preserve partial owned edits. Complete only the recorded first candidate-review findings; no additional repair budget or model change. Run focused declared checks, commit owned files and return complete AgentResult v4 arrays.",
+  "objective": "Resume the SAME one repair after confirmed host initialization stall/interruption. Preserve partial owned edits. Complete only the recorded first candidate-review findings; no additional repair budget or model change. Run focused declared checks, commit owned files and return complete AgentResult v5 arrays.",
   "acceptanceCriteria": [
     "All four acceptance sections of docs/context/l5-provider-replan.md pass with production-shaped offline fixtures."
   ],
@@ -58,5 +58,8 @@
     "maxToolCalls": 24,
     "deadlineSeconds": 2700
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-B2",
+  "ownerRevision": 16
 }

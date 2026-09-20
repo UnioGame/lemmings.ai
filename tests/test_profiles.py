@@ -45,7 +45,7 @@ bad = {}
             encoding="utf-8",
         )
         (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "modelRoutes": {
                 "codex": {
                     "worker": [{"providerId": "manual", "modelId": "worker"}],

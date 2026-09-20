@@ -51,7 +51,7 @@ wire_api = "responses"
         (opencode / "auth.json").write_text('{"anthropic":{"key":"SECRET_AUTH"}}', encoding="utf-8")
 
         snapshot = scan_providers(self.repo, offline=True, home=self.home)
-        self.assertEqual(4, snapshot["schemaVersion"])
+        self.assertEqual(5, snapshot["schemaVersion"])
         self.assertEqual({"openai", "anthropic"}, {item["providerId"] for item in snapshot["providers"]})
         self.assertTrue(any(item.get("profileName") == "fast" for item in snapshot["routes"]))
         self.assertTrue(any(item["protocol"] == "messages" and item["executor"] == "opencode" for item in snapshot["routes"]))
@@ -90,7 +90,7 @@ wire_api = "responses"
         state_dir = self.home / ".lemmings"
         state_dir.mkdir()
         (state_dir / "state.json").write_text(json.dumps({
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "inventory": {
                 "providers": [{"providerId": "old", "source": "host-catalog", "authConfigured": True, "catalogStatus": "current"}],
                 "routes": [{

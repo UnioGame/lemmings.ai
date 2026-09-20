@@ -72,6 +72,8 @@ from .telemetry import (
     telemetry_status,
 )
 from .usage import normalize_usage_export
+from .flow import advance_task, advance_phase, finish_flow, replan_flow, start_flow, status_flow, submit_flow
+from .migration import apply_migration, propose_migration
 from .workspace import (
     claim_workspace,
     estimate_workspace,
@@ -123,7 +125,7 @@ def load_artifacts(args: argparse.Namespace) -> tuple[Path, dict[str, Any] | Non
 def runtime_findings(repo: Path, marker: dict[str, Any] | None) -> ValidationResult:
     result = ValidationResult()
     if marker and marker.get("schemaVersion") != SCHEMA_VERSION:
-        message = "schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle" if marker.get("schemaVersion") == 2 else f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 4"
+        message = "schemaVersion 2 is unsupported by the schema-v5 runtime; replace the legacy bundle" if marker.get("schemaVersion") == 2 else f"unsupported schemaVersion: {marker.get('schemaVersion')!r}; expected 5"
         result.error("runtime.schema", message)
     if marker:
         task_paths = as_list(marker.get("taskPaths"))
@@ -361,7 +363,7 @@ def command_models(args: argparse.Namespace) -> int:
             if args.output:
                 write_object(resolve_path(repo, args.output), value)
             if not args.details:
-                value = {"schemaVersion":4, "scannedAt":value.get("scannedAt"), "providerCount":len(value.get("providers",[])),
+                value = {"schemaVersion":5, "scannedAt":value.get("scannedAt"), "providerCount":len(value.get("providers",[])),
                          "providers":value.get("providers",[])[:12], "routeCount":len(value.get("routes",[])),
                          "diagnostics":value.get("diagnostics",[])[:12], "diagnosticCount":len(value.get("diagnostics",[])),
                          "inventory":"~/.lemmings/state.json", "next":"models inspect --inventory --provider ID"}
@@ -581,12 +583,12 @@ def command_metrics(args: argparse.Namespace) -> int:
     profile = load_profile(repo, getattr(args, "profile", None)) or {}
     if action == "stage":
         if task and task.get("schemaVersion") != SCHEMA_VERSION:
-            raise ValueError("schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics stage requires a schema-v4 Task")
+            raise ValueError("schemaVersion 2 is unsupported by the schema-v5 runtime; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics stage requires a schema-v5 Task")
         event = record_event(repo, "run_started", source="cli", task_id=task_id, phase_id=(phase or {}).get("phaseId"), data={"mode": (task or {}).get("resolvedMode")}) if args.stage == "discover" else None
         emit({"ok": True, "recorded": bool(event), "event": event, "reason": None if event else "only run_started at discover is recorded"})
     elif action == "finish":
         if task and task.get("schemaVersion") != SCHEMA_VERSION:
-            raise ValueError("schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics finish requires a schema-v4 Task")
+            raise ValueError("schemaVersion 2 is unsupported by the schema-v5 runtime; replace the legacy bundle" if task.get("schemaVersion") == 2 else "metrics finish requires a schema-v5 Task")
         integrated = bool(task and task.get("state") == "Integrated" and (task.get("close") or {}).get("integrationEvidence"))
         event = record_event(repo, "task.integrated" if integrated else "run_finished", source="cli", task_id=task_id, data={"outcome": args.outcome, "task": task if integrated else None}, allow_finished_binding=True)
         emit({
@@ -859,6 +861,62 @@ def command_integration(args: argparse.Namespace) -> int:
     return 0 if output["ok"] else 1
 
 
+def command_flow(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    profile = load_profile(repo, getattr(args, "profile", None)) or {}
+    owner_path = resolve_path(repo, getattr(args, "owner", None) or getattr(args, "output", None))
+    if owner_path is None:
+        raise ValueError("flow requires an owner/output path")
+    if args.flow_command == "start":
+        input_path = resolve_path(repo, args.input)
+        if input_path is None or not input_path.is_file():
+            raise ValueError("flow start requires an existing TaskBrief or PhaseBrief")
+        output = start_flow(repo, input_path, owner_path, profile)
+    elif args.flow_command in {"advance", "status"}:
+        if not owner_path.is_file():
+            raise ValueError("flow requires an existing owner")
+        if args.flow_command == "status":
+            output = status_flow(repo, owner_path, profile)
+        else:
+            owner = read_object(owner_path)
+            output = (advance_phase(repo, owner_path, profile) if owner.get("phaseId") else
+                      advance_task(repo, owner_path, profile, candidate_head=getattr(args, "candidate_head", None)))
+    elif args.flow_command == "submit":
+        source = resolve_path(repo, args.result or args.failure)
+        if source is None or not source.is_file():
+            raise ValueError("flow submit requires an existing result or failure file")
+        receipt_path = resolve_path(repo, args.host_receipt) if args.host_receipt else None
+        output = submit_flow(repo, owner_path, profile, args.invocation_id, read_object(source), failure=bool(args.failure), host_receipt=read_object(receipt_path) if receipt_path else None)
+    elif args.flow_command == "replan":
+        amendment = resolve_path(repo, args.input)
+        if amendment is None or not amendment.is_file():
+            raise ValueError("flow replan requires an amendment JSON file")
+        output = replan_flow(repo, owner_path, read_object(amendment), profile)
+    else:
+        output = finish_flow(repo, owner_path)
+    emit(output)
+    return 0 if output.get("ok", True) else 1
+
+
+def command_migrate(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    if args.migrate_command == "propose":
+        owner = resolve_path(repo, args.owner)
+        output = resolve_path(repo, args.output)
+        if owner is None or output is None or not owner.is_file():
+            raise ValueError("migrate propose requires an existing owner and output path")
+        proposal = propose_migration(repo, owner)
+        write_object(output, proposal)
+        emit({"ok": True, "proposal": str(output), "digest": proposal["digest"], "entries": len(proposal["entries"])})
+    else:
+        proposal_path = resolve_path(repo, args.proposal)
+        output_root = resolve_path(repo, args.output_root)
+        if proposal_path is None or output_root is None or not proposal_path.is_file():
+            raise ValueError("migrate apply requires a proposal and output root")
+        emit(apply_migration(repo, read_object(proposal_path), args.confirm, output_root))
+    return 0
+
+
 def add_common(parser: argparse.ArgumentParser, artifacts: bool = False) -> None:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--profile", help="existing JSON configuration path")
@@ -871,13 +929,23 @@ def add_common(parser: argparse.ArgumentParser, artifacts: bool = False) -> None
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lemmings", description="Optional tooling for the Lemmings smart skill")
     sub = parser.add_subparsers(dest="command", required=True)
+    flow = sub.add_parser("flow", help="advance one schema-v5 Task or Phase through the delivery flow"); flow_sub = flow.add_subparsers(dest="flow_command", required=True)
+    flow_start = flow_sub.add_parser("start"); add_common(flow_start); flow_start.add_argument("--input", required=True); flow_start.add_argument("--output", required=True); flow_start.set_defaults(run=command_flow)
+    flow_advance = flow_sub.add_parser("advance"); add_common(flow_advance); flow_advance.add_argument("--owner", required=True); flow_advance.add_argument("--candidate-head"); flow_advance.set_defaults(run=command_flow)
+    flow_submit = flow_sub.add_parser("submit"); add_common(flow_submit); flow_submit.add_argument("--owner", required=True); flow_submit.add_argument("--invocation-id", required=True); flow_submit_payload = flow_submit.add_mutually_exclusive_group(required=True); flow_submit_payload.add_argument("--result"); flow_submit_payload.add_argument("--failure"); flow_submit.add_argument("--host-receipt"); flow_submit.set_defaults(run=command_flow)
+    flow_replan = flow_sub.add_parser("replan"); add_common(flow_replan); flow_replan.add_argument("--owner", required=True); flow_replan.add_argument("--input", required=True); flow_replan.set_defaults(run=command_flow)
+    for flow_name in ("finish", "status"):
+        flow_item = flow_sub.add_parser(flow_name); add_common(flow_item); flow_item.add_argument("--owner", required=True); flow_item.set_defaults(run=command_flow)
+    migrate = sub.add_parser("migrate", help="explicit schema-v4 to schema-v5 migration"); migrate_sub = migrate.add_subparsers(dest="migrate_command", required=True)
+    migrate_propose = migrate_sub.add_parser("propose"); migrate_propose.add_argument("--repo", default="."); migrate_propose.add_argument("--owner", required=True); migrate_propose.add_argument("--output", required=True); migrate_propose.set_defaults(run=command_migrate)
+    migrate_apply = migrate_sub.add_parser("apply"); migrate_apply.add_argument("--repo", default="."); migrate_apply.add_argument("--proposal", required=True); migrate_apply.add_argument("--confirm", required=True); migrate_apply.add_argument("--output-root", required=True); migrate_apply.set_defaults(run=command_migrate)
     check = sub.add_parser("check", help="validate lifecycle contracts once per artifact"); add_common(check); check.add_argument("--task", action="append"); check.add_argument("--phase"); check.add_argument("--review"); check.add_argument("--all", action="store_true"); check.add_argument("--distribution", action="store_true", help="also compare the installed bundle with the package"); check.add_argument("--dispatchable", action="store_true"); check.add_argument("--batch", action="append"); check.add_argument("--available-slots", type=int); check.add_argument("--active-writers", type=int, default=0); check.add_argument("--active-readers", type=int, default=0); check.set_defaults(run=command_check)
     task = sub.add_parser("task", help="prepare one canonical Task from a TaskBrief v1"); task_sub = task.add_subparsers(dest="task_command", required=True)
     task_prepare = task_sub.add_parser("prepare", help="validate and write a TaskBrief v1 once"); add_common(task_prepare); task_prepare.add_argument("--input", required=True); task_prepare.add_argument("--task", required=True); task_prepare.set_defaults(run=command_task)
     doctor = sub.add_parser("doctor", help="verify the installed self-contained runtime"); doctor.add_argument("--repo", default="."); doctor.set_defaults(run=command_doctor)
     invocation = sub.add_parser("invocation", help="persist dispatch and accept matching AgentResult"); invocation_sub = invocation.add_subparsers(dest="invocation_command", required=True)
     invocation_create = invocation_sub.add_parser("create"); add_common(invocation_create); invocation_create.add_argument("--task", required=True); invocation_create.add_argument("--role", required=True, choices=["worker", "reviewer", "explorer"]); invocation_create.add_argument("--attempt", type=int, required=True); invocation_create.add_argument("--expected-revision", type=int, required=True); invocation_create.add_argument("--objective"); invocation_create.add_argument("--preset", help="named role preset for this new Task"); invocation_create.add_argument("--accounting-mode", choices=["host-v1", "invocation-v1"], help="freeze accounting mode before the first invocation"); invocation_create.set_defaults(run=command_invocation)
-    invocation_create.add_argument("--subject-kind", choices=["candidate", "plan", "baseline"]); invocation_create.add_argument("--dispatch-kind", choices=["initial", "review", "repair", "retry", "context-correction", "schema-correction"]); invocation_create.add_argument("--retry-of"); invocation_create.add_argument("--repair-cycle", type=int)
+    invocation_create.add_argument("--subject-kind", choices=["candidate", "task-plan", "phase-gate"]); invocation_create.add_argument("--dispatch-kind", choices=["initial", "review", "repair", "retry", "context-correction", "schema-correction"]); invocation_create.add_argument("--retry-of"); invocation_create.add_argument("--repair-cycle", type=int)
     invocation_create.add_argument("--review-lane", help="stable reviewer host::model identity for cross-review lanes")
     invocation_accept = invocation_sub.add_parser("accept"); add_common(invocation_accept); invocation_accept.add_argument("--task", required=True); invocation_accept.add_argument("--result", required=True); invocation_accept.add_argument("--host-receipt"); invocation_accept.add_argument("--expected-revision", type=int); invocation_accept.set_defaults(run=command_invocation)
     invocation_accept.add_argument("--invocation-id", help="saved invocation when the report omits its transport identity")
@@ -888,7 +956,7 @@ def build_parser() -> argparse.ArgumentParser:
     candidate_prepare = candidate_sub.add_parser("prepare"); add_common(candidate_prepare); candidate_prepare.add_argument("--task", required=True); candidate_prepare.add_argument("--expected-revision", type=int, required=True); candidate_prepare.add_argument("--expected-revision-head", dest="expected_revision_head"); candidate_prepare.add_argument("--debt", action="append", default=[]); candidate_prepare.set_defaults(run=command_candidate)
     candidate_submit = candidate_sub.add_parser("submit", help="accept, promote, and prepare one worker result"); add_common(candidate_submit); candidate_submit.add_argument("--task", required=True); candidate_submit.add_argument("--invocation-id", required=True); candidate_submit.add_argument("--result", required=True); candidate_submit.add_argument("--host-receipt"); candidate_submit.set_defaults(run=command_candidate)
     repair = sub.add_parser("repair", help="authorize one bounded semantic repair cycle"); repair_sub = repair.add_subparsers(dest="repair_command", required=True)
-    repair_start = repair_sub.add_parser("start"); add_common(repair_start); repair_start.add_argument("--task", required=True); repair_start.add_argument("--review"); repair_start.add_argument("--readiness-failure"); repair_start.add_argument("--finding-id", action="append", default=[]); repair_start.add_argument("--progress", required=True); repair_start.add_argument("--plan", required=True); repair_start.add_argument("--narrowed-cause", action="store_true"); repair_start.add_argument("--scope-changed", action="store_true"); repair_start.add_argument("--approach-invalid", action="store_true"); repair_start.add_argument("--expected-revision", type=int, required=True); repair_start.set_defaults(run=command_repair)
+    repair_start = repair_sub.add_parser("start"); add_common(repair_start); repair_start.add_argument("--task", required=True); repair_start.add_argument("--review"); repair_start.add_argument("--readiness-failure"); repair_start.add_argument("--finding-id", action="append", default=[]); repair_start.add_argument("--progress", default=""); repair_start.add_argument("--plan", required=True); repair_start.add_argument("--narrowed-cause", action="store_true"); repair_start.add_argument("--scope-changed", action="store_true"); repair_start.add_argument("--approach-invalid", action="store_true"); repair_start.add_argument("--expected-revision", type=int, required=True); repair_start.set_defaults(run=command_repair)
     review = sub.add_parser("review", help="apply immutable Review evidence with Task CAS"); review_sub = review.add_subparsers(dest="review_command", required=True)
     review_apply = review_sub.add_parser("apply"); add_common(review_apply); review_apply.add_argument("--task", required=True); review_apply.add_argument("--review", required=True); review_apply.add_argument("--expected-revision", type=int, required=True); review_apply.set_defaults(run=command_review)
     review_start = review_sub.add_parser("start", help="prepare candidate and reserve reviewer once"); add_common(review_start)
@@ -902,7 +970,7 @@ def build_parser() -> argparse.ArgumentParser:
     integration = sub.add_parser("integration", help="run declared checks on the exact merged tree"); integration_sub = integration.add_subparsers(dest="integration_command", required=True)
     integration_validate = integration_sub.add_parser("validate"); integration_validate.add_argument("--repo", default="."); integration_validate.add_argument("--task", required=True); integration_validate.add_argument("--expected-revision", type=int, required=True); integration_validate.set_defaults(run=command_integration)
     status = sub.add_parser("status", help="inspect runtime and contract status"); add_common(status, True); status.set_defaults(run=command_status)
-    runtime = sub.add_parser("runtime", help="activate, inspect, or deactivate schema-v4 enforcement"); runtime_sub = runtime.add_subparsers(dest="runtime_command", required=True)
+    runtime = sub.add_parser("runtime", help="activate, inspect, or deactivate schema-v5 enforcement"); runtime_sub = runtime.add_subparsers(dest="runtime_command", required=True)
     runtime_activate = runtime_sub.add_parser("activate"); runtime_activate.add_argument("--repo", default="."); runtime_activate.add_argument("--task", action="append", required=True); runtime_activate.add_argument("--phase"); runtime_activate.add_argument("--review"); runtime_activate.set_defaults(run=command_runtime)
     for name in ("status", "deactivate"):
         item = runtime_sub.add_parser(name); item.add_argument("--repo", default="."); item.set_defaults(run=command_runtime)

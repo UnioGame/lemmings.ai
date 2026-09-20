@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "revision": 12,
   "taskId": "L5-B",
   "goal": "Implement sanitized provider discovery and named profiles",
@@ -93,7 +93,7 @@
     "attempts": [],
     "invocations": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-B",
         "taskId": "L5-B",
         "taskRevision": 2,
@@ -145,7 +145,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-B",
         "taskId": "L5-B",
         "taskRevision": 4,
@@ -156,7 +156,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "04c000bf5886d2552b40d20cd1b9a4acdb0064d4075f5e4a8f51d723149fb49a",
         "contextDigest": "090fb8b693c8cb4c362a7bee1fbaf1953e8a7b4f6425b7ac434fd2f1a9f2cbaf",
-        "objective": "Review only B immutable candidate base..head against discovery/profile section of frozen contract. Inspect true endpoint catalog retrieval/probe behavior, no inference during scan, secret safety, active personal/project precedence, stale-safe state writes, proposal validation against inventory. No repeated full test suite. Return compact AgentResult v4 plus Accepted/ChangesRequested, material findings only.",
+        "objective": "Review only B immutable candidate base..head against discovery/profile section of frozen contract. Inspect true endpoint catalog retrieval/probe behavior, no inference during scan, secret safety, active personal/project precedence, stale-safe state writes, proposal validation against inventory. No repeated full test suite. Return compact AgentResult v5 plus Accepted/ChangesRequested, material findings only.",
         "acceptanceCriteria": [
           "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
         ],
@@ -197,7 +197,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-B",
         "taskId": "L5-B",
         "taskRevision": 6,
@@ -254,7 +254,7 @@
         "outputSchemaVersion": 4
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "runId": "L5-B",
         "taskId": "L5-B",
         "taskRevision": 8,
@@ -265,7 +265,7 @@
         "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
         "taskDigest": "828da5c4674df96a21c1c943411299ecc143b5f43f5c31401e370a93bede2c32",
         "contextDigest": "b90b66da928c06c182d861499677c776ba9efb8519bf89b8ad90552d45d5213b",
-        "objective": "Review immutable repaired B head against previous four P1 findings. Check new real Go catalog response parsing/protocol evidence; probe exact returned model/auth and unsupported cases; shared state transaction locks and digest stability across repeat scans; manual active precedence and inventory matching. Reuse reported7+6tests, no broad suite. Return AgentResult v4 plus Accepted/ChangesRequested.",
+        "objective": "Review immutable repaired B head against previous four P1 findings. Check new real Go catalog response parsing/protocol evidence; probe exact returned model/auth and unsupported cases; shared state transaction locks and digest stability across repeat scans; manual active precedence and inventory matching. Reuse reported7+6tests, no broad suite. Return AgentResult v5 plus Accepted/ChangesRequested.",
         "acceptanceCriteria": [
           "Implement the owned section of docs/context/l5-contracts.md with focused tests. Preserve all unrelated changes."
         ],
@@ -308,7 +308,7 @@
     ],
     "agentResults": [
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "127b7b772df96eeb2a184a68",
         "attempt": 1,
         "candidateHead": "232ecf5663d8f6c801febbd97897e2fe07ad92c2",
@@ -332,7 +332,7 @@
         ]
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "332cb21e68cb6575cfcf9ed2",
         "attempt": 1,
         "status": "succeeded",
@@ -377,7 +377,7 @@
         "verdict": "ChangesRequested"
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "55b1343633df77d4d4c9d2b8",
         "attempt": 2,
         "status": "succeeded",
@@ -401,7 +401,7 @@
         ]
       },
       {
-        "schemaVersion": 4,
+        "schemaVersion": 5,
         "invocationId": "fea7375ac02791439c35466c",
         "attempt": 2,
         "status": "succeeded",

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "runId": "L5-DELIVERY",
   "taskId": "L5-DELIVERY",
   "taskRevision": 9,
@@ -10,7 +10,7 @@
   "profileDigest": "604d91e28fed6d4ebffa9ca66c21ac4f88ee96c0ea2c272c267fe57ca58b0606",
   "taskDigest": "e68c4cf1474748a5ff304bc8acbd56e2040784966add00b3dd4227d210ec961a",
   "contextDigest": "9536077c5d3f679bf287361a091e3484322aa4fa14742228765aacb918c04357",
-  "objective": "Review only integration plan deltas: A and B are terminal Replan Required, replaced by independently Accepted bounded A2 and B2 plans; whole-wave topology remains A2+B2 then C+D. B2 adds optional repo argument to probe, manager CLI passes canonical repo. Original frozen contract applies otherwise; no configuration requirement added. Phase master is umbrella task with no dependencies, C/D depend A2/B2. Return AgentResult v4 verdict. No code/test rereads.",
+  "objective": "Review only integration plan deltas: A and B are terminal Replan Required, replaced by independently Accepted bounded A2 and B2 plans; whole-wave topology remains A2+B2 then C+D. B2 adds optional repo argument to probe, manager CLI passes canonical repo. Original frozen contract applies otherwise; no configuration requirement added. Phase master is umbrella task with no dependencies, C/D depend A2/B2. Return AgentResult v5 verdict. No code/test rereads.",
   "acceptanceCriteria": [
     "Preserve existing v4 manual assignments and settings on install/upgrade; zero-config works on current host without Unity or external CLI.",
     "Scan configured Codex/OpenCode providers and catalogs without inference by default; safe diagnostics and explicit probe; named presets preserve manual pins and frozen task routing.",
@@ -52,5 +52,8 @@
     "maxToolCalls": 16,
     "deadlineSeconds": 1200
   },
-  "outputSchemaVersion": 4
+  "outputSchemaVersion": 5,
+  "ownerKind": "task",
+  "ownerId": "L5-DELIVERY",
+  "ownerRevision": 9
 }
