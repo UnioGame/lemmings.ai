@@ -17,8 +17,8 @@ from .budget import (
 )
 
 SCHEMA_VERSION = 4
-DISTRIBUTION_VERSION = "5.0.3"
-PLUGIN_VERSION = "5.0.3"
+DISTRIBUTION_VERSION = "5.1.0"
+PLUGIN_VERSION = "5.1.0"
 STAGES = ("Prepare", "Dispatch", "Execute/Candidate", "Review/Repair", "Integrate/Close")
 MODES = {"auto", "simple", "standard", "strict"}
 TASK_STATES = {

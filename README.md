@@ -4,7 +4,7 @@
 
 Lemmings turns a coding request into a checked repository change. You describe the outcome to your agent; that agent manages discovery, implementation, review, and integration. Small changes stay small. Larger changes can use independent workers in isolated worktrees, with reviewers checking the actual changes before integration.
 
-The normal interface is a conversation with your agent. The agent runs the bundled tools when needed; you do not need to prepare task JSON or run Python commands yourself.
+The normal interface is a conversation with your agent. The five-stage workflow is complete in `SKILL.md` and can run without Python. When the optional Python runtime is available, the manager may use it for atomic state, hooks, resumable operations, and measured host receipts; you do not prepare its JSON or commands yourself.
 
 ## How Lemmings Works
 
@@ -27,10 +27,12 @@ The cycle is **Discover → Plan → Refine → Implement → Verify**. The mana
 | --- | --- | --- |
 | **Auto** | Default for ordinary requests | Chooses Simple, Standard, or Strict after discovery and may escalate before completion |
 | **Simple** | One low-risk area | Direct implementation and focused validation |
-| **Standard** | One bounded writer, medium risk, or required review | Recorded Task, bounded candidate, and review where required |
+| **Standard** | One bounded writer, medium risk, or required review | Compact task contract, immutable candidate, and review where required |
 | **Strict** | Parallel writers, shared contracts/assets, submodules, or high risk | Dependency planning, isolated writers, immutable reviews, and exact-commit integration checks |
 
 Parallel work uses complete waves: dispatch independent tasks with separate ownership, wait for every current writer, then accept and integrate. Dependent work starts after its dependencies are integrated.
+
+With the optional runtime, those controls are persisted as the following schema-v4 lifecycle:
 
 ```mermaid
 flowchart LR
@@ -50,7 +52,13 @@ flowchart LR
 
 Acceptance is the stopping condition: the requested criteria and required checks pass, with no concrete blocking defect in affected behavior. **P0-P2 block acceptance; P3 suggestions do not.** Optional refactoring, style changes, and speculative improvements remain follow-ups. A repeat review checks the fixes and directly affected behavior using existing evidence; it does not restart a full audit. A new candidate readiness digest alone does not require full review. Mode selection considers the task's actual scope, not merely the presence of submodules or integration branches in its repository.
 
-Three repair cycles are a ceiling, not a target, and permit at most four candidate checks: the initial candidate and one after each repair. Before a candidate reviewer receives a budget, `candidate prepare` records the exact candidate SHA, plan/validation digests, worker result, ownership, clean-tree checks, bounded command diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt, and readiness is invalidated when the SHA or requirements change. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. Acceptance alone is not integration; declared checks must pass while `HEAD` equals the recorded `close.mergeCommit`.
+Three repair cycles are a ceiling, not a target, and permit at most four candidate checks: the initial candidate and one after each repair. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. On the runtime path, candidate readiness also binds the exact SHA, plan and validation digests, worker result, ownership, clean-tree checks, bounded diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt. Acceptance alone is not integration; declared checks must pass on the integrated state.
+
+## 5.1.0
+
+`SKILL.md` now contains the complete **Discover → Plan → Refine → Implement → Verify** process. An explicit no-Python or no-runtime request uses conversation state or one concise Markdown task note, ordinary structured worker results, immutable Git/diff review, and the same acceptance threshold without schema-v4 ceremony.
+
+The Python runtime remains fully supported and gains shell entrypoints for plugin hooks. Inactive hooks return without starting Python. An active marker delegates to the existing Python policy handler and fails explicitly if the interpreter is unavailable. Runtime mechanics now live in [the optional runtime reference](skills/lemmings/references/python-runtime.md), while all worker, reviewer, and explorer definitions accept either skill-only assignments or runtime-bound AgentInvocation v4 work.
 
 ## 5.0.3
 
@@ -64,9 +72,9 @@ Review stops when acceptance and required checks pass with no concrete blocking 
 
 ## Quick Start
 
-The ordinary path uses four manager operations. `task prepare` records the manager's semantic decisions once. `candidate submit` accepts and prepares a worker result. `review start` records the reviewer invocation, and `review submit` constructs and applies immutable Review evidence. The tools manage revisions, Git bindings, digests, and cycle numbers. Repeating an operation reuses saved progress. A malformed report is corrected locally for the same invocation, without restarting implementation or review. Low-level commands remain available for integrations.
+Ask the agent to use Lemmings and describe the result plus observable acceptance. Add “do not use Python or the Lemmings runtime” to force the skill-only path. The manager then keeps a compact task contract, passes bounded ownership and context to workers, reviews an immutable result when required, and reports evidence. Durable work may use one Markdown task note; JSON protocol artifacts are not required.
 
-Workers can return compact reports: ingestion supplies omitted schema/attempt fields, derives changed paths from Git, and accepts missing empty optional lists. The invocation must still be explicitly identified. Candidate review accepts `id` as `findingId`; priorities, findings, and substantive acceptance/validation evidence are preserved. Missing substantive evidence is requested on its own, not treated as a reason to redo the task.
+When a working runtime is already known, or one initial `doctor` check succeeds, the manager may use four recoverable operations. `task prepare` records semantic decisions, `candidate submit` accepts and prepares the worker result, and `review start`/`review submit` bind and apply independent review. Repetition resumes saved progress without duplicating budget or state.
 
 ```text
 lemmings task prepare --input task-brief.json --task docs/tasks/change.task.json
@@ -77,11 +85,11 @@ lemmings review submit --task docs/tasks/change.task.json --result <report.json>
 
 `TaskBrief v1` contains the goal, acceptance, risks, risk-to-test mapping, ownership, minimal working set, declared checks, and an explicit manager decision block for mode, review, workspace, role routes, and accounting mode. The tool hashes references and fills technical Task fields; it never chooses those decisions and never overwrites an existing Task. See [the reusable brief template](skills/lemmings/templates/task-brief.json).
 
-Lemmings requires Git and Python 3.10+. Provider TOML discovery additionally requires Python 3.11+. Engine SDKs and external provider CLIs are optional and are needed only for tasks that use them.
+The skill-only path requires only the repository tools needed by the task, normally Git. The optional runtime requires Python 3.10+; provider TOML discovery requires Python 3.11+. Engine SDKs and provider CLIs remain task-specific.
 
 Open the target repository in your coding agent and ask it to install Lemmings from a local package path. If the package is not local, ask it to obtain [the Git repository](https://github.com/UnioGame/unigame.ai.lemmings.git) in a separate tools directory first. The agent should run the installer and `doctor`, preserve manual settings, and report whether the skill is ready.
 
-From the package root, use the launcher for your environment:
+From the package root, use the launcher when Python is available:
 
 ```text
 python skills/lemmings/scripts/install.py --repo <your-repository>
@@ -95,7 +103,9 @@ Then verify the installed bundle:
 python .agents/skills/lemmings/scripts/run.py doctor
 ```
 
-The installer preserves schema-v4 manual settings and rolls back owned files on failure. Active Lemmings work blocks replacement. Cached hosts may need a new agent session; plugin hooks are configured separately.
+Without Python, install the Codex or Claude plugin through its host, or copy `skills/lemmings/` into the host's skill directory and copy the matching role definitions when delegation is needed. Do not run the Python installer. The workflow remains available; runtime hooks, JSON state, receipts, and atomic recovery are not.
+
+The Python installer preserves schema-v4 manual settings and rolls back owned files on failure. Active Lemmings work blocks replacement. Cached hosts may need a new agent session; plugin hooks are configured separately.
 
 For an update, ask the agent to compare the source version and Git commit with the repository bundle, update only when no Lemmings work is active, preserve manual settings, and run `doctor` again.
 
@@ -146,7 +156,7 @@ The optional pool defaults to two idle worktrees and 10 GiB per Git common direc
 
 ### Bounded Context and Repairs
 
-Initial budgets can be extended only with an unresolved question and evidence of progress. The Task freezes both the initial values and absolute ceilings before its first invocation. Retry, repair, model recovery, and a new invocation share cumulative usage and cannot reset or raise those ceilings.
+Initial budgets can be extended only with an unresolved question and evidence of progress. Retry, repair, model recovery, and a new invocation share cumulative usage and cannot reset or raise those ceilings. The skill-only path records agreed ceilings and actual attempts in its compact task state without claiming machine enforcement. The runtime path freezes and enforces the same limits before its first invocation.
 
 | Budget | Initial | Absolute ceiling |
 | --- | ---: | ---: |
@@ -158,7 +168,7 @@ Initial budgets can be extended only with an unresolved question and evidence of
 | Worker tool calls | 24 | 48 |
 | Repair cycles | 0 | 3 |
 
-Each invocation receives only the approved remainder. New invocations use `usageAccounting=host-v1`: only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Historical v5.0.0 invocations retain their legacy read path. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
+On the runtime path, each invocation receives only the approved remainder. New invocations use `usageAccounting=host-v1`: only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Historical v5.0.0 invocations retain their legacy read path. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
 
 ### Project Rules
 
@@ -182,9 +192,9 @@ Repeated nontrivial work, user corrections, stable project conventions, or expen
 
 The manager recommends reuse, local extension, creation through `skill-creator`, or a script/document. Changes require the user's choice. If search is unavailable, it reports an incomplete official check and continues without claiming no solution exists.
 
-## Command Reference
+## Optional Runtime Command Reference
 
-The manager normally runs these commands. In the examples, `lemmings` means:
+These commands apply only after selecting the Python-runtime path. In the examples, `lemmings` means:
 
 ```text
 python .agents/skills/lemmings/scripts/run.py
@@ -265,11 +275,12 @@ Validation preserves the real exit status and returns bounded diagnostics with a
 
 ## Version and Reference
 
-The package is **5.0.3** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
+The package is **5.1.0** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Runtime Task, Phase, and Review remain **schema v4**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
 
 Authoritative details live in:
 
 - [Contracts and lifecycle](skills/lemmings/references/contracts.md)
+- [Optional Python runtime](skills/lemmings/references/python-runtime.md)
 - [Context and cumulative budgets](skills/lemmings/references/context-contract.md)
 - [Model routing and recovery](skills/lemmings/references/model-routing.md)
 - [Game projects and workspace lifecycle](skills/lemmings/references/game-projects.md)

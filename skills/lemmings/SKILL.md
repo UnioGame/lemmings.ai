@@ -1,66 +1,96 @@
 ---
 name: lemmings
-description: Coordinate repository delivery with proportional Auto, Simple, Standard, or Strict orchestration. Use when a user invokes $lemmings, delegates repository implementation, needs isolated writers, commit-range review, shared-contract safety, model routing, worktree pooling, integration evidence, or optional pipeline metrics.
+description: Coordinate repository delivery through Discover, Plan, Refine, Implement, and Verify, with proportional agents, bounded context, and optional Python runtime enforcement.
 ---
 
 # Lemmings
 
-Act as the sole manager. Tooling validates or atomically executes an already recorded decision; it never chooses mode, model, task, batch, verdict, or acceptance.
+Act as the sole manager. Deliver the requested repository outcome through **Discover → Plan → Refine → Implement → Verify**. Acceptance and required evidence decide completion; protocol ceremony does not.
 
-Start with current-host defaults; installation needs only Git and Python. No provider scan, external CLI, engine SDK, preset, or telemetry is required for ordinary work. Shipped roles contain no model pins. Keep existing manual assignments.
+## Choose the execution path once
 
-Use schema v4 only. If any v2 Task, Phase, Review, profile, or runtime marker is supplied, stop with `schemaVersion 2 is unsupported by the schema-v4 runtime; replace the legacy bundle`. Do not migrate it or fall back to `.codex/lemmings.json`.
+The five stages and quality bar are identical on both paths.
 
-Run `Discover → Plan → Refine → Implement → Verify`. Default `requestedMode` to `auto` and resolve it after Discover from the affected task scope. A repository containing submodules or integration branches is not itself a Strict signal; record those reasons only when this task changes a submodule boundary/pointer or performs branch integration:
+- If the user says not to use Python or the Lemmings runtime, use the **skill-only path**. Do not probe, install, invoke, or activate the runtime.
+- If this session already proved the runtime works, the manager may use the **runtime path**.
+- If the bundled runtime is available but its state is unknown, perform one bounded `doctor` check before creating task state. Success selects the runtime path. Missing Python or a pre-activation failure selects the skill-only path. Do not repeat the probe at later stages.
+- Once a runtime Task is active, a runtime failure is a blocker, not permission to bypass hooks or silently change paths. Follow the controlled handoff in [python-runtime.md](references/python-runtime.md) only when the user explicitly requests skill-only continuation.
 
-1. Strict for two writers, shared/frozen contracts, overlapping domains, submodules, codegen, multi-repository integration, shared serialized assets, exclusive resources, high risk, an integration branch, or baseline review.
-2. Otherwise Standard for one bounded worker, a public contract with one owner, medium risk, candidate/repair/review, or validation wider than one focused check.
-3. Otherwise Simple for one low-risk ownership domain that the manager can change directly.
+Never install Python automatically. Do not scan providers, enable telemetry, or alter model settings merely to choose a path. Execution path does not change risk, acceptance, reviewer requirements, isolation, permissions, or user authorization.
 
-Do not silently change an explicit mode pin. Auto may escalate after new discovery, but never downgrade after the first mutation. Host capability gaps change topology, not guarantees: serialize writers without isolation/slots; ignore late results without cancellation; use count/time limits without token accounting; ask the user when a required reviewer is unavailable.
+## Resolve proportional mode
 
-When asked to discover subscriptions, run `models scan` (`--offline` without network), then read [model-routing.md](references/model-routing.md). Offer at most three evidence-based economy/balanced/review presets; state unknown quality, cost, quota and access rather than invent rankings. Saving a proposal does not activate it; manual pins always win. Scan/probe never edit provider configuration.
+Default to Auto and decide after Discover from the affected scope. Do not treat the mere presence of submodules or integration branches as a Strict signal.
 
-On a model capacity failure, stop new dispatch and read [model-routing.md](references/model-routing.md). Retry one short rate/transport failure or reduce context once when applicable; otherwise present two to four task-local role plans. Apply nothing before user confirmation. One confirmation permits only the selected ordered route chains for the current Task; keep the workspace, start a fresh invocation without model history, and request new confirmation when the chain is exhausted. Capacity probes and recovery never depend on telemetry.
+1. Use **Strict** for multiple writers, overlapping ownership, shared or frozen contracts, changed submodule boundaries, multi-repository integration, shared serialized assets, code generation, exclusive resources, high risk, or baseline review.
+2. Use **Standard** for one bounded worker, medium risk, a public contract with one owner, a required independent review, or validation wider than one focused check.
+3. Use **Simple** for one low-risk ownership domain that the manager can safely change and verify directly.
 
-Use only `manager`, `worker`, `reviewer`, and `explorer`. Delegation depth is one. Reserve the manager slot; run up to four isolated writers, bounded by `maxConcurrentWriters` and two read-only agents. Select each writer wave only from dependency-ready tasks, require explicit independence, and wait for every writer in the wave before accepting or integrating any result. Use the frozen Task budget: start with the profile grants, extend only for a named unresolved question with recorded progress, never exceed the frozen ceilings, and allow one transient transport retry.
+Honor an explicit mode. Auto may escalate when discovery reveals risk, but never downgrade after mutation. Host limitations may serialize work or reduce automation; they do not remove required review or evidence.
 
-Model routes may declare optional `specializations` tags and Tasks may declare one optional `specialization`. The tag is a manager hint: matching routes get priority, but untagged routes remain valid fallbacks. The assigned route in `models.assigned` is the only execution authority; tools never select or rank models. For high-risk work, the manager may set `reviewPolicy` to `cross`; use two distinct provider/model identities when available, otherwise change the policy to `single` and record `cross-review-unavailable` in `capabilityDegradations`.
+## Shared task contract
 
-Accept when the declared acceptance criteria and required validation pass and no blocking defect remains. P0-P2 findings describe concrete acceptance failures or substantial defects in affected behavior; P3 suggestions never trigger repair. Stop implementation and review at this threshold, complete required integration, and report optional follow-ups. Do not expand scope or add checks for polish. See [contracts.md](references/contracts.md) for the review decision rules.
+Before implementation, establish:
 
-Before the first writer for migrations, shared contracts, or non-trivial dependencies, dispatch the existing reviewer with `Review.subject.kind = plan`; bind it to the Task/Phase plan digest and resolve material gaps. Simple skips this review. The manager alone updates Task/Phase using `revision` compare-and-set. Accept `AgentResult v4` only when invocation id, attempt, Task revision, base SHA, context digest, and profile digest still match. Never transfer model conversation history across tasks or pooled workspaces. Freeze effective profile/rule selection with the first reviewer invocation before recording the accepted plan digest; a later plan-relevant selection change needs a new plan review.
+- one concrete goal and observable acceptance criteria;
+- owned, shared, and forbidden paths or symbols;
+- dependencies and material risks, each mapped to a check;
+- the smallest useful working set, with a purpose for every reference;
+- validation commands or manual checks;
+- assigned worker and reviewer routes, workspace choice, and retry, repair, and per-role launch ceilings.
 
-Resolve optional rules from task paths with `rules explain`; use only the selected [technology packs](rules/manifest.json). Record task `ruleSelection` and freeze effective routing/rule hashes on first invocation. Load only selected packs and role-relevant sections, not every engine. Explicit project rules refine the optional defaults; mandatory core isolation, validation, ownership and permissions remain in force. Shared token rules are in [context-contract.md](references/context-contract.md).
+On the skill-only path, keep this contract in the current conversation. For work that must survive a session, record one concise Markdown task note containing the contract, current stage, actual launches and attempts, evidence, reviewer decision, and remaining blockers. Use configured ceilings, or default to worker 5, reviewer 7, and explorer 5 launches for the whole task. Retry, repair, model recovery, and replan do not reset them. Treat these counts as manager-maintained limits, never as machine-verified usage. Do not create parallel JSON state or require invocation IDs, digests, receipts, revisions, or manual lifecycle transitions.
 
-Start dispatch at 16 KiB and 12 context references; the frozen ceilings are 32 KiB and 24 references. Send references plus hashes and role-unique rules, never Task/Phase copies, transcripts, reasoning, raw logs, telemetry, registry contents, secrets, or absolute paths. Summarize logs deterministically. Read [context-contract.md](references/context-contract.md) before dispatch.
+On the runtime path, read [python-runtime.md](references/python-runtime.md) and let the tools own schema metadata and transitions. Tooling validates or executes manager decisions; it never chooses scope, mode, model, verdict, or acceptance.
 
-For Standard/Strict, use the v4 templates and explicitly activate runtime; Simple has no marker. State flow is `Draft → Ready → Active → Candidate → Accepted → Integrated`. For candidate review, prefer two operations:
+## Run the five stages
 
-1. `review start --task <task> --head <candidate>` prepares declared checks and saves the reviewer invocation. Use the returned invocation; a repeated call resumes the same reservation. Do not dispatch a second agent when `reused` is true.
-2. `review submit --task <task> --result <report> --review <artifact> --host-receipt <receipt>` records the result, builds immutable Review bindings, and applies the verdict. The report is AgentResult v4 plus `verdict`, actual `hostId`/`reviewerModel`, and `findingDispositions` for repairs. Use an existing allowed or ignored artifact directory. Tools own revisions, digests, review subjects, and cycle numbers; never copy or edit them by hand. See [contracts.md](references/contracts.md) for recovery and low-level operations.
+### Discover
 
-Results may omit transport fields: ingestion derives schema/attempt from the explicitly named invocation, worker changed paths from Git, and empty optional lists. `invocation accept --task <task> --result <report> --invocation-id <id>` records worker evidence without a hand-entered revision. Preserve explicit values; never invent acceptance/validation evidence or select an invocation by recency. Candidate review accepts `id` as a finding-ID alias. See [context-contract.md](references/context-contract.md) for compact reports.
+Read repository rules and inspect the smallest code or documentation surface that can resolve scope. Identify affected behavior, dependencies, risks, available validation, workspace safety, and unresolved questions. Use a focused explorer only for a named question; do not duplicate an answered investigation.
 
-For the ordinary Standard/Strict path, create the Task with `task prepare --input <brief> --task <task>`. TaskBrief v1 must contain the goal, acceptance, ownership, risks and exact risk-to-test mapping, compact working set, validation, plus the manager's explicit mode, review, workspace, role-route, and accounting decisions. The tool fills Git and schema metadata; it never chooses those decisions or overwrites an existing Task. Accept a successful worker with `candidate submit --task <task> --invocation-id <id> --result <report>`; it derives the exact HEAD, records evidence, promotes Candidate, and runs readiness recoverably. A failed result is recorded without promotion.
+### Plan
 
-Freeze `host-v1` when the host supplies trusted receipts. Freeze `invocation-v1` before the first invocation when it does not: count invocation creation across retry, repair, model recovery, and replan, using task limits worker 5, reviewer 7, explorer 5 unless configured otherwise. Replay never consumes another slot. Never represent unknown tool calls as measured usage or switch/reset a frozen mode.
+Create one implementation plan from the shared task contract. Split work only at real dependency or ownership boundaries. Prefer one sequential writer for connected changes. Parallel writers require explicit independence, separate ownership, isolated workspaces, and a complete wave barrier before integration.
 
-An `artifact` error means correct report formatting and resubmit the same invocation, without rereading code or launching review again. An `evidence` error names an input that changed: refresh only the invalid evidence. A `conflict` means inspect the saved result, never overwrite it. Code repair requires a concrete blocker or failed validation; use `repair start`. Candidate preparation is the final declared validation pass; worker diagnostics remain focused. Repeat review checks prior blockers, the delta, and directly affected behavior. Changed readiness alone does not require full review. Complete integration with `integration validate` on the exact `close.mergeCommit`; only passing evidence for that SHA permits `Integrated`.
+### Refine
+
+Remove material ambiguity before writing. Use an independent reviewer before the first writer for migrations, shared contracts, non-trivial dependencies, high risk, or a requested plan review. Refine only gaps that could change correctness, scope, validation, or ownership. Simple work may refine locally.
+
+### Implement
+
+Give each worker the goal, acceptance, ownership, relevant risks, validation, limits, and initially no more than 12 purposeful references or 16 KiB. A worker may request one focused expansion for a named unresolved symbol or decision. Never send transcripts, reasoning, raw logs, secrets, registry contents, or broad generated artifacts.
+
+The worker reports status, acceptance evidence, validation evidence, changed paths or candidate identity, blockers, and remaining risks. Missing report formatting is corrected in the same exchange. Missing substantive evidence is supplied or the check is run. Neither case restarts completed implementation.
+
+### Verify
+
+Run the narrowest checks that can falsify the change, then required wider checks. Give the immutable candidate to a separate independent reviewer. The manager does not duplicate that review or replace it with its own opinion.
+
+Review an immutable candidate identified by a commit range or an explicitly frozen diff. Do not mutate it during review. Accept when all declared criteria and required validation pass and no P0-P2 defect remains in affected behavior. P3 suggestions are follow-ups and never trigger repair.
+
+A repair addresses named blockers and their direct consequences. Repeat review checks those blockers, the delta, and directly affected behavior while reusing still-valid evidence. Do not rerun successful checks unless a relevant change or unresolved risk can invalidate them. Three repair cycles are the default ceiling; lack of measurable progress requires replan or a clear blocker report.
+
+If the reviewer is unavailable, report Verify as incomplete. Never describe missing evidence as success.
+
+## Roles, models, and workspaces
+
+Use only manager, worker, reviewer, and explorer. Delegation depth is one. Preserve explicit and existing manual model assignments; otherwise use current-host defaults. A model capacity failure permits one short transport retry or one focused context reduction. Further recovery requires a task-local route decision and a fresh invocation or agent without transferred conversation history.
+
+Sequential safe work may use the current checkout. Each concurrent writer owns one isolated worktree. Preserve unrelated changes in dirty worktrees. Reviewers and explorers are read-only. Keep security, sandbox, approval, destructive-action, and repository rules in force on both execution paths.
+
+## References and validation
 
 Read only the reference needed for the current decision:
 
-- [contracts.md](references/contracts.md): artifacts, Auto signals, lifecycle, CAS, and batch checks.
-- [context-contract.md](references/context-contract.md): AgentInvocation/AgentResult and context limits.
-- [game-projects.md](references/game-projects.md): workspace registry, pool, reuse, leases, and safe cleanup.
-- [model-routing.md](references/model-routing.md): host capabilities and confirmation-gated routes.
-- [telemetry.md](references/telemetry.md): optional offline usage and benchmark collection.
-- [skill-reuse.md](references/skill-reuse.md): optional installed/official skill check and user-gated creation flow.
+- [python-runtime.md](references/python-runtime.md): optional schema-v4 CLI, hooks, accounting, recovery, and controlled handoff.
+- [contracts.md](references/contracts.md): detailed artifacts, lifecycle, Auto signals, and review rules used by the runtime.
+- [context-contract.md](references/context-contract.md): runtime AgentInvocation/AgentResult and hard context ceilings.
+- [game-projects.md](references/game-projects.md): isolated workspace registry and safe cleanup.
+- [model-routing.md](references/model-routing.md): optional model discovery and confirmed recovery routes.
+- [skill-reuse.md](references/skill-reuse.md): optional installed/official skill check and user-selected skill creation.
+- [telemetry.md](references/telemetry.md): optional offline metrics, disabled unless explicitly requested.
 
-## Skill reuse proposals
+Run focused validation first. On the runtime path, finish with the runtime package/repository check described in `python-runtime.md`. On the skill-only path, use the repository's own checks and report that runtime guarantees were not used. Stop when acceptance is supported; leave unrelated improvements as follow-ups.
 
-When repeated work suggests a reusable skill, follow [skill-reuse.md](references/skill-reuse.md). Check local and installed skills first, then official vendor sources. Give the user a short recommended choice and use the existing `skill-creator` only after the user selects creation or modification. Continue the main Task when the check is unavailable.
-
-Run the narrowest falsifying validation, then `python .agents/skills/lemmings/scripts/run.py check --repo <repo>`; add `--all` for a complete Strict Phase and `--distribution` only when checking installed bundle bytes. Keep reusable policy here/references, canonical data only in Task/Phase/Review, and compact evidence in the Task.
-
-Controls: `lemmings doctor`; `lemmings task prepare`; `lemmings candidate submit|prepare`; `lemmings review start|submit|apply`; `lemmings invocation create|extend|context-use|fail|accept`; `lemmings repair start`; `lemmings integration validate`; `lemmings runtime activate|status|deactivate`; `lemmings models scan|probe|inspect|propose|apply|recover`; `lemmings profiles list|inspect|use`; `lemmings rules explain`; `lemmings run`; `lemmings workspace estimate|prepare|inspect|register|claim|release|remove`; optional `lemmings metrics ...`. Model-authored usage is never trusted. Only a manager-directed v4 runtime marker enables hooks. There are no validator, summarizer, or orchestrator invocation roles.
+When repeated work suggests another reusable skill, follow [skill-reuse.md](references/skill-reuse.md). Continue the main task if skill search is unavailable, and use `skill-creator` only after the user selects creation or modification.

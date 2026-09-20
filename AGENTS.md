@@ -3,13 +3,13 @@
 ## Scope
 
 - This repository is the Lemmings Unity package and Codex plugin for reusable AI-agent workflows.
-- Keep the Python CLI, hooks, orchestration guidance, task templates, and repo-scoped skill here.
+- Keep the self-contained skill, optional Python CLI/runtime, hooks, orchestration guidance, task templates, and repo-scoped roles here.
 - Do not add Unity Runtime or Editor assemblies unless a separate task explicitly requires them.
 
 ## Sources Of Truth
 
 - `skills/lemmings/SKILL.md` owns the workflow, task controls, and sole-orchestrator contract.
-- `skills/lemmings/references/` owns game-project, artifact-contract, and telemetry policy.
+- `skills/lemmings/references/` owns optional Python-runtime, game-project, artifact-contract, and telemetry policy.
 - `Documentation~/tasks/ROADMAP.md` owns orchestration-tooling priorities.
 - `skills/lemmings/templates/` owns reusable phase, task, and immutable review contracts; close evidence remains embedded in the phase or task contract.
 
@@ -18,12 +18,14 @@ Avoid duplicating detailed policy across these files. Keep the skill compact and
 ## Working Rules
 
 - The smart Lemmings skill is the only orchestrator. Do not split orchestration policy into command or workflow reference files.
+- Keep the five-stage workflow complete in `SKILL.md`. Runtime mechanics belong in `references/python-runtime.md`; Python availability must not be required for skill-only work.
+- Preserve active runtime enforcement. Inactive plugin hooks must no-op without invoking Python, while an active marker must use the Python handler or fail explicitly.
 - Preserve user model assignments. Never silently substitute a requested model or reasoning effort.
 - Use current host defaults unless the user or active manual profile assigns a model and effort.
 - Use the lowest-cost model that safely fits a role when the user has not pinned one.
 - Apply Simple, Standard, or Strict contracts proportionally. The default workspace policy is hybrid: safe serial work may use current, while parallel writers and dirty-primary isolation require separate worktrees; one writer owns one isolated worktree.
 - Select a code worktree, package worktree, or full clone from the affected scope. The pipeline, read-only workers, reviewers, validators, and safe serial work in the current checkout need no special user approval. Obtain explicit approval before provisioning any isolated workspace estimated above 10 GiB, for Unity and non-Unity repositories alike; pending or declined approval blocks only that provisioning or a step with no safe fallback.
-- Keep only Task, Phase, and immutable Review files as canonical artifacts. Embed handoff, validation, and integration evidence in their owning artifact.
+- On the runtime path, keep only Task, Phase, and immutable Review files as canonical artifacts. On the skill-only path, use conversation state or one concise Markdown task note for durable work.
 - Map acceptance criteria and material risks to tests.
 - Keep roadmap and progress notes concise; never paste raw logs.
 - Treat security, sandbox, approval, and destructive-action rules as non-disableable.
