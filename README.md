@@ -154,6 +154,8 @@ Parallel writers require independent ownership, separate workspaces, resource ch
 
 The optional pool defaults to two idle worktrees and 10 GiB per Git common directory. Dirty, active, user-owned, unknown, unintegrated, or failed workspaces remain protected. Larger workspaces require recorded authorization; editor state and caches must preserve isolation.
 
+New branches created by Lemmings use `task/<short-lowercase-slug>`. Provider, model, host, tool, and agent names are not used as branch prefixes. Existing branches explicitly selected by the task keep their names.
+
 ### Bounded Context and Repairs
 
 Initial budgets can be extended only with an unresolved question and evidence of progress. Retry, repair, model recovery, and a new invocation share cumulative usage and cannot reset or raise those ceilings. The skill-only path records agreed ceilings and actual attempts in its compact task state without claiming machine enforcement. The runtime path freezes and enforces the same limits before its first invocation.
@@ -253,7 +255,7 @@ External runners require a compatible declared executor and protocol. Unsupporte
 ```text
 lemmings workspace estimate --backend package-worktree --package <package-git-root>
 lemmings workspace inspect
-lemmings workspace prepare --task docs/tasks/change.task.json --destination <worktree-path> --branch codex/change --expected-revision <revision>
+lemmings workspace prepare --task docs/tasks/change.task.json --destination <worktree-path> --branch task/change --expected-revision <revision>
 lemmings workspace release --workspace-id <id> --task docs/tasks/change.task.json --task-revision <task-revision> --expected-revision <registry-revision> --action pool
 lemmings workspace remove --workspace-id <id> --task docs/tasks/change.task.json --task-revision <task-revision> --expected-revision <registry-revision>
 ```

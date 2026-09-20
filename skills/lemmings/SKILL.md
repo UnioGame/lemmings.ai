@@ -79,6 +79,8 @@ Use only manager, worker, reviewer, and explorer. Delegation depth is one. Prese
 
 Sequential safe work may use the current checkout. Each concurrent writer owns one isolated worktree. Preserve unrelated changes in dirty worktrees. Reviewers and explorers are read-only. Keep security, sandbox, approval, destructive-action, and repository rules in force on both execution paths.
 
+Every new Git branch created by Lemmings must be named `task/<slug>`, using a short lowercase hyphenated slug derived from the task goal. Do not substitute provider, model, host, tool, or agent prefixes such as `codex/`. An existing branch explicitly targeted by the task may be reused without renaming.
+
 ## References and validation
 
 Read only the reference needed for the current decision:
