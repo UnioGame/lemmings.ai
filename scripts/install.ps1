@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [string]$Repo,
-    [string]$Project,
     [switch]$DryRun
 )
 
@@ -19,11 +18,10 @@ foreach ($choice in $choices) {
     & $command.Source @($choice.Prefix) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
     if ($LASTEXITCODE -eq 0) { $selected = @{ Path = $command.Source; Prefix = $choice.Prefix }; break }
 }
-if (-not $selected) { throw 'Lemmings 6.0 requires Python 3.10 or newer.' }
+if (-not $selected) { throw 'Lemmings requires Python 3.10 or newer.' }
 
 $arguments = @($selected.Prefix + $installer)
 if ($Repo) { $arguments += @('--repo', $Repo) }
-if ($Project) { $arguments += @('--project', $Project) }
 if ($DryRun) { $arguments += '--dry-run' }
 & $selected.Path @arguments
 exit $LASTEXITCODE

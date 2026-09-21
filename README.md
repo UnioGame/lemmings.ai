@@ -2,293 +2,108 @@
 
 ![Lemmings package icon](assets/icon.png)
 
-Lemmings turns a coding request into a checked repository change. You describe the outcome to your agent; that agent manages discovery, implementation, review, and integration. Small changes stay small. Larger changes can use independent workers in isolated worktrees, with reviewers checking the actual changes before integration.
+Lemmings turns a coding request into a checked repository change. You describe the outcome to your agent. The agent acts as the manager: it scopes the work, implements it or hands it to workers, has an independent reviewer check the result when the risk calls for it, and reports the evidence. Small changes stay small.
 
-The normal interface is a conversation with your agent. The five-stage workflow is complete in `SKILL.md` and can run without Python. When the optional Python runtime is available, the manager may use it for atomic state, hooks, resumable operations, and measured host receipts; you do not prepare its JSON or commands yourself.
+The whole process lives in one skill, [`skills/lemmings/SKILL.md`](skills/lemmings/SKILL.md), and works without Python. An optional standard-library helper covers what an agent should not improvise: isolated worktrees, scope checks, and running a role on another host CLI.
 
-## How Lemmings Works
-
-```mermaid
-flowchart TD
-  A[You describe the desired result] --> B[Manager discovers scope and project rules]
-  B --> C[Manager plans work and chooses Auto mode]
-  C --> D{Task needs delegation?}
-  D -->|Simple| E[Manager implements the change]
-  D -->|Standard or Strict| F[Bounded workers implement owned changes]
-  E --> H[Validate the result]
-  F --> H
-  H --> G[Separate reviewer verifies the immutable candidate]
-  G --> I[Integrate and report evidence or remaining blockers]
-```
-
-The cycle is **Discover → Plan → Refine → Implement → Verify**. The manager owns decisions and reporting. Workers receive bounded context and ownership; reviewers inspect immutable candidates; explorers answer focused questions.
-
-| Mode | Typical scope | Added control |
-| --- | --- | --- |
-| **Auto** | Default for ordinary requests | Chooses Simple, Standard, or Strict after discovery and may escalate before completion |
-| **Simple** | One low-risk area | Direct implementation and focused validation |
-| **Standard** | One bounded writer, medium risk, or required review | Compact task contract, immutable candidate, and review where required |
-| **Strict** | Parallel writers, shared contracts/assets, submodules, or high risk | Dependency planning, isolated writers, immutable reviews, and exact-commit integration checks |
-
-Parallel work uses complete waves: dispatch independent tasks with separate ownership, wait for every current writer, then accept and integrate. Dependent work starts after its dependencies are integrated.
-
-With the optional runtime, those controls are persisted as the following schema-v5 lifecycle:
+## How it works
 
 ```mermaid
 flowchart LR
-  A[Task: Draft] --> B[Task: Ready]
-  B --> C[Phase plans an independent wave]
-  C --> D[Dispatch bounded writers]
-  D --> E[Wait for every writer]
-  E --> F[Prepare immutable candidate and run readiness checks]
-  F --> G{Immutable review}
-  G -->|Accepted| H[Integrate]
-  H --> I[Validate at close.mergeCommit]
-  I --> J[Integrated]
-  G -->|Blocking defect and grounded progress| K[Repair, maximum 3 cycles]
-  K --> F
-  G -->|Repeated failure, invalid approach, scope change, or fourth failed check| L[Replan Required]
+  A[Discover] --> B[Plan: brief + mode]
+  B --> C{Mode}
+  C -->|Simple| D[Manager implements]
+  C -->|Standard| E[One writer]
+  C -->|Parallel| F[Workers in separate worktrees]
+  D --> G[Checks]
+  E --> G
+  F --> G
+  G --> H{Review needed?}
+  H -->|Standard / Parallel| I[Independent reviewer]
+  H -->|Simple| J[Report]
+  I -->|ChangesRequested, max 2 repairs| E
+  I -->|Accepted| J
 ```
 
-Acceptance is the stopping condition: the requested criteria and required checks pass, with no concrete blocking defect in affected behavior. **P0-P2 block acceptance; P3 suggestions do not.** Optional refactoring, style changes, and speculative improvements remain follow-ups. A repeat review checks the fixes and directly affected behavior using existing evidence; it does not restart a full audit. A new candidate readiness digest alone does not require full review. Mode selection considers the task's actual scope, not merely the presence of submodules or integration branches in its repository.
+| Mode | Use it for | Process |
+| --- | --- | --- |
+| **Simple** | One low-risk area | The manager changes the code and runs the checks. |
+| **Standard** | Medium risk, a public contract, or wider validation | One writer, then one independent read-only reviewer. |
+| **Parallel** | Independent pieces with separate owned paths | One worker per worktree, a complete wave, review of each piece, and checks on the merged result. |
 
-Three repair cycles are a ceiling, not a target, and permit at most four candidate checks: the initial candidate and one after each repair. A repair continues only when it resolves material findings or demonstrably narrows the cause; repeated work moves to `Replan Required`. On the runtime path, candidate readiness also binds the exact SHA, plan and validation digests, worker result, ownership, clean-tree checks, bounded diagnostics, and explicit executor-unavailable debt. A failed command cannot be masked by debt. Acceptance alone is not integration; declared checks must pass on the integrated state.
+The only task contract is a short Markdown brief: goal, acceptance criteria, owned paths, checks, risks, and starting context. The reviewer blocks only on P0–P2 findings, each with a concrete failure scenario. P3 findings are follow-ups. A task gets at most two repair rounds before the manager reports the blocker.
 
-## Current Release
-
-The current release is **Lemmings 6.1.0**. Runtime routes can delegate provider format and authentication to existing Codex profiles or Claude Code configuration. Codex, Claude Code, OpenCode, and native host routes share the same schema-v5 Task lifecycle; cross-host workers and reviewers always start fresh sessions.
-
-Provider discovery stores only sanitized identities and digests. It never rewrites host configuration, copies credentials, requires an env file, or inserts a proxy. Codex supports its configured Responses providers. Claude Code supports its configured Anthropic, Bedrock, Vertex, Foundry, host-managed, and compatible gateway routes. Exact model probes use the host CLI and fail closed on substitution or missing identity evidence.
-
-New runtime owners use `invocation-v1` by default. Explicit `host-v1` is accepted only when the brief freezes trusted usage-accounting capability for every executing host, so an unsupported host fails before work starts. Existing schema-v5 artifacts remain compatible; old frozen direct routes keep their original behavior.
-
-The complete **Discover → Plan → Refine → Implement → Verify** process remains in `SKILL.md` and needs no Python. Missing runtime dependencies trigger one installation offer; installation requires explicit approval, and declining continues in skill-only mode. Inactive hooks return before looking for Python, while an active marker still fails closed when Python is unavailable.
-
-
-## Quick Start
-
-Ask the agent to use Lemmings and describe the result plus observable acceptance. Add “do not use Python or the Lemmings runtime” to force the skill-only path. The manager then keeps a compact task contract, passes bounded ownership and context to workers, reviews an immutable result when required, and reports evidence. Durable work may use one Markdown task note; JSON protocol artifacts are not required.
-
-When a working runtime is known, or one bounded `doctor` succeeds, use the high-level flow. Repeating a command resumes saved progress without duplicating budget, invocations, review, or state.
-
-```text
-lemmings flow start --input task-brief.json --output docs/tasks/change.task.json
-lemmings flow advance --owner docs/tasks/change.task.json
-lemmings flow submit --owner docs/tasks/change.task.json --invocation-id <id> --result <agent-result.json>
-lemmings flow finish --owner docs/tasks/change.task.json
-lemmings flow status --owner docs/tasks/change.task.json
-```
-
-Strict work accepts a `PhaseBrief v1` through the same `flow start` command. Explicit v4 migration uses `migrate propose --owner ... --output ...` followed by `migrate apply --proposal ... --confirm <digest> --output-root ...`.
-
-`TaskBrief v1` contains the goal, acceptance, risks, risk-to-test mapping, ownership, minimal working set, declared checks, and an explicit manager decision block for mode, review, workspace, role routes, and accounting mode. The tool hashes references and fills technical Task fields; it never chooses those decisions and never overwrites an existing Task. See [the reusable brief template](skills/lemmings/templates/task-brief.json).
-
-The skill-only path requires only the repository tools needed by the task, normally Git. The optional runtime requires Python 3.10+; provider TOML discovery requires Python 3.11+. Engine SDKs and provider CLIs remain task-specific.
-
-Open the target repository in your coding agent and ask it to install Lemmings from a local package path. If the package is not local, ask it to obtain [the Git repository](https://github.com/UnioGame/lemmings.ai.git) in a separate tools directory first. The agent should run the installer and `doctor`, preserve manual settings, and report whether the skill is ready.
-
-From the package root, use the launcher when Python is available:
-
-```text
-python skills/lemmings/scripts/install.py --repo <your-repository>
-./scripts/install.ps1 -Repo <your-repository>
-./scripts/install.sh --repo <your-repository>
-```
-
-Then verify the installed bundle:
-
-```text
-python .agents/skills/lemmings/scripts/run.py doctor
-```
-
-Without Python, install the Codex or Claude plugin through its host, or copy `skills/lemmings/` into the host's skill directory and copy the matching role definitions when delegation is needed. Do not run the Python installer. The workflow remains available; runtime hooks, JSON state, receipts, and atomic recovery are not.
-
-The Python installer preserves schema-v5 manual settings and rolls back owned files on failure. Active Lemmings work blocks replacement. Cached hosts may need a new agent session; plugin hooks are configured separately.
-
-For an update, ask the agent to compare the source version and Git commit with the repository bundle, update only when no Lemmings work is active, preserve manual settings, and run `doctor` again.
+## Install
 
 ### Claude Code plugin
-
-The same repository is also a Claude Code plugin. It keeps the shared `skills/lemmings/` workflow and provides Claude-compatible worker, reviewer, and explorer definitions without pinning a model.
-
-Validate or try a local checkout:
-
-```text
-claude plugin validate . --strict
-claude --plugin-dir .
-```
-
-After this repository is published, add its marketplace and install the plugin:
 
 ```text
 claude plugin marketplace add UnioGame/unigame.ai.lemmings
 claude plugin install lemmings@unigame-ai
 ```
 
-Restart Claude Code after installation, or use `/reload-plugins` when the install summary offers it. The Claude package exposes `/lemmings:lemmings` and the scoped `lemmings-worker`, `lemmings-reviewer`, and `lemmings-explorer` agents.
+For a local checkout, use `claude --plugin-dir .`. The plugin provides `/lemmings:lemmings` and the `lemmings-worker`, `lemmings-reviewer`, and `lemmings-explorer` agents.
 
-### Native provider routes
+### Codex or a repository-local install
 
-Runtime model discovery reads provider metadata without storing credentials. Codex routes use `$CODEX_HOME/config.toml` or a named `$CODEX_HOME/<name>.config.toml` profile. Claude Code routes use the provider already selected by its settings and environment. `models scan` is offline; `models probe --route route.json` is the explicit bounded inference check. A Codex manager may dispatch through Claude Code and a Claude manager may dispatch through Codex when the external CLI is installed and compatible. Skill-only work uses the current host directly and needs neither CLI routing nor Python.
-
-## Using Lemmings
-
-Start with the result and observable success criteria:
-
-> Use Lemmings to fix the settings window so reopening it does not add duplicate event listeners. Preserve existing behavior and verify the changed lifecycle.
-
-Use `$lemmings` on hosts with explicit skill invocation. Otherwise ask the agent to use the installed Lemmings skill. Useful requests include:
-
-- **Small fix:** “Keep the work proportional and run the focused checks.”
-- **Parallel delivery:** “Split these independent changes between two isolated workers, wait for the whole wave, review their exact changes, and integrate the passing results.”
-- **Strict workflow:** “Use Strict because this change crosses a shared contract and a submodule. Preserve the dirty primary checkout.”
-- **Model routing:** “Scan configured providers without paid probes and propose economy, balanced, and review-focused profiles. Keep manual assignments first.”
-- **Project rules:** “Explain which engine and target-platform rules apply, then load only those packs.”
-- **Skill reuse:** “Before inventing a repeated workflow, check installed skills and official sources. Recommend whether to reuse, extend, create, or document it.”
-
-Profile precedence is **explicit task pin → project manual settings → personal manual settings → selected generated preset → host defaults**. Presets affect future Tasks; active Tasks keep frozen routes and rules. Recovery stays within the authorized route chain.
-
-## Guarantees and Defaults
-
-### Ownership, Review, and Workspaces
-
-Parallel writers require independent ownership, separate workspaces, resource checks, and available slots. Review covers the immutable commit range; integration checks the exact merged commit. Missing required review or validation leaves the Task incomplete.
-
-The optional pool defaults to two idle worktrees and 10 GiB per Git common directory. Dirty, active, user-owned, unknown, unintegrated, or failed workspaces remain protected. Larger workspaces require recorded authorization; editor state and caches must preserve isolation.
-
-New branches created by Lemmings use `task/<short-lowercase-slug>`. Provider, model, host, tool, and agent names are not used as branch prefixes. Existing branches explicitly selected by the task keep their names.
-
-### Bounded Context and Repairs
-
-Initial budgets can be extended only with an unresolved question and evidence of progress. Retry, repair, model recovery, and a new invocation share cumulative usage and cannot reset or raise those ceilings. The skill-only path records agreed ceilings and actual attempts in its compact task state without claiming machine enforcement. The runtime path freezes and enforces the same limits before its first invocation.
-
-| Budget | Initial | Absolute ceiling |
-| --- | ---: | ---: |
-| Dispatch size | 16 KiB | 32 KiB |
-| Context references | 12 | 24 |
-| Focused context expansions | 1 | 3 |
-| Explorer tool calls | 12 | 24 |
-| Reviewer tool calls | 16 | 32 |
-| Worker tool calls | 24 | 48 |
-| Repair cycles | 0 | 3 |
-
-On the runtime path, each invocation receives only the approved remainder. New runtime owners use `invocation-v1` by default. When explicitly capability-gated, `host-v1` uses only a host receipt bound to the invocation and grant may release unused calls; model-authored usage is ignored and a missing or mismatched receipt spends the full grant and locks the role. Exhaustion preserves the result and stop reason instead of creating a replacement Task to bypass the limit.
-
-### Project Rules
-
-CORE owns orchestration and evidence. The manager detects the nearest project and loads only applicable technology and platform packs; explicit selections override detection. Detection installs no SDK, and headless checks do not prove visual correctness.
-
-| Pack | Primary concerns |
-| --- | --- |
-| [Unity](skills/lemmings/rules/unity.md) | GUID/meta identity, serialized references, lifecycle, assembly boundaries, and isolated import caches |
-| [Unreal](skills/lemmings/rules/unreal.md) | Reflection/module contracts, Blueprint and binary ownership, and focused build checks |
-| [Godot](skills/lemmings/rules/godot.md) | Scene/UID references, signals, lifecycle, and version-appropriate checks |
-| [Defold](skills/lemmings/rules/defold.md) | Lua lifecycle, resource URLs, collection loading, and native extensions |
-| [Flutter](skills/lemmings/rules/flutter.md) | Widget/state lifecycle, keys, semantics, and focused widget checks |
-| [Phaser](skills/lemmings/rules/phaser.md) | Scene cleanup, listeners, timers, shared textures, and browser behavior |
-| [PixiJS](skills/lemmings/rules/pixijs.md) | Renderer lifecycle, ticker/GPU resources, shared textures, and resize behavior |
-
-[Platform rules](skills/lemmings/rules/platforms.md) add web, mobile, desktop, or publishing constraints for the build target rather than the agent's operating system.
-
-### Existing and Official Skills First
-
-Repeated nontrivial work, user corrections, stable project conventions, or expensive research can become a skill candidate. The manager checks installed skills and then official owner sources, including versions, dependencies, and required tools.
-
-The manager recommends reuse, local extension, creation through `skill-creator`, or a script/document. Changes require the user's choice. If search is unavailable, it reports an incomplete official check and continues without claiming no solution exists.
-
-## Optional Runtime Command Reference
-
-These commands apply only after selecting the Python-runtime path. In the examples, `lemmings` means:
+From this package, with Python 3.10+:
 
 ```text
-python .agents/skills/lemmings/scripts/run.py
+python skills/lemmings/scripts/install.py --repo <your-repository>
+./scripts/install.sh --repo <your-repository>
+./scripts/install.ps1 -Repo <your-repository>
 ```
 
-Add `--repo PATH` when running outside the target repository. Use `<command> --help` for the complete option set.
+This copies the skill to `<repo>/.agents/skills/lemmings` and the Codex agents to `<repo>/.codex/agents/`. If the install fails, it restores the previous files. Without Python, copy `skills/lemmings/` and the matching files from `agents/` yourself.
 
-### Models and Profiles
+## Using it
 
-Scanning is sanitized and sends no inference request. It can show configuration, catalogue, protocol compatibility, and apparent authentication, but only an explicit probe tests access and may consume provider usage.
+Ask your agent to use Lemmings and state the result you want, with observable acceptance criteria. You can name a mode ("use Lemmings Parallel") or leave it to Auto.
+
+Optional helper commands:
 
 ```text
-lemmings models scan
-lemmings models scan --offline
-lemmings models inspect --inventory --provider <provider-id> --limit 20
-lemmings models probe --route route.json
-lemmings profiles list
-
-lemmings models propose --name balanced --routes routes.json --output proposal.json
-lemmings models apply --proposal proposal.json --confirm <proposalDigest>
-lemmings profiles inspect balanced
-lemmings profiles use balanced
+python .agents/skills/lemmings/scripts/run.py doctor
+python .agents/skills/lemmings/scripts/run.py workspace create <slug>
+python .agents/skills/lemmings/scripts/run.py scope --base <sha> --owned src/feature
+python .agents/skills/lemmings/scripts/run.py dispatch reviewer --brief brief.md --host claude --model opus
 ```
 
-Saving a proposal does not activate it. Route IDs and protocols must come from discovered evidence. Use `models recover propose|apply|advance` for a recorded Task-local capacity failure; recovery stays inside the authorized ordered route chain.
+See [references/helper.md](skills/lemmings/references/helper.md) for details.
 
-### Rules and Task Runtime
+## Cross-host routing
+
+By default, each role runs as a native subagent of the host you are working in, using that host's default model. To run a role elsewhere, for example Claude reviewing work managed in Codex, assign it in `.agents/lemmings.json`:
+
+```json
+{
+  "roles": {
+    "reviewer": {"host": "claude", "model": "opus", "effort": "high",
+                 "fallback": [{"host": "codex", "model": "gpt-5.6-sol"}]}
+  }
+}
+```
+
+`lemmings dispatch` starts a fresh session of the target CLI (`codex exec`, `claude -p`, or `opencode run`) with that CLI's own login and configuration. It enforces read-only access for reviewers and explorers and applies a deadline. It records the run under `<git-common-dir>/lemmings/runs/` and checks which model actually answered. A model mismatch is reported as an error. Fallback routes are used only when a CLI is missing, fails, or times out.
+
+## Game projects
+
+Engine rules for Unity, Unreal, Godot, Defold, Flutter, Phaser, and PixiJS live in [`skills/lemmings/rules/`](skills/lemmings/rules/). `workspace estimate` includes the Unity `Library` that a new copy will rebuild. Workspaces above 10 GiB need your approval. See [game-projects.md](skills/lemmings/references/game-projects.md).
+
+## Telemetry
+
+[`packages/lemmings-telemetry`](packages/lemmings-telemetry/) is an optional, offline package that summarizes dispatch run logs by role, host, and model: runs, failures, fallbacks, verdicts, time, and tokens.
 
 ```text
-lemmings rules explain --path GameClient/Assets/UI
-lemmings rules explain --path games/browser/src --platform web
-
-lemmings status --task docs/tasks/change.task.json
-lemmings runtime status
-lemmings runtime activate --task docs/tasks/change.task.json
-lemmings runtime deactivate
+pip install ./packages/lemmings-telemetry
+lemmings-telemetry --repo . --days 30
 ```
 
-Task selection freezes the resolved profile, rule references, content hashes, reviewer route, and budget policy. `host-v1` verifies host receipts. `invocation-v1` counts invocation creation with default task limits of worker 5, reviewer 7, and explorer 5; replay of the same invocation is free, and model-authored usage is never trusted. Low-level invocation commands persist this boundary and accept only a matching result:
+## Development
 
 ```text
-lemmings invocation create --task docs/tasks/change.task.json --role worker --attempt 1 --expected-revision 0 --preset balanced
-lemmings candidate prepare --task docs/tasks/change.task.json --expected-revision <revision>
-lemmings invocation create --task docs/tasks/change.task.json --role reviewer --subject-kind candidate --attempt 1 --expected-revision <revision>
-lemmings invocation extend --task docs/tasks/change.task.json --kind toolCalls --role worker --amount 8 --unresolved-question "<question>" --progress "<evidence>" --expected-revision <revision>
-lemmings run --task docs/tasks/change.task.json --invocation-id <saved-id> --route route.json --output result.json
-lemmings invocation accept --task docs/tasks/change.task.json --result result.json --host-receipt host-receipt.json --expected-revision <revision>
-lemmings repair start --task docs/tasks/change.task.json --review docs/tasks/reviews/candidate.json --progress "<concrete progress>" --plan "<next bounded change>" --expected-revision <revision>
-lemmings review apply --task docs/tasks/change.task.json --review docs/tasks/reviews/candidate.json --expected-revision <revision>
+python -m pytest -q
+python scripts/build_agents.py        # regenerate agents/*.toml from agents/*.md
 ```
 
-External runners require a compatible declared executor and protocol. Unsupported restrictions fail visibly; launching a process does not accept its candidate.
-
-### Workspaces
-
-```text
-lemmings workspace estimate --backend package-worktree --package <package-git-root>
-lemmings workspace inspect
-lemmings workspace prepare --task docs/tasks/change.task.json --destination <worktree-path> --branch task/change --expected-revision <revision>
-lemmings workspace release --workspace-id <id> --task docs/tasks/change.task.json --task-revision <task-revision> --expected-revision <registry-revision> --action pool
-lemmings workspace remove --workspace-id <id> --task docs/tasks/change.task.json --task-revision <task-revision> --expected-revision <registry-revision>
-```
-
-Cleanup requires canonical Task evidence and actual integrated commits. Force, reset, clean, and prune are not routine lifecycle operations.
-
-### Validation and Distribution
-
-```text
-lemmings doctor
-lemmings check --task docs/tasks/change.task.json
-lemmings check --all --phase docs/tasks/change.phase.json
-lemmings integration validate --task docs/tasks/change.task.json --expected-revision <revision>
-lemmings check --distribution
-lemmings metrics status
-```
-
-Validation preserves the real exit status and returns bounded diagnostics with a full-log artifact reference. Integration validation requires a clean tree and `HEAD` equal to `close.mergeCommit` before and after every declared check. Telemetry is optional and offline.
-
-## Version and Reference
-
-The package is **6.1.0** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Runtime Task, Phase, and Review remain **schema v5**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
-
-Authoritative details live in:
-
-- [Contracts and lifecycle](skills/lemmings/references/contracts.md)
-- [Optional Python runtime](skills/lemmings/references/python-runtime.md)
-- [Context and cumulative budgets](skills/lemmings/references/context-contract.md)
-- [Model routing and recovery](skills/lemmings/references/model-routing.md)
-- [Game projects and workspace lifecycle](skills/lemmings/references/game-projects.md)
-- [Existing and official skill reuse](skills/lemmings/references/skill-reuse.md)
-- [Optional offline telemetry](skills/lemmings/references/telemetry.md)
-
-Package maintainers should also follow [package rules](AGENTS.md) and the [roadmap](Documentation~/tasks/ROADMAP.md).
+Release notes: [Documentation~/releases](Documentation~/releases/).

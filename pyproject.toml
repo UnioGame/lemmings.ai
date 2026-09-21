@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lemmings"
-version = "6.1.0"
-description = "Repository orchestration with proportional lifecycle contracts"
+version = "7.0.0"
+description = "Deterministic helpers for the Lemmings skill"
 requires-python = ">=3.10"
 
 [project.scripts]

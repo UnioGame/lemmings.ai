@@ -1,23 +1,21 @@
-# Workspace lifecycle
+# Game projects and large workspaces
 
-The manager chooses `current`, `code-worktree`, `package-worktree`, task-specific `unity-clone`, persistent validation clone, or a user workspace. Tooling may execute explicit prepare/register/claim/release/remove decisions atomically. Never use force, reset-hard, automatic git clean, background cleanup, or SessionStart deletion/prune.
+Use this when the repository contains a game engine project or is large enough that a copy is expensive.
 
-Registry: `<git-common-dir>/lemmings/workspaces-v4.json`. It owns absolute paths, common-dir identity, backend, manager, lifetime, active/idle/quarantined/retiring state, task/phase, branch/head/base, estimate/approval, timestamps, leases/processes, and quarantine reason. Task stores only `workspaceId`, backend, policy, estimate, lifecycle, and final disposition. Claim/release requires the expected registry revision, so only one manager can win.
+## Choosing a workspace
 
-The shared writer pool defaults to two idle worktrees and 10 GiB per Git common dir, LRU eviction. It may be disabled; disabled mode never claims an idle workspace and safely removes a releasable integrated workspace while retaining protected, dirty, active, unintegrated, or failed-removal entries. Set `workspacePool.enabled` to false to disable idle reuse; release then attempts the same evidence-gated safe removal, while active, dirty, unintegrated, protected, or failed removals remain retained or quarantined. Reconcile only on provision, claim, release, status, or Phase close. Validation clones and user workspaces are excluded. A workspace over 10 GiB requires separate retention approval; otherwise safely remove it after integration.
+- A single sequential writer may work in the current checkout if it has no unrelated uncommitted changes.
+- Each concurrent writer needs its own worktree. Never let two writers or two Editors share one project directory.
+- Prefer a linked worktree (`lemmings workspace create <slug>`). Use `--clone` only when a linked worktree does not work for the project, such as tooling that rejects `.git` files or packages that resolve paths through the primary checkout.
+- Run `lemmings workspace estimate` first. The estimate includes the Unity `Library` that a fresh copy will rebuild. Above 10 GiB (or the configured `largeThresholdGiB`), ask the user before creating anything. If the user declines, work serially in the current checkout.
 
-Reuse the same task workspace through implementation, validation, immutable review, up to the frozen three-repair ceiling, and revalidation. Do not release it before Integrated. Retain Active failures, Replan Required, and started Cancelled tasks for diagnosis.
+## Unity
 
-Cross-task reuse requires Lemmings ownership, compatible backend/common dir/package, prior Integrated evidence, exact Git registration, clean tracked/untracked/submodule state, no unfinished Git operation, process, editor, invocation, or lease, only allowlisted ignored caches, and a new base equal to integration head. Claim first, repeat checks, create a fresh branch at the exact head without force/reset/clean, update registry/Task, and create a new agent invocation. Quarantine without modification on any failure.
+- Every worktree has its own `Library`, `Temp`, and Editor lock. The first import can take a long time; budget for it, or keep one long-lived validation checkout for expensive Editor checks.
+- Keep `.meta` files paired with their assets and preserve GUIDs on moves and renames.
+- Treat scenes, prefabs, ScriptableObjects, and Addressables as authored data. Edit them with Editor tooling or minimal YAML changes, never by regenerating them.
+- Do not read `Library`, `Temp`, `Obj`, `Logs`, build outputs, or whole scene YAML as context.
 
-Persistent validation clones are project lifetime, never assigned to writers, retain Unity Library, and are never automatically cleaned or removed. Dirty state blocks only validation and needs manual resolution.
+## Cleanup
 
-Safe automatic removal applies only to an exact registered non-primary Lemmings worktree, or a standalone task-specific Unity clone whose Git top-level exactly equals its registry path, after its lifetime ends or it is evicted, with Integrated evidence , clean status/submodules, no Git operation, invocation/process/lease, and no other owner. Use ordinary `git worktree remove` for linked worktrees; delete only the verified standalone clone root for a task clone. Never auto-remove dirty/untracked, unmerged, Blocked/Replan/started-Cancelled, user, unknown, locked, primary, or validation workspaces. Failure quarantines the entry and never reopens Integrated.
-
-## Provisioning and canonical evidence
-
-Record the intended repository, backend, exact base SHA, branch, destination, estimate and approval in the Task before `workspace prepare`. Every branch created for a Lemmings task uses `task/<short-lowercase-slug>`; never replace `task/` with a provider, model, host, tool, or agent prefix. Reuse an existing branch explicitly targeted by the task without renaming it. Package worktrees operate on the package's own Git root; estimate a full repository when that is what Git will check out. Submodule gitlinks, authored asset metadata and uncommitted primary changes must remain intact. Never mistake a package directory inside a superproject for a separate Git repository.
-
-Prepare reserves atomically, runs ordinary Git worktree creation and quarantines failure. Claim's first-use path has the same primary/dirty/process/lease checks as reuse. Resolve Git operation paths against their workspace directory. Cleanup requires the canonical Task and revision, matching workspace/task identity, actual integrated candidate/merge commits and passing checks at that merge SHA. A boolean --integration-evidence is legacy syntax, not authority. Missing/stale evidence or unverifiable process identity blocks removal. Preserve cancelled and failed work for inspection.
-
-Do not share mutable engine caches between writer directories. A Unity Editor lock is local to one project directory, not a global editor count. Other engine imports, dev-server ports, browser profiles and generated output paths are independent per worker. Keep a stable validation workspace for expensive engine checks when appropriate; validation assets and editor sessions have explicit owners.
+Remove a workspace only after its branch is merged or deliberately abandoned by the user. `lemmings workspace remove` refuses dirty workspaces, deletes a task branch only when it is merged, and deletes a clone only when all of its branch heads already exist in the primary repository. Keep failed or unmerged workspaces for inspection and tell the user they exist.

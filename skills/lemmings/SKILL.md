@@ -1,98 +1,84 @@
 ---
 name: lemmings
-description: Coordinate repository delivery through Discover, Plan, Refine, Implement, and Verify, with proportional agents, bounded context, and optional Python runtime enforcement.
+description: Deliver a repository change through Discover, Plan, Implement, and Verify, scaling from direct work to an independent reviewer or parallel workers in isolated worktrees. Use for coding tasks that benefit from delegation, independent review, or parallel implementation.
 ---
 
 # Lemmings
 
-Act as the sole manager. Deliver the requested repository outcome through **Discover → Plan → Refine → Implement → Verify**. Acceptance and required evidence decide completion; protocol ceremony does not.
+You are the manager. Deliver the requested outcome with the least process that still proves it works. The acceptance criteria and passing checks decide when you are done; paperwork does not.
 
-## Choose the execution path once
+## 1. Discover
 
-The five stages and quality bar are identical on both paths.
+Read the repository rules (`AGENTS.md`, `CLAUDE.md`, contributing docs) and the smallest code surface that settles the scope. Identify the affected behavior, how to validate it, and the risks. If a game engine is present, read the matching file in [rules/](rules/) (`unity.md`, `unreal.md`, `godot.md`, `defold.md`, `flutter.md`, `phaser.md`, `pixijs.md`; `platforms.md` for an explicit platform target). Send an explorer only for a named question you cannot answer cheaply yourself.
 
-- If the user says not to use Python or the Lemmings runtime, use the **skill-only path**. Do not probe, install, invoke, or activate the runtime.
-- If this session already proved the runtime works, the manager may use the **runtime path**.
-- If runtime state is unknown, perform one bounded `doctor` check before creating task state. Success selects the runtime path. If Python, the bundle, or a compatible runtime is missing, explain the missing dependency and ask once whether the user wants it installed. Install only after explicit approval; otherwise continue immediately on the skill-only path. Do not repeat the probe at later stages.
-- Once a runtime Task is active, a runtime failure is a blocker, not permission to bypass hooks or silently change paths. Follow the controlled handoff in [python-runtime.md](references/python-runtime.md) only when the user explicitly requests skill-only continuation.
+## 2. Plan and choose a mode
 
-Never install Python or runtime dependencies automatically. A declined or unanswered installation offer selects skill-only and is not a blocker. Do not scan providers, enable telemetry, or alter model settings merely to choose a path. Execution path does not change risk, acceptance, reviewer requirements, isolation, permissions, or user authorization.
+Write a brief. It is the only task contract. Keep it short and pass it to agents as-is:
 
-## Resolve proportional mode
+```markdown
+Goal: <one sentence>
+Acceptance:
+- <observable criterion>
+Owned paths: <paths/globs the writer may change>
+Checks: <commands or manual checks that can falsify the change>
+Risks: <only material ones, each with the check that covers it>
+Context: <at most ~10 files/symbols worth reading first, each with a reason>
+```
 
-Default to Auto and decide after Discover from the affected scope. Do not treat the mere presence of submodules or integration branches as a Strict signal.
+Choose the lightest mode that is safe. Honor a mode the user names. You may escalate later, never downgrade after changes exist.
 
-1. Use **Strict** for multiple writers, overlapping ownership, shared or frozen contracts, changed submodule boundaries, multi-repository integration, shared serialized assets, code generation, exclusive resources, high risk, or baseline review.
-2. Use **Standard** for one bounded worker, medium risk, a public contract with one owner, a required independent review, or validation wider than one focused check.
-3. Use **Simple** for one low-risk ownership domain that the manager can safely change and verify directly.
+| Mode | When | What happens |
+| --- | --- | --- |
+| **Simple** | One low-risk area you can change and verify yourself | You implement and run the checks. No reviewer unless the user asks. |
+| **Standard** | Medium risk, a public contract, broad validation, or the user wants review | One writer (you or a worker), then one independent reviewer. |
+| **Parallel** | Independent pieces with non-overlapping owned paths that are worth doing concurrently | One worker per piece, each in its own worktree; review each; integrate; run the checks on the merged result. |
 
-Honor an explicit mode. Auto may escalate when discovery reveals risk, but never downgrade after mutation. Host limitations may serialize work or reduce automation; they do not remove required review or evidence.
+Split work only at real ownership boundaries. Connected changes stay with one sequential writer. If the plan has a real ambiguity that could change correctness or scope, resolve it now (ask the user or send the brief to a reviewer for a plan check) before anyone writes code.
 
-## Shared task contract
+## 3. Implement
 
-Before implementation, establish:
+- **Simple**: make the change in the current checkout.
+- **Standard**: implement yourself, or give the brief to one `lemmings-worker`. The current checkout is fine for a single writer unless it has unrelated uncommitted changes; then create a worktree.
+- **Parallel**: create one worktree per worker, dispatch all workers of the wave, and wait for every one of them before integrating anything.
 
-- one concrete goal and observable acceptance criteria;
-- owned, shared, and forbidden paths or symbols;
-- dependencies and material risks, each mapped to a check;
-- the smallest useful working set, with a purpose for every reference;
-- validation commands or manual checks;
-- assigned worker and reviewer routes, workspace choice, and retry, repair, and per-role launch ceilings.
+Workers get the brief, not the conversation. A worker may ask one focused question when the brief is missing something; answer it and continue. A worker commits on its branch and reports: status, commit, changed paths, check results, and remaining risks. If the report is missing a piece, ask for that piece; never redo finished work just to fix a report.
 
-On the skill-only path, keep this contract in the current conversation. For work that must survive a session, record one concise Markdown task note containing the contract, current stage, actual launches and attempts, evidence, reviewer decision, and remaining blockers. Use configured ceilings, or default to worker 5, reviewer 7, and explorer 5 launches for the whole task. Retry, repair, model recovery, and replan do not reset them. Treat these counts as manager-maintained limits, never as machine-verified usage. Do not create parallel JSON state or require invocation IDs, digests, receipts, revisions, or manual lifecycle transitions.
+New branches are named `task/<short-lowercase-slug>`. Reuse a branch the user explicitly targets.
 
-On the runtime path, read [python-runtime.md](references/python-runtime.md) and let the tools own schema metadata and transitions. Tooling validates or executes manager decisions; it never chooses scope, mode, model, verdict, or acceptance.
+## 4. Verify
 
-## Run the five stages
+1. Run the checks from the brief, narrowest first. A failing or truncated check is not a pass.
+2. In Standard and Parallel, confirm the writer stayed inside its owned paths (use `lemmings scope` when the helper is available, otherwise `git diff --name-only <base>..<head>`).
+3. In Standard and Parallel, send the brief plus the candidate range (`<base>..<head>`) to a separate `lemmings-reviewer`. Do not replace the review with your own opinion, and do not change the candidate while it is under review.
+4. The reviewer returns `Accepted` or `ChangesRequested`:
+   - P0–P2 findings block. Each names a concrete failure scenario (unmet criterion, failed check, correctness, security, data loss, or real regression) with evidence.
+   - P3 findings are follow-ups. They never block acceptance and never trigger a repair.
+5. On `ChangesRequested`, send only the blocking findings back to the writer. The re-review checks those findings and the new delta, not the whole change again. At most **2 repair rounds**; if the same problem persists, stop and report the blocker or re-plan with the user.
+6. In Parallel, merge the accepted branches one at a time and run the checks on the merged result.
 
-### Discover
+If a required reviewer is unavailable, report Verify as incomplete. Never present missing evidence as success.
 
-Read repository rules and inspect the smallest code or documentation surface that can resolve scope. Identify affected behavior, dependencies, risks, available validation, workspace safety, and unresolved questions. Use a focused explorer only for a named question; do not duplicate an answered investigation.
+Finish with a short report: what changed, check results, review verdict, and any follow-ups. Remove worktrees you created once their branches are merged.
 
-### Plan
+## Agents and models
 
-Create one implementation plan from the shared task contract. Split work only at real dependency or ownership boundaries. Prefer one sequential writer for connected changes. Parallel writers require explicit independence, separate ownership, isolated workspaces, and a complete wave barrier before integration.
+Roles are `lemmings-worker` (writes within owned paths), `lemmings-reviewer` (read-only), and `lemmings-explorer` (read-only). Agents never delegate further.
 
-### Refine
+By default every role runs as a native subagent of the current host with the host's default model. Keep any model the user or `.agents/lemmings.json` assigns; never substitute one silently. To run a role on a different host or provider (for example a Claude reviewer while you run in Codex), use `lemmings dispatch`; see [references/helper.md](references/helper.md).
 
-Remove material ambiguity before writing. Use an independent reviewer before the first writer for migrations, shared contracts, non-trivial dependencies, high risk, or a requested plan review. Refine only gaps that could change correctness, scope, validation, or ownership. Simple work may refine locally.
+## Optional helper
 
-### Implement
+The skill works without Python. When Python 3.10+ is available, `python <this skill>/scripts/run.py <command>` (or `lemmings <command>` if installed) provides:
 
-Give each worker the goal, acceptance, ownership, relevant risks, validation, limits, and initially no more than 12 purposeful references or 16 KiB. A worker may request one focused expansion for a named unresolved symbol or decision. Never send transcripts, reasoning, raw logs, secrets, registry contents, or broad generated artifacts.
+- `doctor`: host CLIs and configured role routes;
+- `workspace create|list|remove|estimate`: isolated worktrees or clones with safe removal;
+- `scope`: changed paths against owned and forbidden rules;
+- `dispatch`: a role on Codex, Claude Code, or OpenCode with a deadline, a run log, and a model identity check.
 
-The worker reports status, acceptance evidence, validation evidence, changed paths or candidate identity, blockers, and remaining risks. Missing report formatting is corrected in the same exchange. Missing substantive evidence is supplied or the check is run. Neither case restarts completed implementation.
+Details: [references/helper.md](references/helper.md). Large game repositories: [references/game-projects.md](references/game-projects.md).
 
-### Verify
+## Safety
 
-Run the narrowest checks that can falsify the change, then required wider checks. Give the immutable candidate to a separate independent reviewer. The manager does not duplicate that review or replace it with its own opinion.
+Preserve unrelated changes in a dirty checkout. Never force-push, reset, or clean without the user's explicit request. Ask before creating any workspace estimated above 10 GiB. Security, sandbox, and approval rules of the host always apply.
 
-Review an immutable candidate identified by a commit range or an explicitly frozen diff. Do not mutate it during review. Accept when all declared criteria and required validation pass and no P0-P2 defect remains in affected behavior. P3 suggestions are follow-ups and never trigger repair.
-
-A repair addresses named blockers and their direct consequences. Repeat review checks those blockers, the delta, and directly affected behavior while reusing still-valid evidence. Do not rerun successful checks unless a relevant change or unresolved risk can invalidate them. Three repair cycles are the default ceiling; lack of measurable progress requires replan or a clear blocker report.
-
-If the reviewer is unavailable, report Verify as incomplete. Never describe missing evidence as success.
-
-## Roles, models, and workspaces
-
-Use only manager, worker, reviewer, and explorer. Delegation depth is one. Preserve explicit and existing manual model assignments; otherwise use current-host defaults. On the runtime path, a `configMode: host` route delegates provider format and authentication to the selected Codex or Claude Code configuration; never copy credentials or silently substitute the route. On the skill-only path, use the current host's native provider and delegation controls without scanning or requiring runtime metadata. A model capacity failure permits one short transport retry or one focused context reduction. Further recovery requires a task-local route decision and a fresh invocation or agent without transferred conversation history.
-
-Sequential safe work may use the current checkout. Each concurrent writer owns one isolated worktree. Preserve unrelated changes in dirty worktrees. Reviewers and explorers are read-only. Keep security, sandbox, approval, destructive-action, and repository rules in force on both execution paths.
-
-Every new Git branch created by Lemmings must be named `task/<slug>`, using a short lowercase hyphenated slug derived from the task goal. Do not substitute provider, model, host, tool, or agent prefixes such as `codex/`. An existing branch explicitly targeted by the task may be reused without renaming.
-
-## References and validation
-
-Read only the reference needed for the current decision:
-
-- [python-runtime.md](references/python-runtime.md): optional schema-v5 CLI, hooks, accounting, recovery, and controlled handoff.
-- [contracts.md](references/contracts.md): detailed artifacts, lifecycle, Auto signals, and review rules used by the runtime.
-- [context-contract.md](references/context-contract.md): runtime AgentInvocation/AgentResult and hard context ceilings.
-- [game-projects.md](references/game-projects.md): isolated workspace registry and safe cleanup.
-- [model-routing.md](references/model-routing.md): optional model discovery and confirmed recovery routes.
-- [skill-reuse.md](references/skill-reuse.md): optional installed/official skill check and user-selected skill creation.
-- [telemetry.md](references/telemetry.md): optional offline metrics, disabled unless explicitly requested.
-
-Run focused validation first. On the runtime path, finish with the runtime package/repository check described in `python-runtime.md`. On the skill-only path, use the repository's own checks and report that runtime guarantees were not used. Stop when acceptance is supported; leave unrelated improvements as follow-ups.
-
-When repeated work suggests another reusable skill, follow [skill-reuse.md](references/skill-reuse.md). Continue the main task if skill search is unavailable, and use `skill-creator` only after the user selects creation or modification.
+When a repeated process looks like it deserves its own skill, see [references/skill-reuse.md](references/skill-reuse.md).

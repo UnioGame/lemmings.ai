@@ -2,36 +2,27 @@
 
 ## Scope
 
-- This repository is the Lemmings Unity package and Codex plugin for reusable AI-agent workflows.
-- Keep the self-contained skill, optional Python CLI/runtime, hooks, orchestration guidance, task templates, and repo-scoped roles here.
-- Do not add Unity Runtime or Editor assemblies unless a separate task explicitly requires them.
+- This repository is the Lemmings skill (a Codex and Claude Code plugin, also packaged for Unity as `unigame.ai.lemmings`), its optional Python helper, and the optional telemetry package.
+- Do not add Unity Runtime or Editor assemblies unless a task explicitly requires them.
 
-## Sources Of Truth
+## Sources of truth
 
-- `skills/lemmings/SKILL.md` owns the workflow, task controls, and sole-orchestrator contract.
-- `skills/lemmings/references/` owns optional Python-runtime, game-project, artifact-contract, and telemetry policy.
-- `Documentation~/tasks/ROADMAP.md` owns orchestration-tooling priorities.
-- `skills/lemmings/templates/` owns reusable phase, task, and immutable review contracts; close evidence remains embedded in the phase or task contract.
+- `skills/lemmings/SKILL.md` owns the entire workflow. Keep it complete and short (under 150 lines). The skill must work without Python.
+- `skills/lemmings/references/` holds details that are needed only for specific operations: the helper, game projects, and skill reuse.
+- `agents/*.md` are the role definitions. `agents/*.toml` are generated from them by `scripts/build_agents.py`; never edit the TOML files by hand.
+- `packages/lemmings-telemetry/` is optional. The skill and helper must never import it.
 
-Avoid duplicating detailed policy across these files. Keep the skill compact and link to the owning reference for advanced cases.
+## Design rules
 
-## Working Rules
-
-- The smart Lemmings skill is the only orchestrator. Do not split orchestration policy into command or workflow reference files.
-- Keep the five-stage workflow complete in `SKILL.md`. Runtime mechanics belong in `references/python-runtime.md`; Python availability must not be required for skill-only work.
-- Preserve active runtime enforcement. Inactive plugin hooks must no-op without invoking Python, while an active marker must use the Python handler or fail explicitly.
-- Preserve user model assignments. Never silently substitute a requested model or reasoning effort.
-- Use current host defaults unless the user or active manual profile assigns a model and effort.
-- Use the lowest-cost model that safely fits a role when the user has not pinned one.
-- Apply Simple, Standard, or Strict contracts proportionally. The default workspace policy is hybrid: safe serial work may use current, while parallel writers and dirty-primary isolation require separate worktrees; one writer owns one isolated worktree.
-- Select a code worktree, package worktree, or full clone from the affected scope. The pipeline, read-only workers, reviewers, validators, and safe serial work in the current checkout need no special user approval. Obtain explicit approval before provisioning any isolated workspace estimated above 10 GiB, for Unity and non-Unity repositories alike; pending or declined approval blocks only that provisioning or a step with no safe fallback.
-- On the runtime path, keep only Task, Phase, and immutable Review files as canonical artifacts. On the skill-only path, use conversation state or one concise Markdown task note for durable work.
-- Map acceptance criteria and material risks to tests.
-- Keep roadmap and progress notes concise; never paste raw logs.
-- Treat security, sandbox, approval, and destructive-action rules as non-disableable.
+- AI-first: the model makes decisions and does the work. Python only does what an agent cannot do reliably (worktree lifecycle, scope checks from the real diff, launching other host CLIs, verifying model identity). Do not add task state machines, JSON protocol artifacts, budgets, or hooks.
+- Never silently substitute a model the user or config assigned.
+- The reviewer is independent and read-only. P3 findings never block.
+- Every new task branch is named `task/<slug>`.
+- The helper uses only the standard library and supports Python 3.10+.
 
 ## Validation
 
-- Run the skill creator `quick_validate.py` against every changed skill.
-- Check `package.json`, Markdown links, and `git diff --check`.
-- Forward-test material skill changes with fresh agents and minimal task-local context.
+- `python -m pytest -q` (tests must be hermetic: no dependence on the developer's HOME or provider environment variables).
+- `python scripts/build_agents.py --check`
+- `git diff --check`
+- Forward-test material workflow changes with a fresh agent on a small real task.

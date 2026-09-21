@@ -1,6 +1,6 @@
 {
   "name": "lemmings",
-  "version": "6.1.0",
+  "version": "7.0.0",
   "description": "Proportional repository orchestration for multiple agent hosts",
   "author": {
     "name": "Lemmings Maintainers"
@@ -11,12 +11,12 @@
   "interface": {
     "displayName": "Lemmings",
     "shortDescription": "Coordinate proportional repository delivery.",
-    "longDescription": "Lemmings scales from artifact-free local work to isolated Strict delivery with immutable review evidence.",
+    "longDescription": "Lemmings scales from direct local work to an independent reviewer or parallel workers in isolated worktrees, with optional cross-host dispatch.",
     "developerName": "Lemmings Maintainers",
     "category": "Productivity",
     "capabilities": [],
     "composerIcon": "./assets/icon.png",
     "logo": "./assets/icon.png",
-    "defaultPrompt": "Use $lemmings Auto to discover, resolve the lightest safe mode, and complete this repository task."
+    "defaultPrompt": "Use $lemmings Auto to discover, choose the lightest safe mode, and complete this repository task."
   }
 }

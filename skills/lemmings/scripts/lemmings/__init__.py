@@ -1,6 +1,3 @@
-"""Lemmings repository orchestration toolkit."""
+"""Deterministic helpers for the Lemmings skill: workspaces, scope checks, and cross-host dispatch."""
 
-from .contracts import SCHEMA_VERSION, ValidationResult
-
-__all__ = ["SCHEMA_VERSION", "ValidationResult"]
-__version__ = "6.1.0"
+__version__ = "7.0.0"

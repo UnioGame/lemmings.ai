@@ -10,7 +10,7 @@
         "source": "github",
         "repo": "UnioGame/unigame.ai.lemmings"
       },
-      "description": "Proportional repository orchestration with bounded workers and immutable review evidence"
+      "description": "Lightweight repository delivery: plan, implement, independent review, and parallel workers in isolated worktrees"
     }
   ],
   "description": "Lemmings orchestration plugins from UnioGame"
