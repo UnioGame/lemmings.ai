@@ -77,7 +77,7 @@ Deactivate only a marker owned by this manager after confirming no invocation or
 
 ## Commands
 
-The CLI also exposes `invocation create|extend|context-use|fail|accept`, `candidate prepare`, `repair start`, `review apply`, `integration validate`, workspace lifecycle commands, profiles, rules, model discovery/recovery, runner operations, and optional metrics. Read [contracts.md](contracts.md), [context-contract.md](context-contract.md), [game-projects.md](game-projects.md), or [model-routing.md](model-routing.md) only when that operation needs their detail.
+The CLI also exposes `invocation create|extend|context-use|fail|accept`, `candidate prepare`, `repair start`, `review apply`, `integration validate`, workspace lifecycle commands, profiles, rules, model discovery/recovery, runner operations, and optional metrics. Host-mode Codex and Claude Code routes use the installed CLI's configuration and authentication; provider files and secrets are never copied into runtime artifacts. Read [contracts.md](contracts.md), [context-contract.md](context-contract.md), [game-projects.md](game-projects.md), or [model-routing.md](model-routing.md) only when that operation needs their detail.
 
 Finish runtime-backed work with the narrowest relevant checks and:
 

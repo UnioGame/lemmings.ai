@@ -498,7 +498,7 @@ def command_run(args: argparse.Namespace) -> int:
         raise ValueError("run route differs from the manager-assigned model")
     explicit_pin = invocation["role"] == task.get("role") and (task.get("models") or {}).get("requested") == assigned and route_name(route) == assigned
     def matches(candidate):
-        return candidate and route_name(candidate) == route_name(route) and candidate.get("hostId") == route.get("hostId") and all(not candidate.get(k) or candidate[k] == route.get(k) for k in ("executor", "profileName", "protocol"))
+        return candidate and route_name(candidate) == route_name(route) and candidate.get("hostId") == route.get("hostId") and all(not candidate.get(k) or candidate[k] == route.get(k) for k in ("executor", "configMode", "configDigest", "profileName", "protocol"))
     if choices and not any(matches(c) for c in choices) and not matches(recovery) and not explicit_pin:
         raise ValueError("run route is outside the frozen approved chain")
     value = build_launch(repo, invocation, route) if args.dry_run else run_invocation(repo, invocation, route)
@@ -1010,7 +1010,7 @@ def build_parser() -> argparse.ArgumentParser:
     stage = metrics_sub.add_parser("stage"); add_common(stage); stage.add_argument("stage", choices=LIFECYCLE_STAGES); stage.add_argument("--task"); stage.add_argument("--phase"); stage.set_defaults(run=command_metrics)
     finish = metrics_sub.add_parser("finish"); add_common(finish); finish.add_argument("--outcome", required=True, choices=sorted(FINISH_OUTCOMES)); finish.add_argument("--task"); finish.set_defaults(run=command_metrics)
     importing = metrics_sub.add_parser("import"); add_common(importing); importing.add_argument("--task"); importing.add_argument("--file", required=True); importing.set_defaults(run=command_metrics)
-    usage = metrics_sub.add_parser("usage"); add_common(usage); usage.add_argument("--host", required=True, choices=["codex", "opencode", "kilo"]); usage.add_argument("--file", required=True); usage.add_argument("--task"); usage.set_defaults(run=command_metrics)
+    usage = metrics_sub.add_parser("usage"); add_common(usage); usage.add_argument("--host", required=True, choices=["codex", "claude", "opencode", "kilo"]); usage.add_argument("--file", required=True); usage.add_argument("--task"); usage.set_defaults(run=command_metrics)
     annotate = metrics_sub.add_parser("annotate"); add_common(annotate); annotate.add_argument("--task", required=True); annotate.add_argument("--kind", required=True, choices=sorted(ANNOTATION_KINDS)); annotate.add_argument("--severity", required=True, choices=["P0", "P1", "P2", "P3"]); annotate.add_argument("--relation", default="confirmed", choices=["confirmed", "suspected"]); annotate.add_argument("--reference", required=True); annotate.add_argument("--detected-at"); annotate.add_argument("--resolved-at"); annotate.add_argument("--fix-commit"); annotate.set_defaults(run=command_metrics)
     report = metrics_sub.add_parser("report"); add_common(report); report.add_argument("--task"); report.add_argument("--phase"); report.add_argument("--since"); report.add_argument("--benchmark", action="store_true"); report.add_argument("--format", choices=["json", "markdown"], default="json"); report.add_argument("--output"); report.set_defaults(run=command_metrics)
     cleanup = metrics_sub.add_parser("cleanup"); add_common(cleanup); cleanup.add_argument("--older-than", default="90d"); cleanup.add_argument("--execute", action="store_true"); cleanup.set_defaults(run=command_metrics)

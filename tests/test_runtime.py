@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def profile() -> dict:
     return {
         "schemaVersion": 5,
-        "distributionVersion": "6.0.0",
+        "distributionVersion": "6.1.0",
         "mode": "auto",
         "modelRoutes": {
             "codex": {
@@ -196,6 +196,21 @@ class ModelsAndUsageV4Tests(unittest.TestCase):
                 self.assertEqual(0, usage["inputTokens"])
                 self.assertEqual(0, usage["cacheReadTokens"])
                 self.assertEqual(0, usage["reportedCost"])
+
+    def test_claude_model_usage_envelope_is_normalized_without_secrets(self):
+        export = {"modelUsage": {"claude-sonnet": {
+            "inputTokens": 11, "outputTokens": 7,
+            "cacheReadInputTokens": 3, "cacheCreationInputTokens": 2,
+            "costUSD": 0.25,
+        }}, "apiKey": "must-not-appear"}
+        usage = normalize_usage_export("claude", export)
+        self.assertTrue(usage["exact"])
+        self.assertEqual(11, usage["inputTokens"])
+        self.assertEqual(7, usage["outputTokens"])
+        self.assertEqual(3, usage["cacheReadTokens"])
+        self.assertEqual(2, usage["cacheWriteTokens"])
+        self.assertEqual(0.25, usage["reportedCost"])
+        self.assertNotIn("apiKey", usage)
 
     @staticmethod
     def recovery_inputs() -> tuple[list[dict], dict, dict]:

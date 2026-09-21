@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -61,9 +62,88 @@ wire_api = "responses"
             allowed = {
                 "hostId", "providerId", "modelId", "executor", "protocol", "configured",
                 "catalogued", "compatible", "authConfigured", "probed", "source",
-                "profileName", "variantId", "quotaGroup",
+                "profileName", "variantId", "quotaGroup", "configMode", "configDigest",
             }
             self.assertTrue(set(route) <= allowed)
+
+
+    def test_codex_project_provider_is_ignored_and_host_routes_are_sanitized(self) -> None:
+        project = self.repo / ".codex"
+        project.mkdir()
+        (project / "config.toml").write_text(
+            'model="project-model"\nmodel_provider="project-provider"\n'
+            '[model_providers.project-provider]\nbase_url="https://secret.example/v1"\n'
+            'wire_api="responses"\napi_key="PROJECT_SECRET"\n', encoding="utf-8")
+        snapshot = scan_providers(self.repo, offline=True, home=self.home)
+        self.assertFalse(any(route["hostId"] == "codex" for route in snapshot["routes"]))
+
+        codex = self.home / ".codex"
+        codex.mkdir()
+        (codex / "team.config.toml").write_text(
+            'model="deepseek"\nmodel_provider="byteplus"\n'
+            '[model_providers.byteplus]\nbase_url="https://ark.example/v1"\n'
+            'wire_api="responses"\nenv_key="BYTEPLUS_KEY"\n', encoding="utf-8")
+        snapshot = scan_providers(self.repo, offline=True, home=self.home)
+        route = next(route for route in snapshot["routes"] if route["hostId"] == "codex")
+        self.assertEqual("host", route["configMode"])
+        self.assertEqual("team", route["profileName"])
+        self.assertEqual(64, len(route["configDigest"]))
+        self.assertNotIn("ark.example", json.dumps(snapshot))
+        self.assertNotIn("PROJECT_SECRET", json.dumps(snapshot))
+
+    def test_claude_provider_modes_and_ambiguity_are_secret_safe(self) -> None:
+        claude = self.home / ".claude"
+        claude.mkdir()
+        settings = claude / "settings.json"
+        cases = {
+            "anthropic": {},
+            "bedrock": {"CLAUDE_CODE_USE_BEDROCK": "1"},
+            "vertex": {"CLAUDE_CODE_USE_VERTEX": "1"},
+            "foundry": {"CLAUDE_CODE_USE_FOUNDRY": "1"},
+            "gateway": {"ANTHROPIC_BASE_URL": "https://private.gateway/v1"},
+            "host-managed": {"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": "1"},
+        }
+        for provider, env in cases.items():
+            settings.write_text(json.dumps({"model": "claude-sonnet", "env": {
+                **env, "ANTHROPIC_API_KEY": "CLAUDE_SECRET"}}), encoding="utf-8")
+            snapshot = scan_providers(self.repo, offline=True, home=self.home)
+            route = next(route for route in snapshot["routes"] if route["hostId"] == "claude")
+            self.assertEqual(provider, route["providerId"])
+            self.assertEqual("claude", route["executor"])
+            self.assertEqual("host", route["configMode"])
+            self.assertEqual("messages", route["protocol"])
+            self.assertTrue(route["authConfigured"])
+            self.assertNotIn("CLAUDE_SECRET", json.dumps(snapshot))
+            self.assertNotIn("private.gateway", json.dumps(snapshot))
+        settings.write_text(json.dumps({"model": "claude-sonnet", "env": {
+            "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1"}}), encoding="utf-8")
+        snapshot = scan_providers(self.repo, offline=True, home=self.home)
+        self.assertFalse(any(route["hostId"] == "claude" for route in snapshot["routes"]))
+        self.assertTrue(any(item["code"] == "claude-provider-ambiguous" for item in snapshot["diagnostics"]))
+
+    def test_host_probe_uses_cli_and_confirms_model_without_direct_http(self) -> None:
+        codex = self.home / ".codex"
+        codex.mkdir()
+        (codex / "custom.config.toml").write_text(
+            'model="deepseek"\nmodel_provider="byteplus"\n'
+            '[model_providers.byteplus]\nbase_url="https://ark.example/v1"\n'
+            'wire_api="responses"\n', encoding="utf-8")
+        route = next(route for route in scan_providers(self.repo, offline=True, home=self.home)["routes"]
+                     if route["hostId"] == "codex")
+        completed = __import__("types").SimpleNamespace(
+            returncode=0, stdout='{"type":"turn.completed","model":"deepseek","usage":{"input_tokens":1}}',
+            stderr="")
+        with patch("lemmings.discovery.shutil.which", return_value="codex"), \
+             patch("lemmings.discovery.subprocess.run", return_value=completed) as launched, \
+             patch("lemmings.discovery.urllib.request.urlopen", side_effect=AssertionError("no direct HTTP")):
+            result = probe_route(route, repo=self.repo, home=self.home)
+        self.assertTrue(result["probed"])
+        self.assertEqual(["deepseek"], result["actualModels"])
+        self.assertTrue(result["usageComplete"])
+        argv = launched.call_args.args[0]
+        self.assertIn("--profile", argv)
+        self.assertNotIn("--ignore-user-config", argv)
+
 
     def test_catalog_protocol_and_alias_diagnostics_do_not_rewrite_routes(self) -> None:
         snapshot = scan_providers(

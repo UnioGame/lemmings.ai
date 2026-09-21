@@ -57,6 +57,70 @@ class RunnerTests(unittest.TestCase):
             self.assertIn('model_reasoning_effort="high"',launch["argv"])
             with self.assertRaisesRegex(ValueError,"Responses"):
                 runners.build_launch(self.repo,self.inv,{**self.route,"executor":"codex","protocol":"messages"})
+
+    def test_host_native_codex_and_claude_launches_do_not_copy_credentials(self):
+        codex_route = {"hostId": "codex", "executor": "codex", "providerId": "byteplus",
+                       "modelId": "deepseek", "protocol": "responses", "configMode": "host",
+                       "profileName": "byteplus", "variantId": "high"}
+        launch = runners.build_launch(self.repo, self.inv, codex_route)
+        self.assertIn("--profile", launch["argv"])
+        self.assertIn("byteplus", launch["argv"])
+        self.assertNotIn("--ignore-user-config", launch["argv"])
+        self.assertEqual({}, launch["env"])
+        self.assertNotIn("model_providers.lemmings-selected", " ".join(launch["argv"]))
+
+        claude_route = {"hostId": "claude", "executor": "claude", "providerId": "bedrock",
+                        "modelId": "claude-sonnet", "protocol": "messages",
+                        "configMode": "host", "variantId": "high"}
+        launch = runners.build_launch(self.repo, self.inv, claude_route)
+        argv = launch["argv"]
+        for flag in ("--safe-mode", "--no-session-persistence", "--json-schema",
+                     "--permission-prompts", "--tools", "--effort"):
+            self.assertIn(flag, argv)
+        self.assertEqual({}, launch["env"])
+        self.assertNotIn("ANTHROPIC_API_KEY", " ".join(argv))
+        settings = json.loads(argv[argv.index("--settings") + 1])
+        self.assertEqual([], settings["fallbackModel"])
+        self.assertFalse(settings["switchModelsOnFlag"])
+
+        reader = runners.build_launch(self.repo, {**self.inv, "role": "reviewer"}, claude_route)
+        tools = reader["argv"][reader["argv"].index("--tools") + 1]
+        self.assertNotIn("Edit", tools)
+        self.assertNotIn("Write", tools)
+        reader_settings = json.loads(reader["argv"][reader["argv"].index("--settings") + 1])
+        self.assertIn("Edit", reader_settings["permissions"]["deny"])
+
+    def test_codex_host_disables_user_profile_and_project_mcp_servers(self):
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            repo = Path(temporary) / "repo"
+            (home / ".codex").mkdir(parents=True)
+            (repo / ".codex").mkdir(parents=True)
+            (home / ".codex/config.toml").write_text("[mcp_servers.user_server]\nurl='http://invalid'\n", encoding="utf-8")
+            (home / ".codex/byteplus.config.toml").write_text("[mcp_servers.profile_server]\ncommand='bad'\n", encoding="utf-8")
+            (repo / ".codex/config.toml").write_text("[mcp_servers.project_server]\ncommand='bad'\n", encoding="utf-8")
+            route = {"hostId": "codex", "providerId": "byteplus", "modelId": "deepseek",
+                     "executor": "codex", "protocol": "responses", "configMode": "host",
+                     "profileName": "byteplus"}
+            with patch.object(runners, "_home", return_value=home):
+                launch = runners.build_launch(repo, self.inv, route)
+            command = " ".join(launch["argv"])
+            for name in ("user_server", "profile_server", "project_server"):
+                self.assertIn(f'mcp_servers.{name}.enabled=false', command)
+
+    def test_claude_envelope_parsing_and_model_observation(self):
+        path = self.root / "claude.json"
+        payload = self.result()
+        path.write_text(json.dumps({
+            "type": "result", "result": json.dumps(payload),
+            "modelUsage": {"claude-sonnet": {"inputTokens": 10, "outputTokens": 2}}
+        }), encoding="utf-8")
+        self.assertEqual("inv-1", runners._parse_output(path, "claude")["invocationId"])
+        observed = runners._host_observation(path, "claude", "claude-sonnet")
+        self.assertTrue(observed["modelConfirmed"])
+        self.assertTrue(observed["usageComplete"])
+
     def test_fake_process_result_and_bounded_failure_evidence(self):
         launch=self.fake("print("+repr(json.dumps(self.result()))+")")
         with patch.object(runners,"build_launch",return_value=launch): result=runners.run_invocation(self.repo,self.inv,self.route)

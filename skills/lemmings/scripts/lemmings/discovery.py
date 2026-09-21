@@ -1,10 +1,12 @@
 
-"""Secret-safe, metadata-only provider discovery for Lemmings v4."""
+"""Secret-safe, metadata-only provider discovery for Lemmings schema v5."""
 from __future__ import annotations
 import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import threading
 from contextlib import contextmanager
 import urllib.error
@@ -16,9 +18,10 @@ from typing import Any, Iterable, Mapping
 
 SCHEMA_VERSION = 5
 PROTOCOLS = {"responses", "chat-completions", "messages", "unknown"}
-EXECUTORS = {"native", "codex", "opencode"}
-ROUTE_KEYS = ("hostId", "providerId", "modelId", "variantId", "executor", "profileName", "protocol", "configured", "catalogued", "compatible", "authConfigured", "probed", "quotaGroup", "source")
-SAFE_SOURCES = {"codex-config", "codex-profile", "codex-auth", "codex-cache", "opencode-config", "opencode-auth", "host-catalog", "state-inventory", "manual", "project-manual", "personal-manual", "generated", "unknown"}
+EXECUTORS = {"native", "codex", "claude", "opencode"}
+CONFIG_MODES = {"host", "direct"}
+ROUTE_KEYS = ("hostId", "providerId", "modelId", "variantId", "executor", "configMode", "configDigest", "profileName", "protocol", "configured", "catalogued", "compatible", "authConfigured", "probed", "quotaGroup", "source")
+SAFE_SOURCES = {"codex-config", "codex-profile", "codex-auth", "codex-cache", "claude-settings", "claude-environment", "claude-auth", "opencode-config", "opencode-auth", "host-catalog", "state-inventory", "manual", "project-manual", "personal-manual", "generated", "unknown"}
 SECRET_KEYS = {"experimental_bearer_token", "bearer_token", "access", "access_token", "api_key", "apikey", "auth", "authorization", "client_secret", "credential", "credentials", "key", "password", "private_key", "refresh", "refresh_token", "secret", "token"}
 
 # https://opencode.ai/docs/go/ documents these endpoint protocols by exact
@@ -208,18 +211,21 @@ def _unique(paths: Iterable[Path]) -> list[Path]:
     return result
 
 def _paths(repo: Path | None, home: Path) -> dict[str, list[Path]]:
-    repo_codex = [] if repo is None else [repo / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc")]
     repo_opencode = [] if repo is None else [repo / name for name in ("opencode.json", "opencode.jsonc")] + [repo / ".opencode" / name for name in ("opencode.json", "opencode.jsonc")]
     codex_profiles = sorted((home / ".codex").glob("*.config.toml"))[:128]
-    if repo is not None:
-        codex_profiles = sorted((repo / ".codex").glob("*.config.toml"))[:128] + codex_profiles
-    repo_codex_auth = [] if repo is None else [repo / ".codex" / "auth.json"]
     repo_opencode_auth = [] if repo is None else [repo / ".opencode" / "auth.json"]
+    claude = [home / ".claude" / "settings.json"]
+    if repo is not None:
+        claude += [repo / ".claude" / "settings.json", repo / ".claude" / "settings.local.json"]
     return {
-        "codex": _unique(repo_codex + [home / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc", "profiles.toml", "profiles.json", "profiles.jsonc")] + codex_profiles),
+        # Codex provider/auth keys are user-level. Project .codex settings are
+        # deliberately excluded because Codex does not honor them for routing.
+        "codex": _unique([home / ".codex" / name for name in ("config.toml", "config.json", "config.jsonc", "profiles.toml", "profiles.json", "profiles.jsonc")] + codex_profiles),
         "opencode": _unique(repo_opencode + [home / ".config" / "opencode" / name for name in ("opencode.json", "opencode.jsonc")] + [home / ".opencode" / name for name in ("opencode.json", "opencode.jsonc", "config.json", "config.jsonc")]),
-        "codex-auth": _unique(repo_codex_auth + [home / ".codex" / "auth.json"]),
+        "codex-auth": _unique([home / ".codex" / "auth.json"]),
         "codex-cache": _unique([home / ".codex" / "models_cache.json"]),
+        "claude": _unique(claude),
+        "claude-auth": _unique([home / ".claude.json"]),
         "opencode-auth": _unique(repo_opencode_auth + [home / ".config" / "opencode" / "auth.json", home / ".local" / "share" / "opencode" / "auth.json", home / ".opencode" / "auth.json"]),
         "opencode-cache": _unique([home / ".cache" / "opencode" / "models.json"]),
     }
@@ -278,6 +284,8 @@ def _executor(host: str, protocol: str, explicit: Any = None) -> str:
     host = host.lower().replace("_", "-")
     if host in {"codex", "openai-codex"}:
         return "codex"
+    if host in {"claude", "claude-code", "anthropic-claude"}:
+        return "claude"
     if host.startswith("opencode") or host in {"go", "open-code"}:
         return "opencode"
     return "native"
@@ -287,6 +295,8 @@ def _compatible(executor: str, protocol: str) -> bool:
         return False
     if executor == "codex":
         return protocol == "responses"
+    if executor == "claude":
+        return protocol == "messages"
     if executor == "opencode":
         return protocol in {"responses", "chat-completions", "messages"}
     return protocol in PROTOCOLS
@@ -301,12 +311,27 @@ def normalize_route(value: Mapping[str, Any], *, defaults: Mapping[str, Any] | N
     protocol = _protocol(value.get("protocol", defaults.get("protocol", "unknown")))
     executor = _executor(host, protocol, value.get("executor", defaults.get("executor")))
     source = _text(value.get("source")) or _text(defaults.get("source")) or "unknown"
-    result: dict[str, Any] = {"hostId": host, "providerId": provider, "modelId": model, "executor": executor, "protocol": protocol, "configured": bool(value.get("configured", defaults.get("configured", False))), "catalogued": bool(value.get("catalogued", defaults.get("catalogued", False))), "compatible": bool(value.get("compatible", defaults.get("compatible", _compatible(executor, protocol)))), "authConfigured": bool(value.get("authConfigured", defaults.get("authConfigured", False))), "probed": bool(value.get("probed", defaults.get("probed", False))), "source": source if source in SAFE_SOURCES else "unknown"}
-    for key in ("variantId", "profileName", "quotaGroup"):
+    mode = _text(value.get("configMode")) or _text(defaults.get("configMode")) or "direct"
+    if mode not in CONFIG_MODES:
+        raise ValueError("route configMode must be host or direct")
+    result: dict[str, Any] = {"hostId": host, "providerId": provider, "modelId": model, "executor": executor, "configMode": mode, "protocol": protocol, "configured": bool(value.get("configured", defaults.get("configured", False))), "catalogued": bool(value.get("catalogued", defaults.get("catalogued", False))), "compatible": bool(value.get("compatible", defaults.get("compatible", _compatible(executor, protocol)))), "authConfigured": bool(value.get("authConfigured", defaults.get("authConfigured", False))), "probed": bool(value.get("probed", defaults.get("probed", False))), "source": source if source in SAFE_SOURCES else "unknown"}
+    for key in ("variantId", "profileName", "quotaGroup", "configDigest"):
         optional = _identifier(value.get(key)) or _identifier(defaults.get(key))
         if optional:
             result[key] = optional
     return result
+
+
+def _host_config_digest(*, host: str, provider: str, model: str, protocol: str,
+                        profile: str | None = None, endpoint: Any = None,
+                        variant: Any = None) -> str:
+    endpoint_text = _text(endpoint)
+    safe = {"hostId": host, "providerId": provider, "modelId": model,
+            "protocol": protocol, "profileName": profile,
+            "variantId": _text(variant),
+            "endpointDigest": hashlib.sha256(endpoint_text.encode()).hexdigest() if endpoint_text else None}
+    return digest(safe)
+
 
 def _route_key(route: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
     return tuple(str(route.get(key, "")) for key in ("hostId", "providerId", "modelId", "variantId", "profileName"))  # type: ignore[return-value]
@@ -393,7 +418,14 @@ def _codex(data: Mapping[str, Any], source: str, routes: dict[tuple[str, str, st
         metadata = {**(dict(providers.get(provider_id)) if isinstance(providers.get(provider_id), Mapping) else {}), **dict(metadata or {})}
         wire = metadata.get("wire_api", metadata.get("wireApi", metadata.get("protocol", protocol)))
         wire = _route_protocol("codex", provider_id, model_id, wire, documented_go=_is_documented_go_endpoint(_section_endpoint(metadata)))
-        _add(routes, {"hostId": "codex", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": wire, "executor": "codex", "configured": True, "authConfigured": _provider_auth(metadata), "source": source, "quotaGroup": metadata.get("quotaGroup")})
+        endpoint = _section_endpoint(metadata)
+        _add(routes, {"hostId": "codex", "providerId": provider_id, "modelId": model_id,
+                      "profileName": profile, "protocol": wire, "executor": "codex",
+                      "configMode": "host",
+                      "configDigest": _host_config_digest(host="codex", provider=provider_id,
+                          model=model_id, protocol=wire, profile=profile, endpoint=endpoint),
+                      "configured": True, "authConfigured": _provider_auth(metadata),
+                      "source": source, "quotaGroup": metadata.get("quotaGroup")})
     add(data.get("model") or data.get("modelId"), default_provider)
     for provider, config in providers.items():
         if not isinstance(config, Mapping):
@@ -405,6 +437,93 @@ def _codex(data: Mapping[str, Any], source: str, routes: dict[tuple[str, str, st
         for name, profile in profiles.items():
             if isinstance(profile, Mapping):
                 add(profile.get("model") or profile.get("modelId"), profile.get("model_provider") or profile.get("modelProvider") or profile.get("providerId") or default_provider, profile, str(name))
+
+
+
+_CLAUDE_ENV_KEYS = {
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+    "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_MODEL",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION", "CLAUDE_CODE_EFFORT_LEVEL",
+}
+_CLAUDE_SECRET_KEYS = {
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS",
+    "AZURE_API_KEY",
+}
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _claude(paths: list[Path], auth_paths: list[Path],
+            routes: dict[tuple[str, str, str, str, str], dict[str, Any]],
+            diagnostics: list[dict[str, str]]) -> None:
+    settings: dict[str, Any] = {}
+    configured_env: dict[str, str] = {}
+    source = "claude-settings"
+    seen = False
+    for candidate in paths:
+        value = _read_safe(candidate, diagnostics)
+        if not isinstance(value, Mapping):
+            continue
+        seen = True
+        settings.update({key: child for key, child in value.items() if key != "env"})
+        if isinstance(value.get("env"), Mapping):
+            configured_env.update({str(key): str(child) for key, child in value["env"].items()
+                                   if isinstance(key, str) and child is not None})
+    effective_env = dict(configured_env)
+    for key in _CLAUDE_ENV_KEYS | _CLAUDE_SECRET_KEYS:
+        if os.environ.get(key) not in (None, ""):
+            effective_env[key] = os.environ[key]
+            source = "claude-environment"
+    if not seen and not any(os.environ.get(key) not in (None, "") for key in _CLAUDE_ENV_KEYS | _CLAUDE_SECRET_KEYS) and not any(path.is_file() for path in auth_paths):
+        return
+    choices = [
+        ("host-managed", _truthy(effective_env.get("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"))),
+        ("anthropic-aws", _truthy(effective_env.get("CLAUDE_CODE_USE_ANTHROPIC_AWS"))),
+        ("bedrock", _truthy(effective_env.get("CLAUDE_CODE_USE_BEDROCK"))),
+        ("vertex", _truthy(effective_env.get("CLAUDE_CODE_USE_VERTEX"))),
+        ("foundry", _truthy(effective_env.get("CLAUDE_CODE_USE_FOUNDRY"))),
+    ]
+    selected = [name for name, active in choices if active]
+    if len(selected) > 1:
+        diagnostics.append(_diag("claude-provider-ambiguous",
+            "multiple Claude provider selectors are active; choose one before routing",
+            source))
+        return
+    provider = selected[0] if selected else ("gateway" if _text(effective_env.get("ANTHROPIC_BASE_URL")) else "anthropic")
+    candidates: list[Any] = [
+        effective_env.get("ANTHROPIC_MODEL"), settings.get("model"),
+        effective_env.get("ANTHROPIC_DEFAULT_MODEL"),
+        effective_env.get("ANTHROPIC_CUSTOM_MODEL_OPTION"),
+    ]
+    available = settings.get("availableModels")
+    if isinstance(available, list):
+        candidates.extend(available)
+    overrides = settings.get("modelOverrides")
+    if isinstance(overrides, Mapping):
+        candidates.extend(overrides.keys())
+    models = list(dict.fromkeys(item for item in (_identifier(value) for value in candidates) if item))
+    if not models:
+        models = ["default"]
+    variant = _identifier(effective_env.get("CLAUDE_CODE_EFFORT_LEVEL") or settings.get("effortLevel"))
+    auth = any(effective_env.get(key) not in (None, "") for key in _CLAUDE_SECRET_KEYS)
+    auth = auth or any(path.is_file() for path in auth_paths) or provider != "anthropic"
+    endpoint = effective_env.get("ANTHROPIC_BASE_URL")
+    for model in models:
+        route = {
+            "hostId": "claude", "providerId": provider, "modelId": model,
+            "executor": "claude", "configMode": "host", "protocol": "messages",
+            "configDigest": _host_config_digest(host="claude", provider=provider,
+                model=model, protocol="messages", endpoint=endpoint, variant=variant),
+            "configured": True, "catalogued": False, "compatible": True,
+            "authConfigured": auth, "probed": False, "source": source,
+        }
+        if variant:
+            route["variantId"] = variant
+        _add(routes, route)
 
 
 def _codex_cache(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str, str], dict[str, Any]], diagnostics: list[dict[str, str]]) -> None:
@@ -425,9 +544,11 @@ def _codex_cache(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str,
         for variant in [None, *(item for item in variants if item)]:
             route: dict[str, Any] = {
                 "hostId": "codex", "providerId": "openai", "modelId": slug,
-                "executor": "codex", "protocol": "responses", "configured": False,
-                "catalogued": True, "compatible": True, "authConfigured": False,
-                "probed": False, "source": "codex-cache",
+                "executor": "codex", "configMode": "host", "protocol": "responses",
+                "configDigest": _host_config_digest(host="codex", provider="openai",
+                    model=slug, protocol="responses", variant=variant),
+                "configured": False, "catalogued": True, "compatible": True,
+                "authConfigured": False, "probed": False, "source": "codex-cache",
             }
             if variant:
                 route["variantId"] = variant
@@ -441,7 +562,7 @@ def _opencode(data: Mapping[str, Any], routes: dict[tuple[str, str, str, str, st
         if not provider_id or not model_id:
             return
         metadata = metadata or {}
-        _add(routes, {"hostId": "opencode", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": _config_protocol("opencode", provider_id, model_id, metadata), "executor": "opencode", "configured": True, "authConfigured": _provider_auth(metadata), "source": "opencode-config", "quotaGroup": metadata.get("quotaGroup")})
+        _add(routes, {"hostId": "opencode", "providerId": provider_id, "modelId": model_id, "profileName": profile, "protocol": _config_protocol("opencode", provider_id, model_id, metadata), "executor": "opencode", "configMode": "direct", "configured": True, "authConfigured": _provider_auth(metadata), "source": "opencode-config", "quotaGroup": metadata.get("quotaGroup")})
     top_provider, top_model = _split_model(data.get("model") or data.get("modelId"))
     if top_provider and top_model:
         config = providers.get(top_provider)
@@ -659,6 +780,7 @@ def _scan_providers(repo: Path | str | None, *, offline: bool = False, home: Pat
         value = _read_safe(candidate, diagnostics)
         if isinstance(value, Mapping):
             _codex_cache(value, routes, diagnostics)
+    _claude(paths["claude"], paths["claude-auth"], routes, diagnostics)
     for candidate in paths["opencode"]:
         value = _read_safe(candidate, diagnostics)
         if isinstance(value, Mapping):
@@ -931,6 +1053,128 @@ def _untrusted_probe_fields(route: Mapping[str, Any]) -> bool:
     return any((name := str(key).lower().replace("-", "_")) in blocked or name in SECRET_KEYS or name.replace("_", "") in compact for key in route)
 
 
+
+def _probe_observation(text: str) -> tuple[list[str], bool, list[str]]:
+    roots = []
+    try:
+        roots.append(json.loads(text))
+    except ValueError:
+        for line in text.splitlines():
+            try:
+                roots.append(json.loads(line))
+            except ValueError:
+                pass
+    models: set[str] = set()
+    usage = False
+    reasoning: set[str] = set()
+    def visit(value: Any) -> None:
+        nonlocal usage
+        if isinstance(value, Mapping):
+            model_usage = value.get("modelUsage")
+            if isinstance(model_usage, Mapping):
+                models.update(str(key) for key in model_usage if key)
+                usage = True
+            if isinstance(value.get("usage"), Mapping):
+                usage = True
+            for key in ("model", "model_id", "modelId"):
+                if isinstance(value.get(key), str):
+                    models.add(value[key])
+            for key in ("effort", "reasoning_effort", "reasoningMode"):
+                if isinstance(value.get(key), str):
+                    reasoning.add(value[key])
+            for key, child in value.items():
+                if key not in {"result", "structured_output", "structuredOutput", "item", "part"}:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+    for root in roots:
+        visit(root)
+    return sorted(models), usage, sorted(reasoning)
+
+
+def _codex_probe_mcp_args(repo: Path | None, home: Path, profile: str | None) -> list[str]:
+    paths = [home / ".codex" / "config.toml"]
+    if profile:
+        paths.append(home / ".codex" / f"{profile}.config.toml")
+    if repo is not None:
+        paths.append(repo / ".codex" / "config.toml")
+    names: set[str] = set()
+    for path in paths:
+        value = _read_safe(path)
+        servers = value.get("mcp_servers") if isinstance(value, Mapping) else None
+        if isinstance(servers, Mapping):
+            names.update(str(name) for name in servers)
+    result: list[str] = []
+    for name in sorted(names):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise ValueError("configured MCP server name cannot be safely disabled")
+        result += ["-c", f"mcp_servers.{name}.enabled=false"]
+    return result
+
+
+def _probe_host_route(selected: dict[str, Any], repo: Path | None, home: Path) -> dict[str, Any]:
+    diagnostics: list[dict[str, str]] = []
+    executor = str(selected["executor"])
+    binary = shutil.which(executor)
+    if binary is None:
+        diagnostics.append(_diag("probe-executor-missing", f"{executor} CLI is not installed"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False,
+                "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
+    model = str(selected["modelId"])
+    if executor == "codex":
+        argv = [binary, "exec", "--ephemeral", "--ignore-rules", "--sandbox", "read-only",
+                "--model", model, "--json", "--color", "never", "--disable", "multi_agent",
+                "-c", 'approval_policy="never"', "-c", "mcp_servers={}", "-"]
+        if selected.get("profileName"):
+            argv[2:2] = ["--profile", str(selected["profileName"])]
+        argv[-1:-1] = _codex_probe_mcp_args(repo, home, selected.get("profileName"))
+        if selected.get("variantId"):
+            argv[-1:-1] = ["-c", "model_reasoning_effort=" + json.dumps(selected["variantId"])]
+    elif executor == "claude":
+        argv = [binary, "-p", "--safe-mode", "--no-session-persistence",
+                "--output-format", "json", "--model", model, "--max-turns", "1",
+                "--permission-mode", "dontAsk", "--permission-prompts", "none",
+                "--tools", "", "--disallowedTools", "*"]
+        if selected.get("variantId"):
+            argv += ["--effort", str(selected["variantId"])]
+    else:
+        diagnostics.append(_diag("probe-unsupported", "host-mode probe requires Codex or Claude"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False,
+                "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
+    env = os.environ.copy()
+    if executor == "codex":
+        env["CODEX_HOME"] = str(home / ".codex")
+    else:
+        env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
+    try:
+        completed = subprocess.run(argv, cwd=repo, env=env, input="Reply only OK.",
+                                   text=True, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        diagnostics.append(_diag("probe-unavailable", "host CLI probe did not complete"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False,
+                "status": "unavailable", "reachable": False, "diagnostics": diagnostics}
+    if completed.returncode:
+        diagnostics.append(_diag("probe-rejected", "host CLI rejected the selected route"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False,
+                "status": "rejected", "reachable": True, "diagnostics": diagnostics}
+    models, usage, reasoning = _probe_observation(completed.stdout)
+    exact = model in models
+    alias = model in {"default", "sonnet", "opus", "haiku", "fable"} and any(model in item.casefold() for item in models)
+    if not models or not (exact or alias):
+        diagnostics.append(_diag("probe-model-unconfirmed",
+            "host output did not confirm the requested model"))
+        return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False,
+                "status": "unsupported", "reachable": True, "actualModels": models,
+                "usageComplete": usage, "reasoningEvidence": reasoning,
+                "diagnostics": diagnostics}
+    selected["probed"] = True
+    return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": True,
+            "status": "probed", "reachable": True, "actualModels": models,
+            "usageComplete": usage, "reasoningEvidence": reasoning,
+            "diagnostics": diagnostics}
+
+
 def probe_route(route: Mapping[str, Any], *, repo: Path | str | None = None, home: Path | str | None = None) -> dict[str, Any]:
     if not isinstance(route, Mapping):
         raise ValueError("route must be an object")
@@ -948,6 +1192,8 @@ def probe_route(route: Mapping[str, Any], *, repo: Path | str | None = None, hom
         return {"schemaVersion": SCHEMA_VERSION, "route": selected, "probed": False, "status": "unsupported", "reachable": None, "diagnostics": diagnostics}
     selected = dict(scanned)
     selected["probed"] = False
+    if selected.get("configMode") == "host":
+        return _probe_host_route(selected, repo_path, _home(home))
     protocol = selected["protocol"]
     endpoint, secret = _trusted_bundle(repo_path, _home(home), selected)
     selected["authConfigured"] = bool(secret)

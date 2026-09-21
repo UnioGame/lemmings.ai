@@ -194,7 +194,7 @@ def _validate_bound_routes(role_routes: Mapping[str, list[Mapping[str, Any]]], i
 def _canonical_bound_routes(value: Any, inventory: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
     bound = [item for item in inventory.get("routes", []) if isinstance(item, Mapping)]
     output: dict[str, list[dict[str, Any]]] = {role: [] for role in ROLES}
-    protected = ("executor", "protocol", "profileName", "compatible")
+    protected = ("executor", "protocol", "configMode", "configDigest", "profileName", "compatible")
     for role, items in _raw_role_items(value).items():
         for raw, host_hint in items:
             requested = _route_input(raw, host_hint)

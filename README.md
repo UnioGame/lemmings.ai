@@ -56,9 +56,11 @@ Three repair cycles are a ceiling, not a target, and permit at most four candida
 
 ## Current Release
 
-The current release is **Lemmings 6.0.0**. It adds the schema-v5 `flow` facade for Task and Strict Phase owners. `flow start|advance|submit|replan|finish|status` performs deterministic lifecycle transitions, preserves idempotent dispatch, opens repair from P0-P2 findings, keeps P3 as follow-up, and uses delta review after repair. Low-level commands remain available for diagnostics.
+The current release is **Lemmings 6.1.0**. Runtime routes can delegate provider format and authentication to existing Codex profiles or Claude Code configuration. Codex, Claude Code, OpenCode, and native host routes share the same schema-v5 Task lifecycle; cross-host workers and reviewers always start fresh sessions.
 
-New runtime owners use `invocation-v1` by default. Explicit `host-v1` is accepted only when the brief freezes trusted usage-accounting capability for every executing host, so an unsupported host fails before work starts. Existing v4 artifacts move through explicit digest-confirmed `migrate propose` and `migrate apply`; migration never overwrites the originals or resets budgets and locks.
+Provider discovery stores only sanitized identities and digests. It never rewrites host configuration, copies credentials, requires an env file, or inserts a proxy. Codex supports its configured Responses providers. Claude Code supports its configured Anthropic, Bedrock, Vertex, Foundry, host-managed, and compatible gateway routes. Exact model probes use the host CLI and fail closed on substitution or missing identity evidence.
+
+New runtime owners use `invocation-v1` by default. Explicit `host-v1` is accepted only when the brief freezes trusted usage-accounting capability for every executing host, so an unsupported host fails before work starts. Existing schema-v5 artifacts remain compatible; old frozen direct routes keep their original behavior.
 
 The complete **Discover → Plan → Refine → Implement → Verify** process remains in `SKILL.md` and needs no Python. Missing runtime dependencies trigger one installation offer; installation requires explicit approval, and declining continues in skill-only mode. Inactive hooks return before looking for Python, while an active marker still fails closed when Python is unavailable.
 
@@ -124,6 +126,10 @@ claude plugin install lemmings@unigame-ai
 ```
 
 Restart Claude Code after installation, or use `/reload-plugins` when the install summary offers it. The Claude package exposes `/lemmings:lemmings` and the scoped `lemmings-worker`, `lemmings-reviewer`, and `lemmings-explorer` agents.
+
+### Native provider routes
+
+Runtime model discovery reads provider metadata without storing credentials. Codex routes use `$CODEX_HOME/config.toml` or a named `$CODEX_HOME/<name>.config.toml` profile. Claude Code routes use the provider already selected by its settings and environment. `models scan` is offline; `models probe --route route.json` is the explicit bounded inference check. A Codex manager may dispatch through Claude Code and a Claude manager may dispatch through Codex when the external CLI is installed and compatible. Skill-only work uses the current host directly and needs neither CLI routing nor Python.
 
 ## Using Lemmings
 
@@ -273,7 +279,7 @@ Validation preserves the real exit status and returns bounded diagnostics with a
 
 ## Version and Reference
 
-The package is **6.0.0** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Runtime Task, Phase, and Review remain **schema v5**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
+The package is **6.1.0** across [Unity](package.json), [Python](pyproject.toml), [Codex plugin](.codex-plugin/plugin.json), [Claude Code plugin](.claude-plugin/plugin.json), installer, and runtime metadata. Runtime Task, Phase, and Review remain **schema v5**. Older schemas require explicit replacement. Repository bundles are copies and do not update with the source; use the Git commit for exact identity.
 
 Authoritative details live in:
 

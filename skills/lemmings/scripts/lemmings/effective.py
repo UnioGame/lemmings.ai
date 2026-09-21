@@ -41,7 +41,7 @@ def capture_effective(repo: Path, task: dict, profile: Mapping, *, preset: str |
     selected = resolve_profile(repo, preset, home=home)
     # --profile is the existing explicit project settings file; its manual role pins win.
     manual_roles = {}
-    fields = {"hostId", "providerId", "modelId", "variantId", "executor", "profileName", "protocol", "quotaGroup", "specializations", "compatible", "configured", "catalogued", "authConfigured", "probed", "source"}
+    fields = {"hostId", "providerId", "modelId", "variantId", "executor", "configMode", "configDigest", "profileName", "protocol", "quotaGroup", "specializations", "compatible", "configured", "catalogued", "authConfigured", "probed", "source"}
     for host, roles in (profile.get("modelRoutes") or {}).items():
         for role, chain in roles.items():
             manual_roles.setdefault(role, []).extend([{**{k:v for k,v in r.items() if k in fields}, "hostId":host} for r in chain])

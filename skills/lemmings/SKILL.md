@@ -75,7 +75,7 @@ If the reviewer is unavailable, report Verify as incomplete. Never describe miss
 
 ## Roles, models, and workspaces
 
-Use only manager, worker, reviewer, and explorer. Delegation depth is one. Preserve explicit and existing manual model assignments; otherwise use current-host defaults. A model capacity failure permits one short transport retry or one focused context reduction. Further recovery requires a task-local route decision and a fresh invocation or agent without transferred conversation history.
+Use only manager, worker, reviewer, and explorer. Delegation depth is one. Preserve explicit and existing manual model assignments; otherwise use current-host defaults. On the runtime path, a `configMode: host` route delegates provider format and authentication to the selected Codex or Claude Code configuration; never copy credentials or silently substitute the route. On the skill-only path, use the current host's native provider and delegation controls without scanning or requiring runtime metadata. A model capacity failure permits one short transport retry or one focused context reduction. Further recovery requires a task-local route decision and a fresh invocation or agent without transferred conversation history.
 
 Sequential safe work may use the current checkout. Each concurrent writer owns one isolated worktree. Preserve unrelated changes in dirty worktrees. Reviewers and explorers are read-only. Keep security, sandbox, approval, destructive-action, and repository rules in force on both execution paths.
 

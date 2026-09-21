@@ -31,7 +31,7 @@ def _usage_mapping(record: Mapping[str, Any]) -> tuple[Mapping[str, Any], int | 
         return info["tokens"], _number(info.get("cost"))
     if isinstance(record.get("tokens"), Mapping):
         return record["tokens"], _number(record.get("cost"))
-    return usage or record, _coalesce(_number(record.get("cost")), _number(record.get("reportedCost")))
+    return usage or record, _coalesce(_number(record.get("cost")), _number(record.get("reportedCost")), _number(record.get("costUSD")))
 
 
 def normalize_usage_record(host: str, record: Mapping[str, Any]) -> dict[str, Any]:
@@ -41,7 +41,7 @@ def normalize_usage_record(host: str, record: Mapping[str, Any]) -> dict[str, An
     output_tokens = _first(tokens, "output", "outputTokens", "output_tokens", "completionTokens", "completion_tokens")
     reasoning = _first(tokens, "reasoning", "reasoningTokens", "reasoning_tokens")
     cache_read = _coalesce(_first(cache, "read"), _first(tokens, "cacheReadTokens", "cache_read_tokens", "cacheReadInputTokens"))
-    cache_write = _coalesce(_first(cache, "write"), _first(tokens, "cacheWriteTokens", "cache_write_tokens", "cacheWriteInputTokens"))
+    cache_write = _coalesce(_first(cache, "write"), _first(tokens, "cacheWriteTokens", "cache_write_tokens", "cacheWriteInputTokens", "cacheCreationInputTokens"))
     total = _first(tokens, "total", "totalTokens", "total_tokens")
     exact = any(value is not None for value in (input_tokens, output_tokens, reasoning, cache_read, cache_write, total))
     return {
@@ -66,6 +66,11 @@ def _records(value: Any) -> Iterable[Mapping[str, Any]]:
         return
     if not isinstance(value, Mapping):
         return
+    if isinstance(value.get("modelUsage"), Mapping):
+        for usage in value["modelUsage"].values():
+            if isinstance(usage, Mapping):
+                yield usage
+        return
     if isinstance(value.get("messages"), list):
         yield from _records(value["messages"])
         return
@@ -76,8 +81,8 @@ def _records(value: Any) -> Iterable[Mapping[str, Any]]:
 
 
 def normalize_usage_export(host: str, value: Any) -> dict[str, Any]:
-    if host not in {"codex", "opencode", "kilo"}:
-        raise ValueError("usage host must be codex, opencode, or kilo")
+    if host not in {"codex", "claude", "opencode", "kilo"}:
+        raise ValueError("usage host must be codex, claude, opencode, or kilo")
     normalized = [normalize_usage_record(host, item) for item in _records(value)]
     exact = [item for item in normalized if item["exact"]]
     if not exact:

@@ -1,6 +1,6 @@
 {
   "name": "lemmings",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "description": "Proportional repository orchestration with bounded workers and immutable review evidence",
   "author": {
     "name": "Lemmings Maintainers"
