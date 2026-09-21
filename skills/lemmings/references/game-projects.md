@@ -7,7 +7,7 @@ Use this when the repository contains a game engine project or is large enough t
 - A single sequential writer may work in the current checkout if it has no unrelated uncommitted changes.
 - Each concurrent writer needs its own worktree. Never let two writers or two Editors share one project directory.
 - Prefer a linked worktree (`lemmings workspace create <slug>`). Use `--clone` only when a linked worktree does not work for the project, such as tooling that rejects `.git` files or packages that resolve paths through the primary checkout.
-- Run `lemmings workspace estimate` first. The estimate includes the Unity `Library` that a fresh copy will rebuild. Above 10 GiB (or the configured `largeThresholdGiB`), ask the user before creating anything. If the user declines, work serially in the current checkout.
+- Run `lemmings workspace estimate` first. Without Python, add up the size of the tracked files (`git ls-files` plus a size tool) and the size of Unity `Library`. The estimate includes the Unity `Library` that a fresh copy will rebuild. Above 10 GiB (or the configured `largeThresholdGiB`), ask the user before creating anything. If the user declines, work serially in the current checkout.
 
 ## Unity
 

@@ -47,7 +47,7 @@ Pick the agent for each brief now (see [Agents and models](#agents-and-models)) 
 
 - **Simple**: make the change in the current checkout.
 - **Standard**: implement yourself, or give the brief to one worker agent. The current checkout is fine for a single writer unless it has unrelated uncommitted changes; then create a worktree.
-- **Parallel**: create one worktree per worker, dispatch all workers of the wave, and wait for every one of them before integrating anything.
+- **Parallel**: create one worktree per worker, dispatch all workers of the wave, and wait for every one of them before integrating anything. To create a worktree, use `lemmings workspace create <slug>`, or without the helper `git worktree add -b task/<slug> ../lemmings-worktrees/<slug> <base>`.
 
 Workers get the brief, not the conversation. A worker may ask one focused question when the brief is missing something; answer it and continue. A worker commits on its branch and reports: status, commit, changed paths, check results, and remaining risks. If the report is missing a piece, ask for that piece; never redo finished work just to fix a report.
 
@@ -66,7 +66,7 @@ New branches are named `task/<short-lowercase-slug>`. Reuse a branch the user ex
 
 If a required reviewer is unavailable, report Verify as incomplete. Never present missing evidence as success.
 
-Finish with a short report: what changed, check results, review verdict, and any follow-ups. Remove worktrees you created once their branches are merged.
+Finish with a short report: what changed, check results, review verdict, and any follow-ups. Remove worktrees you created once their branches are merged: use `lemmings workspace remove <slug>`, or `git worktree remove <path>` followed by `git branch -d task/<slug>`. Never force either step.
 
 ## Agents and models
 
@@ -79,13 +79,14 @@ Roles are worker (writes within owned paths), reviewer (read-only), and explorer
 | Codex | `lemmings-codex-worker` (gpt-5.6-luna, high) | `lemmings-codex-worker-strong` (gpt-5.6-terra, high) | `lemmings-codex-reviewer` (gpt-5.6-sol, high) | `lemmings-codex-explorer` (gpt-5.6-luna, medium) |
 | Claude Code | `lemmings-claude-worker` (sonnet) | `lemmings-claude-worker-strong` (opus) | `lemmings-claude-reviewer` (opus) | `lemmings-claude-explorer` (haiku) |
 
-A project may add or override agents in `.agents/lemmings.json` → `agents`. Each agent has a `role`, a `host` and `model`, a `use` text that says what it is good at, and `for`, the manager hosts that may use it. It may also have `default: true` and `escalateTo`, a stronger agent of the same role. Use only agents whose `for` includes your host. `lemmings agents list` prints the effective set.
+A project may add or override agents in `.agents/lemmings.json` → `agents`. Each agent has a `role`, a `host` and `model`, a `use` text that says what it is good at, and `for`, the manager hosts that may use it. It may also have `default: true` and `escalateTo`, a stronger agent of the same role. Use only agents whose `for` includes your host. `lemmings agents list` prints the effective set. Without the helper, read `defaults.json` in this skill and `.agents/lemmings.json` yourself: project agents override shipped ones by name, and `"defaults": false` drops the shipped ones.
 
 **Choosing.** For each brief, pick the agent whose `use` best fits the work; otherwise use the role's default for your host. Name the chosen agent in the brief and in your report. Never swap in a different model silently; if the chosen agent cannot run, say so.
 
 **Running.**
 - If the agent's host is `native`, or is your own host (`codex` inside Codex, `claude` inside Claude Code) and the agent has no Codex `profile`, start the native subagent `lemmings-<name>`. `lemmings agents sync` generates it with the pinned model.
 - Otherwise run `lemmings dispatch --agent <name> --brief <file>`, which starts that host's CLI. If a shipped model is unavailable on your account, report it and ask the user which model to assign; do not fall back silently. See [references/helper.md](references/helper.md).
+- **Without Python:** the shipped agents are already installed as native subagents, either through the plugin's `agents/` directory or through copied agent files, so the default pipeline runs unchanged. A project agent needs its file from `agents sync`; if that file is missing, and for any agent that needs `dispatch`, tell the user and ask which installed agent to use instead.
 
 **Escalation.** Escalate when the current agent cannot finish: it reports blocked, the same check or finding survives two repair rounds without progress, or it keeps failing to run.
 1. Stop the current agent.
@@ -107,6 +108,6 @@ Details: [references/helper.md](references/helper.md). Large game repositories: 
 
 ## Safety
 
-Preserve unrelated changes in a dirty checkout. Never force-push, reset, or clean without the user's explicit request. Ask before creating any workspace estimated above 10 GiB. Security, sandbox, and approval rules of the host always apply.
+Preserve unrelated changes in a dirty checkout. Never force-push, reset, or clean without the user's explicit request. Ask before creating any workspace estimated above 10 GiB. Without the helper, estimate the size of the tracked files plus any engine cache that a new copy rebuilds, such as Unity `Library`. Security, sandbox, and approval rules of the host always apply.
 
 When a repeated process looks like it deserves its own skill, see [references/skill-reuse.md](references/skill-reuse.md).

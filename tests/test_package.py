@@ -47,6 +47,31 @@ class PackageTests(HermeticTest):
             self.assertIn(mode, text)
         self.assertIn("How Auto decides", text)
 
+    def test_skill_has_a_python_free_path_for_every_required_step(self):
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("The skill works without Python", text)
+        for fallback in ("git worktree add -b task/<slug>", "git worktree remove <path>", "git branch -d task/<slug>",
+                         "git diff --name-only <base>..<head>", "read `defaults.json` in this skill",
+                         "**Without Python:**", "Without the helper, estimate"):
+            self.assertIn(fallback, text)
+
+    def test_python_free_install_ships_ready_agents(self):
+        """The Claude plugin and a copied Codex install need no generation step."""
+        sys.path.insert(0, str(SKILL / "scripts"))
+        from lemmings.agents import load_agents
+        shipped = load_agents({})
+        for name, agent in shipped.items():
+            suffix = ".md" if agent["host"] == "claude" else ".toml"
+            path = ROOT / "agents" / f"lemmings-{name}{suffix}"
+            self.assertTrue(path.is_file(), path)
+            self.assertIn(agent["model"], path.read_text(encoding="utf-8"))
+        for manifest in (ROOT / ".claude-plugin" / "plugin.json", ROOT / ".codex-plugin" / "plugin.json"):
+            text = manifest.read_text(encoding="utf-8")
+            self.assertNotIn("hooks", text)
+            self.assertNotIn("python", text.lower())
+        for path in (ROOT / "agents").iterdir():
+            self.assertNotIn("run.py", path.read_text(encoding="utf-8"))
+
     def test_no_hooks_are_shipped(self):
         self.assertFalse((ROOT / "hooks").exists())
 
