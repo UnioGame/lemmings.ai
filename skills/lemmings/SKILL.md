@@ -1,6 +1,6 @@
 ---
 name: lemmings
-description: Deliver a repository change through Discover, Plan, Implement, and Verify, scaling from direct work to an independent reviewer or parallel workers in isolated worktrees. Use for coding tasks that benefit from delegation, independent review, or parallel implementation.
+description: Deliver a repository change through Discover, Plan, Refine, Implement, and Verify, scaling from direct work to an independent reviewer or parallel workers in isolated worktrees. Use for coding tasks that benefit from delegation, independent review, or parallel implementation.
 ---
 
 # Lemmings
@@ -41,9 +41,13 @@ How Auto decides, from the affected scope only (a repository merely having submo
 
 State the chosen mode and the reason in one line before implementing. Auto may escalate later: Simple becomes Standard when hidden risk shows up, and Standard becomes Parallel only before implementation starts. It never downgrades once changes exist. Host limits, such as no worktrees or no subagents, may serialize Parallel work but never remove the required review.
 
-Pick the agent for each brief now (see [Agents and models](#agents-and-models)) and name it in the brief. Split work only at real ownership boundaries. Connected changes stay with one sequential writer. If the plan has a real ambiguity that could change correctness or scope, resolve it now (ask the user or send the brief to a reviewer for a plan check) before anyone writes code.
+Pick the agent for each brief now (see [Agents and models](#agents-and-models)) and name it in the brief. Split work only at real ownership boundaries. Connected changes stay with one sequential writer.
 
-## 3. Implement
+## 3. Refine
+
+Before anyone writes code, remove only the ambiguity that could change correctness, scope, ownership, or validation. Ask the user, or check the code, when a question has a single decisive answer. For a migration, shared contract, or high-risk change, send the brief to a reviewer for a plan review, then fix the brief. Simple work refines in your head; do not add ceremony that cannot change the outcome.
+
+## 4. Implement
 
 - **Simple**: make the change in the current checkout.
 - **Standard**: implement yourself, or give the brief to one worker agent. The current checkout is fine for a single writer unless it has unrelated uncommitted changes; then create a worktree.
@@ -53,7 +57,7 @@ Workers get the brief, not the conversation. A worker may ask one focused questi
 
 New branches are named `task/<short-lowercase-slug>`. Reuse a branch the user explicitly targets.
 
-## 4. Verify
+## 5. Verify
 
 1. Run the checks from the brief, narrowest first. A failing or truncated check is not a pass.
 2. In Standard and Parallel, confirm the writer stayed inside its owned paths (use `lemmings scope` when the helper is available, otherwise `git diff --name-only <base>..<head>`).

@@ -12,22 +12,47 @@ Lemmings 6.5 removes the schema-v5 runtime. That runtime had Task/Phase/Review J
 
 ## How it works
 
+The manager (the agent you talk to) runs every task through five stages. Each stage exists to prevent a specific failure, and each is only as heavy as the task needs.
+
+```mermaid
+flowchart TD
+  U(["You describe the result<br/>and how to check it"]) --> D
+  D["1 · Discover<br/>rules, affected code, checks, risks"] --> P
+  P["2 · Plan<br/>brief · Auto picks the mode · agents"] --> R
+  R["3 · Refine<br/>resolve blocking ambiguity<br/>plan review for risky work"] --> MODE{Mode}
+  MODE -->|Simple| S["4 · Implement<br/>manager edits directly"]
+  MODE -->|Standard| W["4 · Implement<br/>one worker agent"]
+  MODE -->|Parallel| PW["4 · Implement<br/>one worker per worktree<br/>wait for the whole wave"]
+  S --> C["5 · Verify<br/>run the checks"]
+  W --> V["5 · Verify<br/>checks, scope, independent review<br/>(loop below)"]
+  PW --> V
+  V --> INT["Integrate<br/>merge one branch at a time<br/>re-run checks on the result"]
+  C --> REP(["Report: changes, checks,<br/>verdict, follow-ups"])
+  INT --> REP
+```
+
+Verify, repair, and escalation for each writer in Standard and Parallel modes:
+
 ```mermaid
 flowchart LR
-  A[Discover] --> B[Plan: brief + mode]
-  B --> C{Mode}
-  C -->|Simple| D[Manager implements]
-  C -->|Standard| E[One writer]
-  C -->|Parallel| F[Workers in separate worktrees]
-  D --> G[Checks]
-  E --> G
-  F --> G
-  G --> H{Review needed?}
-  H -->|Standard / Parallel| I[Independent reviewer]
-  H -->|Simple| J[Report]
-  I -->|ChangesRequested, max 2 repairs| E
-  I -->|Accepted| J
+  CAND["Candidate<br/>base..head"] --> CHK["Checks + scope"]
+  CHK --> REV{"Reviewer<br/>P0–P2 block<br/>P3 = follow-up"}
+  REV -->|Accepted| OK(["To integration"])
+  REV -->|ChangesRequested| FIX["Same writer fixes<br/>blocking findings only"]
+  FIX -->|"≤ 2 rounds, progress"| CHK
+  FIX -->|stuck| ESC{"escalateTo?"}
+  ESC -->|yes| NEW["Stronger agent, fresh session<br/>same worktree + handoff"]
+  NEW --> CHK
+  ESC -->|no| BLK(["Report blocker"])
 ```
+
+| Stage | What the manager does | What it prevents |
+| --- | --- | --- |
+| **1. Discover** | Reads repository rules (`AGENTS.md`, `CLAUDE.md`) and engine rules, finds the affected code, available checks, and material risks. Sends an explorer only for a named question. | Changing the wrong thing, or missing how it is validated. |
+| **2. Plan** | Writes the brief (goal, acceptance, owned paths, checks, risks, context). Auto chooses the mode. Picks an agent for each brief and splits work only at real ownership boundaries. | Vague tasks, overlapping writers, and too much or too little process. |
+| **3. Refine** | Removes only the ambiguity that could change correctness, scope, ownership, or validation, by asking the user or checking the code. Migrations, shared contracts, and high-risk work get a reviewer's plan review first. | Building the wrong solution confidently. |
+| **4. Implement** | Simple: the manager edits directly. Standard: one worker agent. Parallel: one worker per worktree on `task/<slug>`, with the whole wave finished before integration. Workers get the brief, not the conversation, and commit plus report. | Context overload and writers interfering with each other. |
+| **5. Verify** | Runs the checks (a failing or truncated check is not a pass) and confirms owned paths. An independent reviewer checks the commit range: P0–P2 findings block, P3 are follow-ups. Repairs address blocking findings only, with at most 2 rounds per agent, then escalation or a blocker report. Parallel merges accepted branches one at a time and rechecks. | Unverified success, endless polishing, and silent failures. |
 
 | Mode | Use it for | Process |
 | --- | --- | --- |
@@ -36,7 +61,7 @@ flowchart LR
 | **Standard** | Medium risk, a public contract, or wider validation | One writer, then one independent read-only reviewer. |
 | **Parallel** | Independent pieces with separate owned paths | One worker per worktree, a complete wave, review of each piece, and checks on the merged result. |
 
-The reviewer blocks only on P0–P2 findings, each with a concrete failure scenario. P3 findings are follow-ups. A task gets at most two repair rounds before the manager reports the blocker.
+The reviewer blocks only on P0–P2 findings, each with a concrete failure scenario. P3 findings are follow-ups. Each writer gets at most two repair rounds; then the manager escalates to the agent's `escalateTo` agent or reports the blocker.
 
 ### Tasks and assignment
 

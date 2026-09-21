@@ -41,6 +41,14 @@ class PackageTests(HermeticTest):
         self.assertRegex(text, r"^---\nname: lemmings\ndescription: .+\n---\n")
         self.assertLess(len(text.splitlines()), 150)
 
+    def test_five_stages_are_documented(self):
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for number, stage in enumerate(("Discover", "Plan", "Refine", "Implement", "Verify"), 1):
+            self.assertRegex(skill, rf"## {number}\. {stage}")
+            self.assertIn(f"**{number}. {stage}**", readme)
+        self.assertIn("```mermaid", readme)
+
     def test_auto_is_the_default_mode(self):
         text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         for mode in ("**Auto** (default)", "**Simple**", "**Standard**", "**Parallel**"):
