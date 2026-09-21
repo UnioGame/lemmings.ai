@@ -20,10 +20,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from .agents import ROLES, default_agent, load_agents, native_name
 from .gitutil import HelperError, load_config, state_dir, toplevel
 
 HOSTS = ("native", "codex", "claude", "opencode")
-ROLES = ("worker", "reviewer", "explorer")
 READ_ONLY = {"reviewer", "explorer"}
 MAX_OUTPUT = 16 * 1024 * 1024
 DEFAULT_TIMEOUT = 1800
@@ -44,20 +44,36 @@ PREAMBLE = {
 }
 
 
-def route_chain(config: Mapping[str, Any], role: str, override: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """The configured route for a role followed by its explicit fallbacks."""
-    configured = dict(((config.get("roles") or {}).get(role)) or {"host": "native"})
-    fallback = [dict(item) for item in configured.pop("fallback", []) or [] if isinstance(item, Mapping)]
+def resolve_agent(config: Mapping[str, Any], role: str | None, name: str | None) -> dict[str, Any]:
+    """A named agent, or the default agent for the role."""
+    agents = load_agents(config)
+    if name:
+        if name not in agents:
+            raise HelperError(f"unknown agent {name}; configured: {', '.join(agents) or 'none'}")
+        agent = dict(agents[name])
+        if role and agent["role"] != role:
+            raise HelperError(f"agent {name} is a {agent['role']}, not a {role}")
+        return agent
+    if role not in ROLES:
+        raise HelperError(f"role must be one of {', '.join(ROLES)}")
+    return default_agent(agents, role)
+
+
+def route_chain(agent: Mapping[str, Any], override: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The agent's route followed by its transport fallbacks; command-line overrides disable fallback."""
+    keys = ("host", "model", "effort", "profile")
+    configured = {key: agent[key] for key in keys if agent.get(key)}
     if override.get("host") and override["host"] != configured.get("host"):
         configured = {"host": override["host"]}
     primary = {**configured, **{key: value for key, value in override.items() if value}}
+    fallback = [dict(item) for item in agent.get("fallback") or []]
     chain = [primary] + ([] if override.get("host") or override.get("model") else fallback)
     for route in chain:
         if route.get("host") not in HOSTS:
-            raise HelperError(f"unknown host for {role}: {route.get('host')!r}; use one of {', '.join(HOSTS)}")
+            raise HelperError(f"unknown host {route.get('host')!r}; use one of {', '.join(HOSTS)}")
         for key in ("model", "effort", "profile"):
             if str(route.get(key) or "").startswith("-"):
-                raise HelperError(f"invalid {key} for {role}")
+                raise HelperError(f"invalid {key}")
         if route["host"] == "opencode" and route.get("model") and "/" not in route["model"]:
             raise HelperError("OpenCode models use provider/model")
     return chain
@@ -275,22 +291,23 @@ def _run_process(argv: list[str], env: Mapping[str, str], cwd: Path, stdin: str,
     return process.returncode, timed_out
 
 
-def dispatch(repo: Path, role: str, brief: str, *, cwd: Path | None = None, host: str | None = None,
-             model: str | None = None, effort: str | None = None, timeout: int = DEFAULT_TIMEOUT,
-             dry_run: bool = False) -> dict[str, Any]:
-    if role not in ROLES:
-        raise HelperError(f"role must be one of {', '.join(ROLES)}")
+def dispatch(repo: Path, role: str | None, brief: str, *, agent: str | None = None, cwd: Path | None = None,
+             host: str | None = None, model: str | None = None, effort: str | None = None,
+             timeout: int = DEFAULT_TIMEOUT, dry_run: bool = False) -> dict[str, Any]:
     repo = toplevel(repo)
     cwd = (cwd or repo).resolve()
-    chain = route_chain(load_config(repo), role, {"host": host, "model": model, "effort": effort})
+    selected = resolve_agent(load_config(repo), role, agent)
+    role = selected["role"]
+    chain = route_chain(selected, {"host": host, "model": model, "effort": effort})
     if chain[0]["host"] == "native":
-        return {"ok": False, "status": "native", "role": role,
-                "message": "role is configured as native; use this host's lemmings-" + role + " subagent"}
+        subagent = f"lemmings-{role}" if selected["name"] in ROLES else native_name(selected)
+        return {"ok": False, "status": "native", "role": role, "agent": selected["name"], "nativeSubagent": subagent,
+                "message": f"agent runs natively; start this host's {subagent} subagent"}
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     if dry_run:
         run_dir = Path(tempfile.mkdtemp(prefix="lemmings-dry-run-"))
     else:
-        run_dir = state_dir(repo) / "runs" / f"{stamp}-{role}-{uuid.uuid4().hex[:6]}"
+        run_dir = state_dir(repo) / "runs" / f"{stamp}-{role}-{selected['name']}-{uuid.uuid4().hex[:6]}"
         run_dir.mkdir(parents=True)
     prompt = PREAMBLE[role] + "\n\n" + brief.strip() + "\n"
     (run_dir / "brief.md").write_text(prompt, encoding="utf-8")
@@ -324,16 +341,16 @@ def dispatch(repo: Path, role: str, brief: str, *, cwd: Path | None = None, host
         confirmed = model_confirmed(route.get("model"), parsed["observedModels"])
         result = {"ok": confirmed is not False and bool(parsed["report"]),
                   "status": "model-mismatch" if confirmed is False else ("completed" if parsed["report"] else "empty-report"),
-                  "role": role, "host": route["host"], "requestedModel": route.get("model"),
+                  "role": role, "agent": selected["name"], "host": route["host"], "requestedModel": route.get("model"),
                   "observedModels": parsed["observedModels"], "modelConfirmed": confirmed,
                   "fallbackUsed": index > 0, "verdict": parsed["verdict"], "usage": parsed["usage"],
                   "elapsedSeconds": attempt["elapsedSeconds"], "report": parsed["report"], "error": parsed["error"]}
         # A wrong model is a routing error, not a transport failure: never silently fall back.
         break
     if dry_run:
-        result = {"ok": True, "status": "dry-run", "role": role}
+        result = {"ok": True, "status": "dry-run", "role": role, "agent": selected["name"]}
     elif not result:
-        result = {"ok": False, "status": "failed", "role": role,
+        result = {"ok": False, "status": "failed", "role": role, "agent": selected["name"],
                   "message": "; ".join(item.get("error", "") for item in attempts) or "no runnable route"}
     result["runDir"] = str(run_dir)
     result["attempts"] = attempts

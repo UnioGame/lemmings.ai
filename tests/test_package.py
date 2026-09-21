@@ -50,4 +50,4 @@ class PackageTests(HermeticTest):
                                  capture_output=True, text=True, encoding="utf-8")
         result = json.loads(process.stdout)
         self.assertEqual("6.5.0", result["version"])
-        self.assertEqual({"worker", "reviewer", "explorer"}, set(result["roles"]))
+        self.assertEqual({"worker", "reviewer", "explorer"}, {row["role"] for row in result["agents"]})

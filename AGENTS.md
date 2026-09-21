@@ -9,7 +9,7 @@
 
 - `skills/lemmings/SKILL.md` owns the entire workflow. Keep it complete and short (under 150 lines). The skill must work without Python.
 - `skills/lemmings/references/` holds details that are needed only for specific operations: the helper, game projects, and skill reuse.
-- `agents/*.md` are the role definitions. `agents/*.toml` are generated from them by `scripts/build_agents.py`; never edit the TOML files by hand.
+- `skills/lemmings/roles/*.md` are the role prompts. `agents/*` (the default Claude and Codex agents) are generated from them by `scripts/build_agents.py`, and per-agent native files by `lemmings agents sync`. Never edit generated files by hand.
 - `packages/lemmings-telemetry/` is optional. The skill and helper must never import it.
 
 ## Design rules

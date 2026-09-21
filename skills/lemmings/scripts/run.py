@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # keep the installed skill directory free of __pycache__
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lemmings.cli import main  # noqa: E402

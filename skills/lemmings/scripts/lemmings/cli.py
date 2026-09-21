@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, dispatch, scope, workspace
+from . import __version__, agents, dispatch, scope, workspace
 from .gitutil import CONFIG_PATH, HelperError, git, load_config, toplevel
 
 
@@ -30,19 +30,24 @@ def doctor(repo: Path) -> dict[str, Any]:
     repo = toplevel(repo)
     config = load_config(repo)
     hosts = {name: _version([name, "--version"]) for name in ("codex", "claude", "opencode")}
-    roles = {}
-    for role in dispatch.ROLES:
-        try:
-            chain = dispatch.route_chain(config, role, {})
-        except HelperError as error:
-            roles[role] = {"error": str(error)}
-            continue
-        missing = [route["host"] for route in chain if route["host"] != "native" and not hosts.get(route["host"])]
-        roles[role] = {"routes": chain, "missingHosts": missing}
-    return {"ok": all(not item.get("missingHosts") and "error" not in item for item in roles.values()),
-            "version": __version__, "python": sys.version.split()[0],
-            "git": git(repo, "--version").stdout.strip(), "repo": str(repo),
-            "config": CONFIG_PATH if (repo / CONFIG_PATH).is_file() else None, "hosts": hosts, "roles": roles}
+    result: dict[str, Any] = {"version": __version__, "python": sys.version.split()[0],
+                              "git": git(repo, "--version").stdout.strip(), "repo": str(repo),
+                              "config": CONFIG_PATH if (repo / CONFIG_PATH).is_file() else None, "hosts": hosts}
+    try:
+        configured = agents.load_agents(config)
+    except HelperError as error:
+        return {"ok": False, **result, "error": str(error)}
+    rows = agents.describe(configured)
+    problems = []
+    for row in rows:
+        needed = [row["host"], *[item["host"] for item in configured.get(row["name"], {}).get("fallback") or []]]
+        missing = [host for host in needed if host != "native" and not hosts.get(host)]
+        if missing:
+            problems.append(f"agent {row['name']} needs {', '.join(missing)} on PATH")
+    stale = agents.sync(repo, configured, check=True)["stale"]
+    if stale:
+        problems.append("native agent definitions are out of date; run `agents sync`")
+    return {"ok": not problems, **result, "agents": rows, "problems": problems}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,6 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("slug")
     remove.add_argument("--keep-branch", action="store_true")
 
+    team = commands.add_parser("agents", help="named workers, reviewers, and explorers").add_subparsers(dest="action", required=True)
+    team.add_parser("list", parents=[common], help="agents, defaults, escalation chains, and native subagent names")
+    sync = team.add_parser("sync", parents=[common], help="write native Codex/Claude subagent files for configured agents")
+    sync.add_argument("--check", action="store_true", help="only report files that are out of date")
+
     check = commands.add_parser("scope", parents=[common], help="check changed paths against owned/forbidden rules")
     check.add_argument("--base", required=True)
     check.add_argument("--head", default="HEAD")
@@ -74,7 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--forbidden", nargs="*", default=[])
 
     run = commands.add_parser("dispatch", parents=[common], help="run a worker, reviewer, or explorer on another host CLI")
-    run.add_argument("role", choices=dispatch.ROLES)
+    run.add_argument("role", nargs="?", choices=agents.ROLES, help="use the role's default agent")
+    run.add_argument("--agent", help="a named agent from .agents/lemmings.json")
     run.add_argument("--brief", required=True, help="Markdown brief file, or - for stdin")
     run.add_argument("--cwd", help="checkout the role works in (default: --repo)")
     run.add_argument("--host", choices=dispatch.HOSTS[1:])
@@ -99,13 +110,22 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if args.action == "list":
             return {"ok": True, "workspaces": workspace.list_workspaces(repo)}
         return {"ok": True, **workspace.remove(repo, args.slug, keep_branch=args.keep_branch)}
+    if args.command == "agents":
+        root = toplevel(repo)
+        configured = agents.load_agents(load_config(root))
+        if args.action == "list":
+            return {"ok": True, "agents": agents.describe(configured)}
+        outcome = agents.sync(root, configured, check=args.check)
+        return {"ok": not outcome["stale"], **outcome}
     if args.command == "scope":
         root = toplevel(repo)
         paths = scope.changed_paths(root, args.base, args.head, worktree=args.worktree)
         violations = scope.check_scope(paths, args.owned, args.forbidden)
         return {"ok": not violations, "changedPaths": paths, "violations": violations}
     brief = sys.stdin.read() if args.brief == "-" else Path(args.brief).read_text(encoding="utf-8-sig")
-    return dispatch.dispatch(repo, args.role, brief, cwd=Path(args.cwd) if args.cwd else None, host=args.host,
+    if not args.role and not args.agent:
+        raise HelperError("dispatch needs a role or --agent")
+    return dispatch.dispatch(repo, args.role, brief, agent=args.agent, cwd=Path(args.cwd) if args.cwd else None, host=args.host,
                              model=args.model, effort=args.effort, timeout=args.timeout, dry_run=args.dry_run)
 
 

@@ -57,7 +57,7 @@ The manager assigns a brief to a role:
 - **Standard**: one `lemmings-worker` (or the manager) implements, then a separate `lemmings-reviewer` gets the brief and the commit range `<base>..<head>`.
 - **Parallel**: each worker gets its own brief, its own branch `task/<slug>`, and its own worktree.
 
-Which host and model run a role comes from `.agents/lemmings.json` (see [Cross-host routing](#cross-host-routing)). Workers get the brief, not the conversation. They commit on their branch and report the status, commit, changed paths, check results, and risks. Reviewers answer `VERDICT: Accepted` or `VERDICT: ChangesRequested` with findings.
+Which agent (host and model) runs a brief comes from `.agents/lemmings.json` (see [Agents, models, and escalation](#agents-models-and-escalation)). Workers get the brief, not the conversation. They commit on their branch and report the status, commit, changed paths, check results, and risks. Reviewers answer `VERDICT: Accepted` or `VERDICT: ChangesRequested` with findings.
 
 State lives in the conversation and in Git: `task/*` branches and commits, the workspace registry in `<git-common-dir>/lemmings/workspaces.json`, and dispatch logs in `<git-common-dir>/lemmings/runs/`. Work that must survive a session gets one note, `.lemmings/<slug>.md`, with the brief, the current stage, the verdict, and the blockers. There is no task queue, status machine, or automatic resume.
 
@@ -109,27 +109,37 @@ Optional helper commands:
 
 ```text
 python .agents/skills/lemmings/scripts/run.py doctor
+python .agents/skills/lemmings/scripts/run.py agents list
 python .agents/skills/lemmings/scripts/run.py workspace create <slug>
 python .agents/skills/lemmings/scripts/run.py scope --base <sha> --owned src/feature
-python .agents/skills/lemmings/scripts/run.py dispatch reviewer --brief brief.md --host claude --model opus
+python .agents/skills/lemmings/scripts/run.py dispatch --agent opus --brief brief.md
 ```
 
 See [references/helper.md](skills/lemmings/references/helper.md) for details.
 
-## Cross-host routing
+## Agents, models, and escalation
 
-By default, each role runs as a native subagent of the host you are working in, using that host's default model. To run a role elsewhere, for example Claude reviewing work managed in Codex, assign it in `.agents/lemmings.json`:
+You can define several named agents per role in `.agents/lemmings.json`, each with its own host and model, a `use` note that says what it is good at, and an optional `escalateTo` agent that takes over when it fails:
 
 ```json
 {
-  "roles": {
-    "reviewer": {"host": "claude", "model": "opus", "effort": "high",
-                 "fallback": [{"host": "codex", "model": "gpt-5.6-sol"}]}
+  "agents": {
+    "deepseek": {"role": "worker", "host": "codex", "profile": "byteplus", "model": "deepseek-v4-pro-260425",
+                 "use": "Routine, well-specified implementation", "default": true, "escalateTo": "luna-max"},
+    "luna-max": {"role": "worker", "host": "codex", "model": "gpt-5.6-luna", "effort": "max",
+                 "use": "Hard or cross-cutting changes; takes over when a cheaper worker fails"},
+    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-5.6-sol", "effort": "high", "default": true},
+    "opus":     {"role": "reviewer", "host": "claude", "model": "opus", "use": "Security and concurrency risks"}
   }
 }
 ```
 
-`lemmings dispatch` starts a fresh session of the target CLI (`codex exec`, `claude -p`, or `opencode run`) with that CLI's own login and configuration. It enforces read-only access for reviewers and explorers and applies a deadline. It records the run under `<git-common-dir>/lemmings/runs/` and checks which model actually answered. A model mismatch is reported as an error. Fallback routes are used only when a CLI is missing, fails, or times out.
+- **Choosing.** For each brief, the manager picks the agent whose `use` fits the work, or the role's `default`, and names it in the brief and in the report. Reviewers work the same way: the default reviewer, plus any reviewer whose `use` matches a material risk.
+- **Escalation.** When an agent reports blocked, fails to resolve the same check or finding after two repair rounds, or keeps failing to run, the manager stops it. The `escalateTo` agent then gets a fresh session in the same worktree, with the brief and a short handoff (HEAD, what was tried, failing checks, open findings). Every escalation is reported, and the task stops with a blocker when the chain ends. In the example, if `deepseek` cannot finish, `luna-max` takes over.
+- **Pinned models for native subagents.** `lemmings agents sync` writes `.codex/agents/lemmings-<name>.toml` (with `model` and `model_reasoning_effort`) and `.claude/agents/lemmings-<name>.md` (with `model`) for agents that run on the manager's own host. The installer runs it, and `doctor` warns when the files are out of date.
+- **Other hosts.** An agent on another host, or a Codex agent with a `profile`, runs through `lemmings dispatch --agent <name>`. It starts a fresh `codex exec`, `claude -p`, or `opencode run` session with that CLI's own login. Reviewers and explorers are read-only, and every run has a deadline and is recorded under `<git-common-dir>/lemmings/runs/`. The helper checks which model actually answered and reports a mismatch as an error. The per-agent `fallback` routes are only a transport retry, used when a CLI is missing, fails, or times out.
+
+`lemmings agents list` shows every agent, its default flag, and its escalation chain. Full reference: [references/helper.md](skills/lemmings/references/helper.md#agents).
 
 ## Game projects
 
@@ -158,7 +168,7 @@ When every role is native, this package currently has nothing to report. Parsing
 
 ```text
 python -m pytest -q
-python scripts/build_agents.py        # regenerate agents/*.toml from agents/*.md
+python scripts/build_agents.py        # regenerate agents/* from skills/lemmings/roles/*.md
 ```
 
 Release notes: [Documentation~/releases](Documentation~/releases/).

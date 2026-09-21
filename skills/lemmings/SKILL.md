@@ -33,12 +33,12 @@ Choose the lightest mode that is safe. Honor a mode the user names. You may esca
 | **Standard** | Medium risk, a public contract, broad validation, or the user wants review | One writer (you or a worker), then one independent reviewer. |
 | **Parallel** | Independent pieces with non-overlapping owned paths that are worth doing concurrently | One worker per piece, each in its own worktree; review each; integrate; run the checks on the merged result. |
 
-Split work only at real ownership boundaries. Connected changes stay with one sequential writer. If the plan has a real ambiguity that could change correctness or scope, resolve it now (ask the user or send the brief to a reviewer for a plan check) before anyone writes code.
+Pick the agent for each brief now (see [Agents and models](#agents-and-models)) and name it in the brief. Split work only at real ownership boundaries. Connected changes stay with one sequential writer. If the plan has a real ambiguity that could change correctness or scope, resolve it now (ask the user or send the brief to a reviewer for a plan check) before anyone writes code.
 
 ## 3. Implement
 
 - **Simple**: make the change in the current checkout.
-- **Standard**: implement yourself, or give the brief to one `lemmings-worker`. The current checkout is fine for a single writer unless it has unrelated uncommitted changes; then create a worktree.
+- **Standard**: implement yourself, or give the brief to one worker agent. The current checkout is fine for a single writer unless it has unrelated uncommitted changes; then create a worktree.
 - **Parallel**: create one worktree per worker, dispatch all workers of the wave, and wait for every one of them before integrating anything.
 
 Workers get the brief, not the conversation. A worker may ask one focused question when the brief is missing something; answer it and continue. A worker commits on its branch and reports: status, commit, changed paths, check results, and remaining risks. If the report is missing a piece, ask for that piece; never redo finished work just to fix a report.
@@ -49,11 +49,11 @@ New branches are named `task/<short-lowercase-slug>`. Reuse a branch the user ex
 
 1. Run the checks from the brief, narrowest first. A failing or truncated check is not a pass.
 2. In Standard and Parallel, confirm the writer stayed inside its owned paths (use `lemmings scope` when the helper is available, otherwise `git diff --name-only <base>..<head>`).
-3. In Standard and Parallel, send the brief plus the candidate range (`<base>..<head>`) to a separate `lemmings-reviewer`. Do not replace the review with your own opinion, and do not change the candidate while it is under review.
+3. In Standard and Parallel, send the brief plus the candidate range (`<base>..<head>`) to a separate reviewer agent: the default reviewer, plus any other reviewer whose `use` matches a material risk (for example security). Every chosen reviewer's P0–P2 findings block. Do not replace the review with your own opinion, and do not change the candidate while it is under review.
 4. The reviewer returns `Accepted` or `ChangesRequested`:
    - P0–P2 findings block. Each names a concrete failure scenario (unmet criterion, failed check, correctness, security, data loss, or real regression) with evidence.
    - P3 findings are follow-ups. They never block acceptance and never trigger a repair.
-5. On `ChangesRequested`, send only the blocking findings back to the writer. The re-review checks those findings and the new delta, not the whole change again. At most **2 repair rounds**; if the same problem persists, stop and report the blocker or re-plan with the user.
+5. On `ChangesRequested`, send only the blocking findings back to the writer. The re-review checks those findings and the new delta, not the whole change again. Each writer gets at most **2 repair rounds**; after that, escalate (below) or, when no escalation is left, stop and report the blocker or re-plan with the user.
 6. In Parallel, merge the accepted branches one at a time and run the checks on the merged result.
 
 If a required reviewer is unavailable, report Verify as incomplete. Never present missing evidence as success.
@@ -62,9 +62,22 @@ Finish with a short report: what changed, check results, review verdict, and any
 
 ## Agents and models
 
-Roles are `lemmings-worker` (writes within owned paths), `lemmings-reviewer` (read-only), and `lemmings-explorer` (read-only). Agents never delegate further.
+Roles are worker (writes within owned paths), reviewer (read-only), and explorer (read-only). Agents never delegate further.
 
-By default every role runs as a native subagent of the current host with the host's default model. Keep any model the user or `.agents/lemmings.json` assigns; never substitute one silently. To run a role on a different host or provider (for example a Claude reviewer while you run in Codex), use `lemmings dispatch`; see [references/helper.md](references/helper.md).
+**Which agents exist.** `.agents/lemmings.json` → `agents` may define several named agents per role. Each one has a `host` and `model`, a `use` text that says what it is good at, optionally `default: true`, and optionally `escalateTo`, which names a stronger agent of the same role. `lemmings agents list` prints them. Without that file, each role has one native agent (`lemmings-worker`, `lemmings-reviewer`, `lemmings-explorer`) on the current host's default model.
+
+**Choosing.** For each brief, pick the agent whose `use` best fits the work; otherwise use the role's default. Name the chosen agent in the brief and in your report. Never swap in a different model silently; if the chosen agent cannot run, say so.
+
+**Running.**
+- If the agent's host is `native`, or is your own host (`codex` inside Codex, `claude` inside Claude Code) and the agent has no Codex `profile`, start the native subagent `lemmings-<name>`. `lemmings agents sync` generates it with the pinned model.
+- Otherwise run `lemmings dispatch --agent <name> --brief <file>`, which starts that host's CLI. See [references/helper.md](references/helper.md).
+
+**Escalation.** Escalate when the current agent cannot finish: it reports blocked, the same check or finding survives two repair rounds without progress, or it keeps failing to run.
+1. Stop the current agent.
+2. Give its `escalateTo` agent a fresh session in the same worktree and branch. Send the brief plus a short handoff: HEAD, what was tried, the failing checks, and the open findings. Never send the previous agent's transcript.
+3. The new agent gets its own two repair rounds.
+4. Escalate a reviewer the same way when it cannot deliver a verdict.
+5. Report every escalation. When the chain ends, stop and report the blocker.
 
 ## Optional helper
 

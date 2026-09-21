@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 VERSION = "6.5.0"
-AGENTS = ("lemmings-worker.toml", "lemmings-reviewer.toml", "lemmings-explorer.toml")
+ROLES = ("worker", "reviewer", "explorer")
 RETIRED_AGENTS = ("lemmings-orchestrator.toml", "lemmings-validator.toml", "lemmings-summarizer.toml")
 
 
@@ -25,7 +25,9 @@ def plan(package_root: Path, repo: Path) -> list[tuple[Path | None, Path]]:
     """(source, target) pairs; a None source removes a retired file."""
     skill = package_root / "skills" / "lemmings"
     items: list[tuple[Path | None, Path]] = [(skill, repo / ".agents/skills/lemmings")]
-    items += [(package_root / "agents" / name, repo / ".codex/agents" / name) for name in AGENTS]
+    for role in ROLES:
+        items.append((package_root / "agents" / f"lemmings-{role}.toml", repo / ".codex/agents" / f"lemmings-{role}.toml"))
+        items.append((package_root / "agents" / f"lemmings-{role}.md", repo / ".claude/agents" / f"lemmings-{role}.md"))
     items += [(None, repo / ".codex/agents" / name) for name in RETIRED_AGENTS if (repo / ".codex/agents" / name).exists()]
     return items
 
@@ -93,6 +95,15 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, shutil.Error) as error:
         print(f"Lemmings install failed and was rolled back: {error}", file=sys.stderr)
         return 1
+    if not args.dry_run:
+        # Named agents from .agents/lemmings.json become native Codex/Claude subagents.
+        helper = repo / ".agents/skills/lemmings/scripts/run.py"
+        synced = subprocess.run([sys.executable, str(helper), "agents", "sync", "--repo", str(repo)],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+        if synced.returncode:
+            print(f"Lemmings installed, but `agents sync` failed: {synced.stdout.strip() or synced.stderr.strip()}",
+                  file=sys.stderr)
+            return 1
     print(f"Lemmings {VERSION} {'install dry run complete' if args.dry_run else 'installed'} in {repo}")
     return 0
 

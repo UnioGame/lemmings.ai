@@ -29,8 +29,10 @@ class DispatchTests(HermeticTest):
         os.environ["FAKE_LOG"] = str(self.tmp / "calls.jsonl")
 
     def configure(self, roles):
+        """One agent per role, named after its role with an -x suffix."""
+        agents = {f"{role}-x": {"role": role, **route} for role, route in roles.items()}
         (self.repo / ".agents").mkdir(exist_ok=True)
-        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"roles": roles}), encoding="utf-8")
+        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"agents": agents}), encoding="utf-8")
 
     def calls(self):
         path = self.tmp / "calls.jsonl"
@@ -105,9 +107,29 @@ class DispatchTests(HermeticTest):
         self.assertLess(result["attempts"][0]["elapsedSeconds"], 20)
 
     def test_command_line_override_replaces_the_configured_route(self):
-        self.configure({"reviewer": {"host": "claude", "model": "opus", "fallback": [{"host": "opencode"}]}})
-        chain = dispatch.route_chain(dispatch.load_config(self.repo), "reviewer", {"host": "codex", "model": None, "effort": None})
-        self.assertEqual([{"host": "codex"}], chain)
+        agent = {"name": "r", "role": "reviewer", "host": "claude", "model": "opus", "fallback": [{"host": "opencode"}]}
+        self.assertEqual([{"host": "codex"}], dispatch.route_chain(agent, {"host": "codex"}))
+        self.assertEqual(2, len(dispatch.route_chain(agent, {})))
+
+    def test_named_agent_is_dispatched_and_recorded(self):
+        (self.repo / ".agents").mkdir()
+        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"agents": {
+            "cheap": {"role": "worker", "host": "codex", "model": "deepseek", "default": True, "escalateTo": "strong"},
+            "strong": {"role": "worker", "host": "claude", "model": "opus"}}}), encoding="utf-8")
+        result = dispatch.dispatch(self.repo, None, "Goal: x", agent="strong")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(("strong", "claude"), (result["agent"], result["host"]))
+        self.assertIn("-worker-strong-", Path(result["runDir"]).name)
+        self.assertEqual("cheap", dispatch.dispatch(self.repo, "worker", "Goal: x", dry_run=True)["agent"])
+        with self.assertRaisesRegex(HelperError, "not a reviewer"):
+            dispatch.dispatch(self.repo, "reviewer", "Goal: x", agent="strong")
+
+    def test_native_named_agent_points_to_its_subagent(self):
+        (self.repo / ".agents").mkdir()
+        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"agents": {
+            "scout": {"role": "explorer", "host": "native", "use": "questions"}}}), encoding="utf-8")
+        result = dispatch.dispatch(self.repo, "explorer", "Question")
+        self.assertEqual(("native", "lemmings-scout"), (result["status"], result["nativeSubagent"]))
 
     def test_dry_run_does_not_execute_or_log(self):
         self.configure({"reviewer": {"host": "codex"}})
@@ -116,13 +138,9 @@ class DispatchTests(HermeticTest):
         self.assertEqual([], self.calls())
         self.assertFalse((self.repo / ".git" / "lemmings" / "runs").exists())
 
-    def test_invalid_routes(self):
+    def test_invalid_override(self):
         with self.assertRaises(HelperError):
-            dispatch.route_chain({"roles": {"worker": {"host": "gemini"}}}, "worker", {})
-        with self.assertRaises(HelperError):
-            dispatch.route_chain({"roles": {"worker": {"host": "codex", "model": "--yolo"}}}, "worker", {})
-        with self.assertRaises(HelperError):
-            dispatch.route_chain({"roles": {"worker": {"host": "opencode", "model": "no-provider"}}}, "worker", {})
+            dispatch.route_chain({"name": "w", "role": "worker", "host": "codex"}, {"model": "--yolo"})
 
     def test_model_confirmation(self):
         self.assertTrue(dispatch.model_confirmed("opus", ["claude-opus-5"]))
