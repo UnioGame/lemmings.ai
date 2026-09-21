@@ -85,7 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = commands.add_parser("dispatch", parents=[common], help="run a worker, reviewer, or explorer on another host CLI")
     run.add_argument("role", nargs="?", choices=agents.ROLES, help="use the role's default agent")
-    run.add_argument("--agent", help="a named agent from .agents/lemmings.json")
+    run.add_argument("--agent", help="a named agent (shipped defaults or .agents/lemmings.json)")
+    run.add_argument("--manager", choices=agents.MANAGERS, help="your host, to pick the role's default agent")
     run.add_argument("--brief", required=True, help="Markdown brief file, or - for stdin")
     run.add_argument("--cwd", help="checkout the role works in (default: --repo)")
     run.add_argument("--host", choices=dispatch.HOSTS[1:])
@@ -125,7 +126,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     brief = sys.stdin.read() if args.brief == "-" else Path(args.brief).read_text(encoding="utf-8-sig")
     if not args.role and not args.agent:
         raise HelperError("dispatch needs a role or --agent")
-    return dispatch.dispatch(repo, args.role, brief, agent=args.agent, cwd=Path(args.cwd) if args.cwd else None, host=args.host,
+    return dispatch.dispatch(repo, args.role, brief, agent=args.agent, manager=args.manager, cwd=Path(args.cwd) if args.cwd else None, host=args.host,
                              model=args.model, effort=args.effort, timeout=args.timeout, dry_run=args.dry_run)
 
 

@@ -44,8 +44,9 @@ PREAMBLE = {
 }
 
 
-def resolve_agent(config: Mapping[str, Any], role: str | None, name: str | None) -> dict[str, Any]:
-    """A named agent, or the default agent for the role."""
+def resolve_agent(config: Mapping[str, Any], role: str | None, name: str | None,
+                  manager: str | None = None) -> dict[str, Any]:
+    """A named agent, or the role's default agent for the manager's host."""
     agents = load_agents(config)
     if name:
         if name not in agents:
@@ -56,7 +57,7 @@ def resolve_agent(config: Mapping[str, Any], role: str | None, name: str | None)
         return agent
     if role not in ROLES:
         raise HelperError(f"role must be one of {', '.join(ROLES)}")
-    return default_agent(agents, role)
+    return default_agent(agents, role, manager)
 
 
 def route_chain(agent: Mapping[str, Any], override: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -291,12 +292,13 @@ def _run_process(argv: list[str], env: Mapping[str, str], cwd: Path, stdin: str,
     return process.returncode, timed_out
 
 
-def dispatch(repo: Path, role: str | None, brief: str, *, agent: str | None = None, cwd: Path | None = None,
+def dispatch(repo: Path, role: str | None, brief: str, *, agent: str | None = None, manager: str | None = None,
+             cwd: Path | None = None,
              host: str | None = None, model: str | None = None, effort: str | None = None,
              timeout: int = DEFAULT_TIMEOUT, dry_run: bool = False) -> dict[str, Any]:
     repo = toplevel(repo)
     cwd = (cwd or repo).resolve()
-    selected = resolve_agent(load_config(repo), role, agent)
+    selected = resolve_agent(load_config(repo), role, agent, manager)
     role = selected["role"]
     chain = route_chain(selected, {"host": host, "model": model, "effort": effort})
     if chain[0]["host"] == "native":

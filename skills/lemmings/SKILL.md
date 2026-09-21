@@ -72,13 +72,20 @@ Finish with a short report: what changed, check results, review verdict, and any
 
 Roles are worker (writes within owned paths), reviewer (read-only), and explorer (read-only). Agents never delegate further.
 
-**Which agents exist.** `.agents/lemmings.json` → `agents` may define several named agents per role. Each one has a `host` and `model`, a `use` text that says what it is good at, optionally `default: true`, and optionally `escalateTo`, which names a stronger agent of the same role. `lemmings agents list` prints them. Without that file, each role has one native agent (`lemmings-worker`, `lemmings-reviewer`, `lemmings-explorer`) on the current host's default model.
+**Which agents exist.** Lemmings ships ready-to-use agents for both hosts, and they are yours to use with no setup:
 
-**Choosing.** For each brief, pick the agent whose `use` best fits the work; otherwise use the role's default. Name the chosen agent in the brief and in your report. Never swap in a different model silently; if the chosen agent cannot run, say so.
+| Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
+| --- | --- | --- | --- | --- |
+| Codex | `lemmings-codex-worker` (gpt-5.6-luna, high) | `lemmings-codex-worker-strong` (gpt-5.6-sol, high) | `lemmings-codex-reviewer` (gpt-5.6-sol, high) | `lemmings-codex-explorer` (gpt-5.6-luna, medium) |
+| Claude Code | `lemmings-claude-worker` (sonnet) | `lemmings-claude-worker-strong` (opus) | `lemmings-claude-reviewer` (opus) | `lemmings-claude-explorer` (haiku) |
+
+A project may add or override agents in `.agents/lemmings.json` → `agents`. Each agent has a `role`, a `host` and `model`, a `use` text that says what it is good at, and `for`, the manager hosts that may use it. It may also have `default: true` and `escalateTo`, a stronger agent of the same role. Use only agents whose `for` includes your host. `lemmings agents list` prints the effective set.
+
+**Choosing.** For each brief, pick the agent whose `use` best fits the work; otherwise use the role's default for your host. Name the chosen agent in the brief and in your report. Never swap in a different model silently; if the chosen agent cannot run, say so.
 
 **Running.**
 - If the agent's host is `native`, or is your own host (`codex` inside Codex, `claude` inside Claude Code) and the agent has no Codex `profile`, start the native subagent `lemmings-<name>`. `lemmings agents sync` generates it with the pinned model.
-- Otherwise run `lemmings dispatch --agent <name> --brief <file>`, which starts that host's CLI. See [references/helper.md](references/helper.md).
+- Otherwise run `lemmings dispatch --agent <name> --brief <file>`, which starts that host's CLI. If a shipped model is unavailable on your account, report it and ask the user which model to assign; do not fall back silently. See [references/helper.md](references/helper.md).
 
 **Escalation.** Escalate when the current agent cannot finish: it reports blocked, the same check or finding survives two repair rounds without progress, or it keeps failing to run.
 1. Stop the current agent.

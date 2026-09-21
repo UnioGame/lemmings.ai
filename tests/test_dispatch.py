@@ -32,13 +32,15 @@ class DispatchTests(HermeticTest):
         """One agent per role, named after its role with an -x suffix."""
         agents = {f"{role}-x": {"role": role, **route} for role, route in roles.items()}
         (self.repo / ".agents").mkdir(exist_ok=True)
-        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"agents": agents}), encoding="utf-8")
+        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"defaults": False, "agents": agents}),
+                                                              encoding="utf-8")
 
     def calls(self):
         path = self.tmp / "calls.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
     def test_native_role_is_not_dispatched(self):
+        self.configure({})
         result = dispatch.dispatch(self.repo, "worker", "Goal: x")
         self.assertEqual("native", result["status"])
         self.assertEqual([], self.calls())
@@ -126,7 +128,7 @@ class DispatchTests(HermeticTest):
 
     def test_native_named_agent_points_to_its_subagent(self):
         (self.repo / ".agents").mkdir()
-        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"agents": {
+        (self.repo / ".agents" / "lemmings.json").write_text(json.dumps({"defaults": False, "agents": {
             "scout": {"role": "explorer", "host": "native", "use": "questions"}}}), encoding="utf-8")
         result = dispatch.dispatch(self.repo, "explorer", "Question")
         self.assertEqual(("native", "lemmings-scout"), (result["status"], result["nativeSubagent"]))
@@ -137,6 +139,14 @@ class DispatchTests(HermeticTest):
         self.assertEqual("dry-run", result["status"])
         self.assertEqual([], self.calls())
         self.assertFalse((self.repo / ".git" / "lemmings" / "runs").exists())
+
+    def test_shipped_defaults_need_the_manager_host(self):
+        with self.assertRaisesRegex(HelperError, "pass --agent or --manager"):
+            dispatch.dispatch(self.repo, "reviewer", "Goal: x", dry_run=True)
+        result = dispatch.dispatch(self.repo, "reviewer", "Goal: x", manager="claude", dry_run=True)
+        self.assertEqual("claude-reviewer", result["agent"])
+        claude_cmd = result["attempts"][0]["argv"]
+        self.assertEqual("opus", claude_cmd[claude_cmd.index("--model") + 1])
 
     def test_invalid_override(self):
         with self.assertRaises(HelperError):

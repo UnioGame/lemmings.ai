@@ -1,0 +1,38 @@
+{
+  "agents": {
+    "codex-worker": {
+      "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-5.6-luna", "effort": "high",
+      "default": true, "escalateTo": "codex-worker-strong",
+      "use": "Everyday implementation, tests, and repairs"
+    },
+    "codex-worker-strong": {
+      "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-5.6-sol", "effort": "high",
+      "use": "Hard or cross-cutting changes; takes over when codex-worker cannot finish"
+    },
+    "codex-reviewer": {
+      "role": "reviewer", "for": ["codex"], "host": "codex", "model": "gpt-5.6-sol", "effort": "high",
+      "default": true, "use": "Independent candidate and plan review"
+    },
+    "codex-explorer": {
+      "role": "explorer", "for": ["codex"], "host": "codex", "model": "gpt-5.6-luna", "effort": "medium",
+      "default": true, "use": "Focused read-only codebase questions"
+    },
+    "claude-worker": {
+      "role": "worker", "for": ["claude"], "host": "claude", "model": "sonnet",
+      "default": true, "escalateTo": "claude-worker-strong",
+      "use": "Everyday implementation, tests, and repairs"
+    },
+    "claude-worker-strong": {
+      "role": "worker", "for": ["claude"], "host": "claude", "model": "opus",
+      "use": "Hard or cross-cutting changes; takes over when claude-worker cannot finish"
+    },
+    "claude-reviewer": {
+      "role": "reviewer", "for": ["claude"], "host": "claude", "model": "opus",
+      "default": true, "use": "Independent candidate and plan review"
+    },
+    "claude-explorer": {
+      "role": "explorer", "for": ["claude"], "host": "claude", "model": "haiku",
+      "default": true, "use": "Focused read-only codebase questions"
+    }
+  }
+}

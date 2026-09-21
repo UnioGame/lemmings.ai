@@ -11,8 +11,11 @@ import tempfile
 from pathlib import Path
 
 VERSION = "6.5.0"
-ROLES = ("worker", "reviewer", "explorer")
-RETIRED_AGENTS = ("lemmings-orchestrator.toml", "lemmings-validator.toml", "lemmings-summarizer.toml")
+RETIRED_AGENTS = (".codex/agents/lemmings-orchestrator.toml", ".codex/agents/lemmings-validator.toml",
+                  ".codex/agents/lemmings-summarizer.toml", ".codex/agents/lemmings-worker.toml",
+                  ".codex/agents/lemmings-reviewer.toml", ".codex/agents/lemmings-explorer.toml",
+                  ".claude/agents/lemmings-worker.md", ".claude/agents/lemmings-reviewer.md",
+                  ".claude/agents/lemmings-explorer.md")
 
 
 def repository_root(path: Path) -> Path | None:
@@ -22,13 +25,10 @@ def repository_root(path: Path) -> Path | None:
 
 
 def plan(package_root: Path, repo: Path) -> list[tuple[Path | None, Path]]:
-    """(source, target) pairs; a None source removes a retired file."""
+    """(source, target) pairs; a None source removes a retired file. Agents are written by `agents sync`."""
     skill = package_root / "skills" / "lemmings"
     items: list[tuple[Path | None, Path]] = [(skill, repo / ".agents/skills/lemmings")]
-    for role in ROLES:
-        items.append((package_root / "agents" / f"lemmings-{role}.toml", repo / ".codex/agents" / f"lemmings-{role}.toml"))
-        items.append((package_root / "agents" / f"lemmings-{role}.md", repo / ".claude/agents" / f"lemmings-{role}.md"))
-    items += [(None, repo / ".codex/agents" / name) for name in RETIRED_AGENTS if (repo / ".codex/agents" / name).exists()]
+    items += [(None, repo / name) for name in RETIRED_AGENTS if (repo / name).exists()]
     return items
 
 
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Lemmings install failed and was rolled back: {error}", file=sys.stderr)
         return 1
     if not args.dry_run:
-        # Named agents from .agents/lemmings.json become native Codex/Claude subagents.
+        # Shipped and project agents become native Codex/Claude subagents with pinned models.
         helper = repo / ".agents/skills/lemmings/scripts/run.py"
         synced = subprocess.run([sys.executable, str(helper), "agents", "sync", "--repo", str(repo)],
                                 capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)

@@ -48,7 +48,14 @@ Every run is recorded in `<git-common-dir>/lemmings/runs/<timestamp>-<role>-<age
 
 ## Agents
 
-Define agents in `.agents/lemmings.json`. A role without agents has one native agent on the host's default model.
+Lemmings ships default agents in `skills/lemmings/defaults.json`, which works without any configuration:
+
+- **Codex:** `codex-worker` (gpt-5.6-luna, high) escalates to `codex-worker-strong` (gpt-5.6-sol, high). `codex-reviewer` uses gpt-5.6-sol, high; `codex-explorer` uses gpt-5.6-luna, medium.
+- **Claude Code:** `claude-worker` (sonnet) escalates to `claude-worker-strong` (opus). `claude-reviewer` uses opus; `claude-explorer` uses haiku.
+
+Each shipped agent serves only its own host (`for`). A Codex manager never depends on the Claude CLI, and a Claude manager never depends on Codex.
+
+`.agents/lemmings.json` → `agents` adds agents or overrides shipped ones by name. A project agent with `default: true` replaces the shipped default of its role for the hosts in its `for`. `"defaults": false` drops the shipped agents entirely. Example that adds cheaper and specialized agents:
 
 ```json
 {
@@ -70,10 +77,11 @@ Define agents in `.agents/lemmings.json`. A role without agents has one native a
 
 - **name**: lowercase words joined by hyphens, and not `worker`, `reviewer`, or `explorer`. The native subagent is called `lemmings-<name>`.
 - **role**: `worker`, `reviewer`, or `explorer`.
+- **for**: the manager hosts that may use this agent, `codex` and/or `claude` (default: both).
 - **host**: `native`, `codex`, `claude`, or `opencode`. `native` means the manager's own host on its default model, so it cannot pin a model. When the host equals the manager's host, the agent runs as a native subagent. Any other host, or a Codex agent with a `profile`, runs through `dispatch`. OpenCode models use `provider/model`.
 - **model**, **effort**: passed to the host (`--model`; Codex `model_reasoning_effort`, Claude `--effort`, OpenCode `--variant`). If omitted, the host's default is used.
 - **profile**: optional Codex profile, for example another provider. Only `codex exec --profile` can apply it, so such an agent always runs through `dispatch`.
 - **use**: what this agent is good at. The manager reads it to choose an agent for each brief.
-- **default**: the role's first choice. A role with a single agent makes that agent the default automatically.
+- **default**: the role's first choice for the hosts in `for`. If a host has only one agent for a role, that agent becomes its default automatically. `dispatch <role>` needs `--manager codex|claude` when both hosts have defaults.
 - **escalateTo**: another agent of the same role. It takes over when the manager decides the current agent cannot finish the task. Chains are followed in order; cycles are rejected.
 - **fallback**: routes tried automatically by `dispatch` only when a CLI is missing, fails, or times out. A fallback is never used after a model mismatch, and the result reports `fallbackUsed`. Passing `--host` or `--model` disables fallback. Escalation is the manager's quality decision; fallback is a transport retry.

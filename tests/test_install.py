@@ -18,8 +18,9 @@ class InstallTests(HermeticTest):
         self.assertTrue((skill / "SKILL.md").is_file())
         self.assertTrue((skill / "scripts" / "run.py").is_file())
         self.assertFalse(list(skill.rglob("__pycache__")))
-        self.assertTrue((repo / ".codex" / "agents" / "lemmings-reviewer.toml").is_file())
-        self.assertTrue((repo / ".claude" / "agents" / "lemmings-reviewer.md").is_file())
+        self.assertIn('model = "gpt-5.6-sol"',
+                      (repo / ".codex" / "agents" / "lemmings-codex-reviewer.toml").read_text(encoding="utf-8"))
+        self.assertIn("model: opus", (repo / ".claude" / "agents" / "lemmings-claude-reviewer.md").read_text(encoding="utf-8"))
         self.assertFalse((repo / ".codex" / "agents" / "lemmings-validator.toml").exists())
 
     def test_install_syncs_configured_agents(self):
@@ -45,7 +46,7 @@ class InstallTests(HermeticTest):
 
         def failing_move(source, destination):
             calls["count"] += 1
-            if calls["count"] == 4:
+            if calls["count"] == 3:
                 raise OSError("disk full")
             return original_move(source, destination)
 

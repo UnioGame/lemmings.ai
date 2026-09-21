@@ -120,7 +120,16 @@ See [references/helper.md](skills/lemmings/references/helper.md) for details.
 
 ## Agents, models, and escalation
 
-You can define several named agents per role in `.agents/lemmings.json`, each with its own host and model, a `use` note that says what it is good at, and an optional `escalateTo` agent that takes over when it fails:
+Lemmings works right after installation with these shipped agents (`skills/lemmings/defaults.json`). Each host uses only its own agents, so neither host needs the other's CLI:
+
+| Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
+| --- | --- | --- | --- | --- |
+| Codex | gpt-5.6-luna, high | gpt-5.6-sol, high | gpt-5.6-sol, high | gpt-5.6-luna, medium |
+| Claude Code | sonnet | opus | opus | haiku |
+
+To change or extend them, add agents to `.agents/lemmings.json`, where project agents override shipped ones by name. Set `"defaults": false` to drop the shipped set entirely.
+
+You can also define several named agents per role in `.agents/lemmings.json`, each with its own host and model, a `use` note that says what it is good at, and an optional `escalateTo` agent that takes over when it fails:
 
 ```json
 {
