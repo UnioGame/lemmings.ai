@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, agents, dispatch, scope, workspace
+from . import __version__, agents, dispatch, scope, tasks, workspace
 from .gitutil import CONFIG_PATH, HelperError, git, load_config, toplevel
 
 
@@ -76,6 +76,25 @@ def build_parser() -> argparse.ArgumentParser:
     sync = team.add_parser("sync", parents=[common], help="write native Codex/Claude subagent files for configured agents")
     sync.add_argument("--check", action="store_true", help="only report files that are out of date")
 
+    journal = commands.add_parser("tasks", help="task journal: index table plus one file per task").add_subparsers(
+        dest="action", required=True)
+    add = journal.add_parser("add", parents=[common], help="add a Not started row and its task file")
+    add.add_argument("id")
+    add.add_argument("--title", required=True)
+    add.add_argument("--where", default="")
+    add.add_argument("--who", default="")
+    add.add_argument("--depends", default="", help="comma-separated ids; short forms like 05 use the row's prefix")
+    add.add_argument("--brief", help="Markdown brief file to put into the task file")
+    update = journal.add_parser("update", parents=[common], help="change a task's status and append to its log")
+    update.add_argument("id")
+    update.add_argument("--status", required=True, help=", ".join(tasks.STATUSES) + " (e.g. 'Repair 2')")
+    update.add_argument("--note", default="", help="short result or reason")
+    update.add_argument("--commit", help="commit SHA that proves the step")
+    update.add_argument("--who", help="replace the Who cell, e.g. 'W (codex-worker -> codex-worker-strong)'")
+    journal.add_parser("check", parents=[common], help="validate ids, dependencies, statuses, commits, and logs")
+    journal.add_parser("next", parents=[common], help="Not started tasks whose dependencies are Done")
+    journal.add_parser("list", parents=[common], help="all tasks with their status and a count per status")
+
     check = commands.add_parser("scope", parents=[common], help="check changed paths against owned/forbidden rules")
     check.add_argument("--base", required=True)
     check.add_argument("--head", default="HEAD")
@@ -118,6 +137,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             return {"ok": True, "agents": agents.describe(configured)}
         outcome = agents.sync(root, configured, check=args.check)
         return {"ok": not outcome["stale"], **outcome}
+    if args.command == "tasks":
+        root = toplevel(repo)
+        journal = tasks.Journal(tasks.tasks_dir(root, load_config(root)))
+        if args.action == "add":
+            brief = Path(args.brief).read_text(encoding="utf-8-sig") if args.brief else ""
+            return {"ok": True, **journal.add(args.id, args.title, args.where, args.who, args.depends, brief)}
+        if args.action == "update":
+            return {"ok": True, **journal.update(args.id, args.status, args.note, args.commit, args.who)}
+        if args.action == "check":
+            outcome = tasks.check(journal, root)
+            return {"ok": not outcome["errors"], **outcome}
+        if args.action == "next":
+            return {"ok": True, "ready": tasks.ready(journal)}
+        return {"ok": True, **tasks.summary(journal)}
     if args.command == "scope":
         root = toplevel(repo)
         paths = scope.changed_paths(root, args.base, args.head, worktree=args.worktree)

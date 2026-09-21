@@ -61,7 +61,7 @@ The reviewer blocks only on P0–P2 findings, each with a concrete failure scena
 
 ### Tasks and assignment
 
-Lemmings creates no task files. The manager (the agent you talk to) holds the task and writes a short Markdown **brief**, which is the only task contract:
+Every task is a short Markdown **brief** that the manager writes and keeps in the task journal:
 
 ```markdown
 Goal: <one sentence>
@@ -73,15 +73,28 @@ Risks: <material risks, each with the check that covers it>
 Context: <up to ~10 files/symbols worth reading first>
 ```
 
-The manager assigns a brief to a role:
+The manager assigns each brief to an agent:
 
 - **Simple**: the manager does the work itself.
-- **Standard**: one `lemmings-worker` (or the manager) implements, then a separate `lemmings-reviewer` gets the brief and the commit range `<base>..<head>`.
-- **Parallel**: each worker gets its own brief, its own branch `task/<slug>`, and its own worktree.
+- **Standard**: one worker implements. A separate reviewer then gets the brief and the commit range `<base>..<head>`.
+- **Parallel**: each worker gets its own brief, branch `task/<slug>`, and worktree.
 
-Which agent (host and model) runs a brief comes from `.agents/lemmings.json` (see [Agents, models, and escalation](#agents-models-and-escalation)). Workers get the brief, not the conversation. They commit on their branch and report the status, commit, changed paths, check results, and risks. Reviewers answer `VERDICT: Accepted` or `VERDICT: ChangesRequested` with findings.
+Which agent (host and model) runs a brief comes from the shipped defaults and `.agents/lemmings.json` (see [Agents, models, and escalation](#agents-models-and-escalation)). Workers get the brief, not the conversation. They commit on their branch and report the status, commit, changed paths, check results, and risks. Reviewers answer `VERDICT: Accepted` or `VERDICT: ChangesRequested` with findings.
 
-State lives in the conversation and in Git: `task/*` branches and commits, the workspace registry in `<git-common-dir>/lemmings/workspaces.json`, and dispatch logs in `<git-common-dir>/lemmings/runs/`. Work that must survive a session gets one note, `.lemmings/<slug>.md`, with the brief, the current stage, the verdict, and the blockers. There is no task queue, status machine, or automatic resume.
+### Task journal
+
+The manager, and only the manager, records every task in `docs/tasks/`. The journal is committed so the whole team sees it. A small index keeps each task to one short row:
+
+| ID | Task | Where | Who | Depends on | Status |
+| --- | --- | --- | --- | --- | --- |
+| NCORE-13 | Compact delta wire format | `unigame.staticecs.network` | W (codex-worker) | 11 | Done (`50fc170`): 44 → 16 B/entity — details |
+| NCORE-15b | Cells: CPU cost and scope-change errors | network + server | W (codex-worker → codex-worker-strong) | 15 | In review (`864161b`) — details |
+
+- **Index.** `TASKS.md` is the only place with status. A status starts with `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, or `Blocked`. `Done` always names a commit.
+- **Task file.** Each task has its own `<ID>.md` with the brief (which the worker receives as-is), a timestamped log line for every status change, and the evidence. The manager reads it only when working on that task, so the context stays small as the project grows.
+- **Next wave.** Dependencies drive the next wave: the not-started tasks whose dependencies are Done.
+- **Resuming.** After a session ends, the manager resumes from the index.
+- **Without Python**, the journal is plain Markdown edits. With Python, `lemmings tasks add|update|next|list|check` makes the edits deterministic and validates ids, dependencies, statuses, commits, and index–log consistency. See [references/tasks.md](skills/lemmings/references/tasks.md).
 
 ### Decomposition and execution
 
@@ -184,16 +197,19 @@ Telemetry is offline and optional. It never runs during the task and never adds 
 | --- | --- | --- |
 | Cross-host runs (`lemmings dispatch`) | `<git-common-dir>/lemmings/runs/<id>/result.json`: role, host, requested and observed model, verdict, tokens, time, fallback | `lemmings-telemetry` |
 | Native subagents (the default) | Only the host's own transcripts (Claude Code `~/.claude/projects/`, Codex `~/.codex/sessions/`) | Not yet summarized |
+| Task journal | `docs/tasks/TASKS.md` and `<ID>.md` logs: status, repairs, escalations, lead time | `lemmings-telemetry`, `lemmings tasks list` |
 | Benchmark runs | `observation.json` in the benchmark repository | `lemmings_bench report` |
 
-[`packages/lemmings-telemetry`](packages/lemmings-telemetry/) summarizes dispatch run logs by role, host, and model: runs, failures, model mismatches, fallbacks, verdicts, time, and tokens.
+[`packages/lemmings-telemetry`](packages/lemmings-telemetry/) summarizes two sources:
+- **dispatch run logs**, grouped by role, host, and model: runs, failures, model mismatches, fallbacks, verdicts, time, and tokens;
+- **the task journal**: tasks per status, repair rounds, escalations, and median lead time from `In progress` to `Done`.
 
 ```text
 pip install ./packages/lemmings-telemetry
 lemmings-telemetry --repo . --days 30
 ```
 
-When every role is native, this package currently has nothing to report. Parsing host transcripts is on the [roadmap](Documentation~/tasks/ROADMAP.md).
+Token usage of native subagents is not recorded yet. Parsing host transcripts is on the [roadmap](Documentation~/tasks/ROADMAP.md).
 
 ## Development
 

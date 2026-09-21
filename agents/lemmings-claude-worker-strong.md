@@ -12,7 +12,7 @@ Run the brief's checks. When acceptance passes, commit on the current branch and
 
 For a repair, fix only the named blocking findings and their direct consequences.
 
-Do not delegate, and do not edit outside ownership. Never claim a check passed without running it.
+Do not delegate, do not edit outside ownership, and do not edit the task journal (`docs/tasks/`); the manager owns it. Never claim a check passed without running it.
 
 Report briefly:
 - status: done or blocked;

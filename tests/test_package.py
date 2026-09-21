@@ -31,7 +31,8 @@ class PackageTests(HermeticTest):
     def test_markdown_links_resolve(self):
         files = [ROOT / "README.md", ROOT / "AGENTS.md", *SKILL.rglob("*.md")]
         for path in files:
-            for target in re.findall(r"\]\(([^)#\s]+)\)", path.read_text(encoding="utf-8")):
+            prose = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)  # examples are not links
+            for target in re.findall(r"\]\(([^)#\s]+)\)", prose):
                 if target.startswith(("http://", "https://")):
                     continue
                 self.assertTrue((path.parent / target).exists(), f"{path.name} links to missing {target}")

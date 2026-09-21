@@ -9,6 +9,8 @@ You are the manager. Deliver the requested outcome with the least process that s
 
 ## 1. Discover
 
+If `docs/tasks/TASKS.md` exists, read it first. Continue unfinished rows from their task files before starting new work (see [Task journal](#task-journal)).
+
 Read the repository rules (`AGENTS.md`, `CLAUDE.md`, contributing docs) and the smallest code surface that settles the scope. Identify the affected behavior, how to validate it, and the risks. If a game engine is present, read the matching file in [rules/](rules/) (`unity.md`, `unreal.md`, `godot.md`, `defold.md`, `flutter.md`, `phaser.md`, `pixijs.md`; `platforms.md` for an explicit platform target). Send an explorer only for a named question you cannot answer cheaply yourself.
 
 ## 2. Plan and choose a mode
@@ -41,7 +43,7 @@ How Auto decides, from the affected scope only (a repository merely having submo
 
 State the chosen mode and the reason in one line before implementing. Auto may escalate later: Simple becomes Standard when hidden risk shows up, and Standard becomes Parallel only before implementation starts. It never downgrades once changes exist. Host limits, such as no worktrees or no subagents, may serialize Parallel work but never remove the required review.
 
-Pick the agent for each brief now (see [Agents and models](#agents-and-models)) and name it in the brief. Split work only at real ownership boundaries. Connected changes stay with one sequential writer.
+Pick the agent for each brief now (see [Agents and models](#agents-and-models)) and name it in the brief. Split work only at real ownership boundaries. Connected changes stay with one sequential writer. Record each brief in the task journal: one index row, plus a task file that holds the brief and its dependencies.
 
 ## 3. Refine
 
@@ -53,7 +55,7 @@ Before anyone writes code, remove only the ambiguity that could change correctne
 - **Standard**: implement yourself, or give the brief to one worker agent. The current checkout is fine for a single writer unless it has unrelated uncommitted changes; then create a worktree.
 - **Parallel**: create one worktree per worker, dispatch all workers of the wave, and wait for every one of them before integrating anything. To create a worktree, use `lemmings workspace create <slug>`, or without the helper `git worktree add -b task/<slug> ../lemmings-worktrees/<slug> <base>`.
 
-Workers get the brief, not the conversation. A worker may ask one focused question when the brief is missing something; answer it and continue. A worker commits on its branch and reports: status, commit, changed paths, check results, and remaining risks. If the report is missing a piece, ask for that piece; never redo finished work just to fix a report.
+Workers get the brief (the task file), not the conversation. A worker may ask one focused question when the brief is missing something; answer it and continue. A worker commits on its branch and reports: status, commit, changed paths, check results, and remaining risks. If the report is missing a piece, ask for that piece; never redo finished work just to fix a report.
 
 New branches are named `task/<short-lowercase-slug>`. Reuse a branch the user explicitly targets.
 
@@ -71,6 +73,16 @@ New branches are named `task/<short-lowercase-slug>`. Reuse a branch the user ex
 If a required reviewer is unavailable, report Verify as incomplete. Never present missing evidence as success.
 
 Finish with a short report: what changed, check results, review verdict, and any follow-ups. Remove worktrees you created once their branches are merged: use `lemmings workspace remove <slug>`, or `git worktree remove <path>` followed by `git branch -d task/<slug>`. Never force either step.
+
+## Task journal
+
+The journal lives in `docs/tasks/`. `TASKS.md` is a small index with one row per task (`ID | Task | Where | Who | Depends on | Status`) and is the only place that holds status. `<ID>.md` holds the task's brief, a timestamped log, and evidence. You are its only writer; workers and reviewers never edit it.
+
+At every status change:
+1. Rewrite the row's Status cell. It must start with `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, or `Blocked`, followed by an optional commit in backticks and at most one short sentence.
+2. Append one log line to the task file.
+
+`Done` names the commit that proves it. Detailed results go in the task file, not in the index. Simple work gets one row that goes straight to `Done`, or no row at all for a trivial fix. Read a task file only when you work on that task. With the helper, `lemmings tasks add|update|next|check` does these edits. `tasks next` gives the next Parallel wave: the not-started tasks whose dependencies are Done. Format and rules: [references/tasks.md](references/tasks.md).
 
 ## Agents and models
 
