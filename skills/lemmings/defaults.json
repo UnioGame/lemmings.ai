@@ -6,7 +6,7 @@
       "use": "Everyday implementation, tests, and repairs"
     },
     "codex-worker-strong": {
-      "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-5.6-sol", "effort": "high",
+      "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-5.6-terra", "effort": "high",
       "use": "Hard or cross-cutting changes; takes over when codex-worker cannot finish"
     },
     "codex-reviewer": {

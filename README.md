@@ -124,7 +124,7 @@ Lemmings works right after installation with these shipped agents (`skills/lemmi
 
 | Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
 | --- | --- | --- | --- | --- |
-| Codex | gpt-5.6-luna, high | gpt-5.6-sol, high | gpt-5.6-sol, high | gpt-5.6-luna, medium |
+| Codex | gpt-5.6-luna, high | gpt-5.6-terra, high | gpt-5.6-sol, high | gpt-5.6-luna, medium |
 | Claude Code | sonnet | opus | opus | haiku |
 
 To change or extend them, add agents to `.agents/lemmings.json`, where project agents override shipped ones by name. Set `"defaults": false` to drop the shipped set entirely.

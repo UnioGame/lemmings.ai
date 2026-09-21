@@ -95,6 +95,7 @@ class ShippedDefaultTests(HermeticTest):
         claude = {role: agents.default_agent(shipped, role, "claude") for role in agents.ROLES}
         self.assertEqual(("codex-worker", "gpt-5.6-luna"), (codex["worker"]["name"], codex["worker"]["model"]))
         self.assertEqual("gpt-5.6-sol", codex["reviewer"]["model"])
+        self.assertEqual("gpt-5.6-terra", shipped["codex-worker-strong"]["model"])
         self.assertEqual(("claude-worker", "sonnet"), (claude["worker"]["name"], claude["worker"]["model"]))
         self.assertEqual("opus", claude["reviewer"]["model"])
         self.assertEqual(["codex-worker", "codex-worker-strong"], agents.escalation_chain(shipped, "codex-worker"))

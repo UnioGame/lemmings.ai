@@ -76,7 +76,7 @@ Roles are worker (writes within owned paths), reviewer (read-only), and explorer
 
 | Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
 | --- | --- | --- | --- | --- |
-| Codex | `lemmings-codex-worker` (gpt-5.6-luna, high) | `lemmings-codex-worker-strong` (gpt-5.6-sol, high) | `lemmings-codex-reviewer` (gpt-5.6-sol, high) | `lemmings-codex-explorer` (gpt-5.6-luna, medium) |
+| Codex | `lemmings-codex-worker` (gpt-5.6-luna, high) | `lemmings-codex-worker-strong` (gpt-5.6-terra, high) | `lemmings-codex-reviewer` (gpt-5.6-sol, high) | `lemmings-codex-explorer` (gpt-5.6-luna, medium) |
 | Claude Code | `lemmings-claude-worker` (sonnet) | `lemmings-claude-worker-strong` (opus) | `lemmings-claude-reviewer` (opus) | `lemmings-claude-explorer` (haiku) |
 
 A project may add or override agents in `.agents/lemmings.json` → `agents`. Each agent has a `role`, a `host` and `model`, a `use` text that says what it is good at, and `for`, the manager hosts that may use it. It may also have `default: true` and `escalateTo`, a stronger agent of the same role. Use only agents whose `for` includes your host. `lemmings agents list` prints the effective set.

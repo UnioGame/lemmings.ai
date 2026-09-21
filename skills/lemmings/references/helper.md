@@ -50,7 +50,7 @@ Every run is recorded in `<git-common-dir>/lemmings/runs/<timestamp>-<role>-<age
 
 Lemmings ships default agents in `skills/lemmings/defaults.json`, which works without any configuration:
 
-- **Codex:** `codex-worker` (gpt-5.6-luna, high) escalates to `codex-worker-strong` (gpt-5.6-sol, high). `codex-reviewer` uses gpt-5.6-sol, high; `codex-explorer` uses gpt-5.6-luna, medium.
+- **Codex:** `codex-worker` (gpt-5.6-luna, high) escalates to `codex-worker-strong` (gpt-5.6-terra, high). `codex-reviewer` uses gpt-5.6-sol, high; `codex-explorer` uses gpt-5.6-luna, medium.
 - **Claude Code:** `claude-worker` (sonnet) escalates to `claude-worker-strong` (opus). `claude-reviewer` uses opus; `claude-explorer` uses haiku.
 
 Each shipped agent serves only its own host (`for`). A Codex manager never depends on the Claude CLI, and a Claude manager never depends on Codex.
