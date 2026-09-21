@@ -1,6 +1,6 @@
 {
   "name": "lemmings",
-  "version": "7.0.0",
+  "version": "6.5.0",
   "description": "Lightweight repository delivery: plan, implement, independent review, and parallel workers in isolated worktrees",
   "author": {
     "name": "Lemmings Maintainers"
