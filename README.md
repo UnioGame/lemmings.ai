@@ -31,6 +31,7 @@ flowchart LR
 
 | Mode | Use it for | Process |
 | --- | --- | --- |
+| **Auto** (default) | Any request without a named mode | The manager chooses Simple, Standard, or Parallel after Discover. It checks Parallel, then Standard, then Simple, and states the choice and reason. It may escalate later but never downgrades once changes exist. |
 | **Simple** | One low-risk area | The manager changes the code and runs the checks. |
 | **Standard** | Medium risk, a public contract, or wider validation | One writer, then one independent read-only reviewer. |
 | **Parallel** | Independent pieces with separate owned paths | One worker per worktree, a complete wave, review of each piece, and checks on the merged result. |
@@ -103,7 +104,7 @@ This copies the skill to `<repo>/.agents/skills/lemmings` and the Codex agents t
 
 ## Using it
 
-Ask your agent to use Lemmings and state the result you want, with observable acceptance criteria. You can name a mode ("use Lemmings Parallel") or leave it to Auto.
+Ask your agent to use Lemmings and state the result you want, with observable acceptance criteria. You can name a mode ("use Lemmings Parallel"). Otherwise Auto chooses one, following the rules in [SKILL.md](skills/lemmings/SKILL.md#2-plan-and-choose-a-mode).
 
 Optional helper commands:
 

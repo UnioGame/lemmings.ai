@@ -41,6 +41,12 @@ class PackageTests(HermeticTest):
         self.assertRegex(text, r"^---\nname: lemmings\ndescription: .+\n---\n")
         self.assertLess(len(text.splitlines()), 150)
 
+    def test_auto_is_the_default_mode(self):
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        for mode in ("**Auto** (default)", "**Simple**", "**Standard**", "**Parallel**"):
+            self.assertIn(mode, text)
+        self.assertIn("How Auto decides", text)
+
     def test_no_hooks_are_shipped(self):
         self.assertFalse((ROOT / "hooks").exists())
 

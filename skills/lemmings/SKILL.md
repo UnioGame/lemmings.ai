@@ -25,13 +25,21 @@ Risks: <only material ones, each with the check that covers it>
 Context: <at most ~10 files/symbols worth reading first, each with a reason>
 ```
 
-Choose the lightest mode that is safe. Honor a mode the user names. You may escalate later, never downgrade after changes exist.
+The mode is **Auto** unless the user names one. Honor a named mode.
 
 | Mode | When | What happens |
 | --- | --- | --- |
+| **Auto** (default) | The user did not name a mode | You choose Simple, Standard, or Parallel after Discover, using the order below. |
 | **Simple** | One low-risk area you can change and verify yourself | You implement and run the checks. No reviewer unless the user asks. |
 | **Standard** | Medium risk, a public contract, broad validation, or the user wants review | One writer (you or a worker), then one independent reviewer. |
 | **Parallel** | Independent pieces with non-overlapping owned paths that are worth doing concurrently | One worker per piece, each in its own worktree; review each; integrate; run the checks on the merged result. |
+
+How Auto decides, from the affected scope only (a repository merely having submodules or many packages is not a signal). Check the modes in this order and take the first that fits:
+1. **Parallel**: at least two pieces that are independent, have separate owned paths, and are each big enough that concurrency saves real time.
+2. **Standard**: medium or high risk; a public or shared contract, migration, security, data, or concurrency change; generated code or serialized assets; changes across several areas; validation wider than one focused check; or the user asks for review. For a migration, shared contract, or high risk, also get a plan review before code is written.
+3. **Simple**: everything else, meaning one low-risk area.
+
+State the chosen mode and the reason in one line before implementing. Auto may escalate later: Simple becomes Standard when hidden risk shows up, and Standard becomes Parallel only before implementation starts. It never downgrades once changes exist. Host limits, such as no worktrees or no subagents, may serialize Parallel work but never remove the required review.
 
 Pick the agent for each brief now (see [Agents and models](#agents-and-models)) and name it in the brief. Split work only at real ownership boundaries. Connected changes stay with one sequential writer. If the plan has a real ambiguity that could change correctness or scope, resolve it now (ask the user or send the brief to a reviewer for a plan check) before anyone writes code.
 
