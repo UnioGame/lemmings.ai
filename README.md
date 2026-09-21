@@ -6,10 +6,6 @@ Lemmings turns a coding request into a checked repository change. You describe t
 
 The whole process lives in one skill, [`skills/lemmings/SKILL.md`](skills/lemmings/SKILL.md), and works without Python. An optional standard-library helper covers what an agent should not improvise: isolated worktrees, scope checks, and running a role on another host CLI.
 
-## Current release: 6.5.0
-
-Lemmings 6.5 removes the schema-v5 runtime. That runtime had Task/Phase/Review JSON artifacts, a lifecycle state machine, revisions and digests, invocation budgets, hooks, and provider discovery. The workflow itself is unchanged: scope, plan, implement, independent review, and proportional modes. The Python part shrank from about 13.6k lines to about 700. Hooks no longer run on every tool call. There is no migration path. Replace the old bundle and delete old `docs/tasks/*.task.json` files and `<git-common-dir>/lemmings/active.json` if they exist. See [the release notes](Documentation~/releases/6.5.0.md).
-
 ## How it works
 
 The manager (the agent you talk to) runs every task through five stages. Each stage exists to prevent a specific failure, and each is only as heavy as the task needs.
