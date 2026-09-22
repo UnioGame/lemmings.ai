@@ -18,8 +18,9 @@ class InstallTests(HermeticTest):
         self.assertTrue((skill / "SKILL.md").is_file())
         self.assertTrue((skill / "scripts" / "run.py").is_file())
         self.assertFalse(list(skill.rglob("__pycache__")))
-        self.assertIn('model = "gpt-5.6-sol"',
+        self.assertIn('model = "gpt-6-sol"',
                       (repo / ".codex" / "agents" / "lemmings-codex-reviewer.toml").read_text(encoding="utf-8"))
+        self.assertFalse((repo / ".codex" / "agents" / "lemmings-codex-worker-strong.toml").exists())
         self.assertIn("model: opus", (repo / ".claude" / "agents" / "lemmings-claude-reviewer.md").read_text(encoding="utf-8"))
         self.assertFalse((repo / ".codex" / "agents" / "lemmings-validator.toml").exists())
 
@@ -28,10 +29,10 @@ class InstallTests(HermeticTest):
         repo = self.make_repo()
         (repo / ".agents").mkdir()
         (repo / ".agents" / "lemmings.json").write_text(json.dumps({"agents": {
-            "luna": {"role": "worker", "host": "codex", "model": "gpt-5.6-luna"}}}), encoding="utf-8")
+            "luna": {"role": "worker", "host": "codex", "model": "gpt-6-luna"}}}), encoding="utf-8")
         self.assertEqual(0, install.main(["--repo", str(repo)]))
         text = (repo / ".codex" / "agents" / "lemmings-luna.toml").read_text(encoding="utf-8")
-        self.assertIn("gpt-5.6-luna", text)
+        self.assertIn("gpt-6-luna", text)
 
     def test_failed_install_restores_existing_files(self):
         repo = self.make_repo()

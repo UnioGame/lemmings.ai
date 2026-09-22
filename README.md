@@ -88,7 +88,7 @@ The manager, and only the manager, records every task in `docs/tasks/`. The jour
 | ID | Task | Where | Who | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
 | NCORE-13 | Compact delta wire format | `unigame.staticecs.network` | W (codex-worker) | 11 | Done (`50fc170`): 44 → 16 B/entity — details |
-| NCORE-15b | Cells: CPU cost and scope-change errors | network + server | W (codex-worker → codex-worker-strong) | 15 | In review (`864161b`) — details |
+| NCORE-15b | Cells: CPU cost and scope-change errors | network + server | W (custom-worker → custom-worker-strong) | 15 | In review (`864161b`) — details |
 
 - **Index.** `TASKS.md` is the only place with status. A status starts with `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, or `Blocked`. `Done` always names a commit.
 - **Task file.** Each task has its own `<ID>.md` with the brief (which the worker receives as-is), a timestamped log line for every status change, and the evidence. The manager reads it only when working on that task, so the context stays small as the project grows.
@@ -158,10 +158,12 @@ Lemmings works right after installation with these shipped agents (`skills/lemmi
 
 | Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
 | --- | --- | --- | --- | --- |
-| Codex | gpt-5.6-luna, high | gpt-5.6-terra, high | gpt-5.6-sol, high | gpt-5.6-luna, medium |
+| Codex | gpt-6-luna, max | — | gpt-6-sol, high | gpt-6-luna, medium |
 | Claude Code | sonnet | opus | opus | haiku |
 
 To change or extend them, add agents to `.agents/lemmings.json`, where project agents override shipped ones by name. Set `"defaults": false` to drop the shipped set entirely.
+
+The shipped `codex-worker-strong` agent has been removed. Projects that reference it in `escalateTo` must define their own agent with that name or remove the reference.
 
 You can also define several named agents per role in `.agents/lemmings.json`, each with its own host and model, a `use` note that says what it is good at, and an optional `escalateTo` agent that takes over when it fails:
 
@@ -170,9 +172,9 @@ You can also define several named agents per role in `.agents/lemmings.json`, ea
   "agents": {
     "deepseek": {"role": "worker", "host": "codex", "profile": "byteplus", "model": "deepseek-v4-pro-260425",
                  "use": "Routine, well-specified implementation", "default": true, "escalateTo": "luna-max"},
-    "luna-max": {"role": "worker", "host": "codex", "model": "gpt-5.6-luna", "effort": "max",
+    "luna-max": {"role": "worker", "host": "codex", "model": "gpt-6-luna", "effort": "max",
                  "use": "Hard or cross-cutting changes; takes over when a cheaper worker fails"},
-    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-5.6-sol", "effort": "high", "default": true},
+    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-6-sol", "effort": "high", "default": true},
     "opus":     {"role": "reviewer", "host": "claude", "model": "opus", "use": "Security and concurrency risks"}
   }
 }

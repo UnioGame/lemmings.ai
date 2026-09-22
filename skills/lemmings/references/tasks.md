@@ -17,13 +17,13 @@ Only the manager writes to the journal. Workers and reviewers report to the mana
 | ID | Task | Where | Who | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
 | NCORE-13 | Compact delta wire format | `unigame.staticecs.network` | W (codex-worker) | 11 | Done (`50fc170`): 44 → 16 B/entity — [details](NCORE-13.md) |
-| NCORE-15b | Cells: CPU cost and scope-change errors | network + server | W (codex-worker → codex-worker-strong) | 15 | In review (`864161b`) — [details](NCORE-15b.md) |
+| NCORE-15b | Cells: CPU cost and scope-change errors | network + server | W (custom-worker → custom-worker-strong) | 15 | In review (`864161b`) — [details](NCORE-15b.md) |
 ```
 
 - **ID**: unique, like `PROJ-12`. Use a suffix for a follow-up (`PROJ-12a`); never repeat a row.
 - **Task**: a short title. Long descriptions go in the task file.
 - **Where**: the repository, package, or area.
-- **Who**: the role (`M` manager, `W` worker, `R` reviewer, `E` explorer) and the agent. After an escalation it shows the chain, for example `W (codex-worker → codex-worker-strong)`.
+- **Who**: the role (`M` manager, `W` worker, `R` reviewer, `E` explorer) and the agent. After an escalation it shows the chain, for example `W (custom-worker → custom-worker-strong)`.
 - **Depends on**: comma-separated ids. A short form such as `05` means the row's own prefix (`PROJ-05`). Use `—` for none.
 - **Status**: starts with exactly one of `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, `Blocked`. It may add a commit in backticks, a result of at most one short sentence, and the details link. `Done` must name the commit that proves it. Measurements, tables, and reasoning belong in the task file or a linked context document, not in the cell.
 

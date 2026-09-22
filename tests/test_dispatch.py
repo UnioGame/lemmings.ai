@@ -60,7 +60,7 @@ class DispatchTests(HermeticTest):
         self.assertTrue((run_dir / "result.json").is_file() and (run_dir / "brief.md").is_file())
 
     def test_codex_worker_uses_workspace_write_and_last_message(self):
-        self.configure({"worker": {"host": "codex", "model": "gpt-5.6-terra", "profile": "work"}})
+        self.configure({"worker": {"host": "codex", "model": "gpt-6-luna", "profile": "work"}})
         result = dispatch.dispatch(self.repo, "worker", "Goal: build")
         self.assertTrue(result["ok"], result)
         self.assertEqual("status: done", result["report"])
@@ -154,6 +154,6 @@ class DispatchTests(HermeticTest):
 
     def test_model_confirmation(self):
         self.assertTrue(dispatch.model_confirmed("opus", ["claude-opus-5"]))
-        self.assertTrue(dispatch.model_confirmed("openai/gpt-5.6-sol", ["gpt-5.6-sol"]))
-        self.assertFalse(dispatch.model_confirmed("gpt-5.6-sol", ["gpt-5.6-luna"]))
-        self.assertIsNone(dispatch.model_confirmed("gpt-5.6-sol", []))
+        self.assertTrue(dispatch.model_confirmed("openai/gpt-6-sol", ["gpt-6-sol"]))
+        self.assertFalse(dispatch.model_confirmed("gpt-6-sol", ["gpt-6-luna"]))
+        self.assertIsNone(dispatch.model_confirmed("gpt-6-sol", []))

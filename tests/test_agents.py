@@ -8,10 +8,10 @@ from lemmings.gitutil import HelperError
 TEAM = {
     "deepseek": {"role": "worker", "host": "codex", "profile": "byteplus", "model": "deepseek-v4-pro",
                  "use": "Routine implementation", "default": True, "escalateTo": "luna-max"},
-    "luna-max": {"role": "worker", "host": "codex", "model": "gpt-5.6-luna", "effort": "max",
+    "luna-max": {"role": "worker", "host": "codex", "model": "gpt-6-luna", "effort": "max",
                  "use": "Hard changes", "escalateTo": "opus-worker"},
     "opus-worker": {"role": "worker", "host": "claude", "model": "opus"},
-    "sol": {"role": "reviewer", "host": "codex", "model": "gpt-5.6-sol", "effort": "high"},
+    "sol": {"role": "reviewer", "host": "codex", "model": "gpt-6-sol", "effort": "high"},
     "scout": {"role": "explorer", "host": "native", "use": "Questions"},
 }
 
@@ -51,7 +51,7 @@ class AgentConfigTests(HermeticTest):
         codex = repo / ".codex" / "agents"
         claude = repo / ".claude" / "agents"
         luna = (codex / "lemmings-luna-max.toml").read_text(encoding="utf-8")
-        self.assertIn('model = "gpt-5.6-luna"', luna)
+        self.assertIn('model = "gpt-6-luna"', luna)
         self.assertIn('model_reasoning_effort = "max"', luna)
         self.assertIn('sandbox_mode = "workspace-write"', luna)
         self.assertIn("Use for: Hard changes", luna)
@@ -93,12 +93,14 @@ class ShippedDefaultTests(HermeticTest):
         shipped = agents.load_agents({})
         codex = {role: agents.default_agent(shipped, role, "codex") for role in agents.ROLES}
         claude = {role: agents.default_agent(shipped, role, "claude") for role in agents.ROLES}
-        self.assertEqual(("codex-worker", "gpt-5.6-luna"), (codex["worker"]["name"], codex["worker"]["model"]))
-        self.assertEqual("gpt-5.6-sol", codex["reviewer"]["model"])
-        self.assertEqual("gpt-5.6-terra", shipped["codex-worker-strong"]["model"])
+        self.assertEqual(("codex-worker", "gpt-6-luna", "max"),
+                         (codex["worker"]["name"], codex["worker"]["model"], codex["worker"]["effort"]))
+        self.assertEqual(("gpt-6-sol", "high"), (codex["reviewer"]["model"], codex["reviewer"]["effort"]))
+        self.assertEqual(("gpt-6-luna", "medium"), (codex["explorer"]["model"], codex["explorer"]["effort"]))
+        self.assertNotIn("codex-worker-strong", shipped)
         self.assertEqual(("claude-worker", "sonnet"), (claude["worker"]["name"], claude["worker"]["model"]))
         self.assertEqual("opus", claude["reviewer"]["model"])
-        self.assertEqual(["codex-worker", "codex-worker-strong"], agents.escalation_chain(shipped, "codex-worker"))
+        self.assertEqual(["codex-worker"], agents.escalation_chain(shipped, "codex-worker"))
         self.assertEqual(["claude-worker", "claude-worker-strong"], agents.escalation_chain(shipped, "claude-worker"))
         for agent in shipped.values():
             self.assertEqual([agent["host"]], agent["for"])  # a host never depends on the other CLI
@@ -106,10 +108,10 @@ class ShippedDefaultTests(HermeticTest):
     def test_project_default_replaces_shipped_default_for_its_hosts(self):
         merged = agents.load_agents({"agents": {
             "deepseek": {"role": "worker", "for": ["codex"], "host": "codex", "profile": "byteplus",
-                         "model": "deepseek-v4-pro", "default": True, "escalateTo": "codex-worker-strong"}}})
+                         "model": "deepseek-v4-pro", "default": True, "escalateTo": "codex-worker"}}})
         self.assertEqual("deepseek", agents.default_agent(merged, "worker", "codex")["name"])
         self.assertEqual("claude-worker", agents.default_agent(merged, "worker", "claude")["name"])
-        self.assertEqual(["deepseek", "codex-worker-strong"], agents.escalation_chain(merged, "deepseek"))
+        self.assertEqual(["deepseek", "codex-worker"], agents.escalation_chain(merged, "deepseek"))
 
     def test_project_overrides_by_name_and_can_drop_defaults(self):
         merged = agents.load_agents({"agents": {"claude-reviewer": {"role": "reviewer", "for": ["claude"],
@@ -118,12 +120,22 @@ class ShippedDefaultTests(HermeticTest):
         self.assertEqual("claude-reviewer", agents.default_agent(merged, "reviewer", "claude")["name"])
         self.assertEqual({}, agents.load_agents({"defaults": False}))
 
+    def test_removed_shipped_escalation_requires_project_agent(self):
+        with self.assertRaisesRegex(HelperError, "escalateTo must name another worker agent"):
+            agents.load_agents({"agents": {"custom-worker": {
+                "role": "worker", "for": ["codex"], "host": "codex",
+                "escalateTo": "codex-worker-strong"}}})
+
     def test_sync_writes_the_shipped_agents(self):
         repo = self.make_repo()
+        retired = repo / ".codex" / "agents" / "lemmings-codex-worker-strong.toml"
+        retired.parent.mkdir(parents=True)
+        retired.write_text(f"# {agents.GENERATED}\nmodel = \"old\"\n", encoding="utf-8")
         agents.sync(repo, agents.load_agents({}))
         codex = sorted(path.name for path in (repo / ".codex" / "agents").iterdir())
         claude = sorted(path.name for path in (repo / ".claude" / "agents").iterdir())
         self.assertEqual(["lemmings-codex-explorer.toml", "lemmings-codex-reviewer.toml",
-                          "lemmings-codex-worker-strong.toml", "lemmings-codex-worker.toml"], codex)
+                          "lemmings-codex-worker.toml"], codex)
+        self.assertFalse(retired.exists())
         self.assertEqual(["lemmings-claude-explorer.md", "lemmings-claude-reviewer.md",
                           "lemmings-claude-worker-strong.md", "lemmings-claude-worker.md"], claude)

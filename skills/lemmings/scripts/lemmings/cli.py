@@ -90,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--status", required=True, help=", ".join(tasks.STATUSES) + " (e.g. 'Repair 2')")
     update.add_argument("--note", default="", help="short result or reason")
     update.add_argument("--commit", help="commit SHA that proves the step")
-    update.add_argument("--who", help="replace the Who cell, e.g. 'W (codex-worker -> codex-worker-strong)'")
+    update.add_argument("--who", help="replace the Who cell, e.g. 'W (custom-worker -> custom-worker-strong)'")
     journal.add_parser("check", parents=[common], help="validate ids, dependencies, statuses, commits, and logs")
     journal.add_parser("next", parents=[common], help="Not started tasks whose dependencies are Done")
     journal.add_parser("list", parents=[common], help="all tasks with their status and a count per status")

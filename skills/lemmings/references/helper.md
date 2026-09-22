@@ -50,7 +50,7 @@ Every run is recorded in `<git-common-dir>/lemmings/runs/<timestamp>-<role>-<age
 
 Lemmings ships default agents in `skills/lemmings/defaults.json`, which works without any configuration:
 
-- **Codex:** `codex-worker` (gpt-5.6-luna, high) escalates to `codex-worker-strong` (gpt-5.6-terra, high). `codex-reviewer` uses gpt-5.6-sol, high; `codex-explorer` uses gpt-5.6-luna, medium.
+- **Codex:** `codex-worker` uses gpt-6-luna, max, with no shipped escalation worker. `codex-reviewer` uses gpt-6-sol, high; `codex-explorer` uses gpt-6-luna, medium.
 - **Claude Code:** `claude-worker` (sonnet) escalates to `claude-worker-strong` (opus). `claude-reviewer` uses opus; `claude-explorer` uses haiku.
 
 Each shipped agent serves only its own host (`for`). A Codex manager never depends on the Claude CLI, and a Claude manager never depends on Codex.
@@ -62,13 +62,13 @@ Each shipped agent serves only its own host (`for`). A Codex manager never depen
   "agents": {
     "deepseek": {"role": "worker", "host": "codex", "profile": "byteplus", "model": "deepseek-v4-pro-260425",
                  "use": "Routine, well-specified implementation", "default": true, "escalateTo": "luna-max"},
-    "luna-max": {"role": "worker", "host": "codex", "model": "gpt-5.6-luna", "effort": "max",
+    "luna-max": {"role": "worker", "host": "codex", "model": "gpt-6-luna", "effort": "max",
                  "use": "Hard or cross-cutting changes; takes over when a cheaper worker fails"},
-    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-5.6-sol", "effort": "high", "default": true,
+    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-6-sol", "effort": "high", "default": true,
                  "escalateTo": "opus"},
     "opus":     {"role": "reviewer", "host": "claude", "model": "opus",
                  "use": "Security, concurrency, and data-loss risks",
-                 "fallback": [{"host": "codex", "model": "gpt-5.6-sol"}]},
+                 "fallback": [{"host": "codex", "model": "gpt-6-sol"}]},
     "scout":    {"role": "explorer", "host": "native", "use": "Codebase questions"}
   },
   "workspace": {"root": "../lemmings-worktrees", "largeThresholdGiB": 10}

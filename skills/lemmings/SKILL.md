@@ -92,10 +92,12 @@ Roles are worker (writes within owned paths), reviewer (read-only), and explorer
 
 | Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
 | --- | --- | --- | --- | --- |
-| Codex | `lemmings-codex-worker` (gpt-5.6-luna, high) | `lemmings-codex-worker-strong` (gpt-5.6-terra, high) | `lemmings-codex-reviewer` (gpt-5.6-sol, high) | `lemmings-codex-explorer` (gpt-5.6-luna, medium) |
+| Codex | `lemmings-codex-worker` (gpt-6-luna, max) | — | `lemmings-codex-reviewer` (gpt-6-sol, high) | `lemmings-codex-explorer` (gpt-6-luna, medium) |
 | Claude Code | `lemmings-claude-worker` (sonnet) | `lemmings-claude-worker-strong` (opus) | `lemmings-claude-reviewer` (opus) | `lemmings-claude-explorer` (haiku) |
 
 A project may add or override agents in `.agents/lemmings.json` → `agents`. Each agent has a `role`, a `host` and `model`, a `use` text that says what it is good at, and `for`, the manager hosts that may use it. It may also have `default: true` and `escalateTo`, a stronger agent of the same role. Use only agents whose `for` includes your host. `lemmings agents list` prints the effective set. Without the helper, read `defaults.json` in this skill and `.agents/lemmings.json` yourself: project agents override shipped ones by name, and `"defaults": false` drops the shipped ones.
+
+Projects that refer to the retired shipped `codex-worker-strong` must define their own agent by that name or remove the reference.
 
 **Choosing.** For each brief, pick the agent whose `use` best fits the work; otherwise use the role's default for your host. Name the chosen agent in the brief and in your report. Never swap in a different model silently; if the chosen agent cannot run, say so.
 
