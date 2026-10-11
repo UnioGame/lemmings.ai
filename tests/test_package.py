@@ -21,7 +21,7 @@ class PackageTests(HermeticTest):
         import install
         import lemmings
         versions.update(helper=lemmings.__version__, installer=install.VERSION)
-        self.assertEqual({"6.5.0"}, set(versions.values()), versions)
+        self.assertEqual({"6.6.0"}, set(versions.values()), versions)
 
     def test_agent_toml_is_generated_from_markdown(self):
         process = subprocess.run([sys.executable, str(ROOT / "scripts" / "build_agents.py"), "--check"],
@@ -89,5 +89,5 @@ class PackageTests(HermeticTest):
         process = subprocess.run([sys.executable, str(SKILL / "scripts" / "run.py"), "doctor", "--repo", str(repo)],
                                  capture_output=True, text=True, encoding="utf-8")
         result = json.loads(process.stdout)
-        self.assertEqual("6.5.0", result["version"])
+        self.assertEqual("6.6.0", result["version"])
         self.assertEqual({"worker", "reviewer", "explorer"}, {row["role"] for row in result["agents"]})

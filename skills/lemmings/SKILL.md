@@ -15,17 +15,21 @@ Read the repository rules (`AGENTS.md`, `CLAUDE.md`, contributing docs) and the 
 
 ## 2. Plan and choose a mode
 
-Write a brief. It is the only task contract. Keep it short and pass it to agents as-is:
+Write a brief. It is the only task contract. Keep it short, structured, and made of references, not prose: every agent request re-reads the whole brief, so each extra paragraph is paid for on every step. Pass it to agents as-is:
 
 ```markdown
+Task: <journal id>
+Agent: <agent name>
 Goal: <one sentence>
 Acceptance:
-- <observable criterion>
+- <observable criterion, at most 5>
 Owned paths: <paths/globs the writer may change>
-Checks: <commands or manual checks that can falsify the change>
-Risks: <only material ones, each with the check that covers it>
-Context: <at most ~10 files/symbols worth reading first, each with a reason>
+Checks: <exact commands and the expected result>
+Context: <at most 10 items, one per line as `path#symbol: why`; point at sections, never paste docs or code>
+Stop: <done when ...; return blocked when ...>
 ```
+
+Aim for under 4 KB (`contextPolicy.targetBytes`); at 16 KB (`ceilingBytes`) split the task or move content into files the brief references. `lemmings brief check <file>` prints size and shape warnings; they are advice for you, not a gate. Risks go into Acceptance or Checks only when a check covers them. A long command is run once and read at the end; never tell an agent to poll or wait in a loop.
 
 The mode is **Auto** unless the user names one. Honor a named mode.
 
@@ -57,6 +61,10 @@ Before anyone writes code, remove only the ambiguity that could change correctne
 
 Workers get the brief (the task file), not the conversation. A worker may ask one focused question when the brief is missing something; answer it and continue. A worker commits on its branch and reports: status, commit, changed paths, check results, and remaining risks. If the report is missing a piece, ask for that piece; never redo finished work just to fix a report.
 
+Delegate only to `lemmings-*` agents, so the pinned model, tools, and turn budget apply. Never use `general-purpose`, `Explore`, or `Plan` for repository work unless the user asks, and never override the model per call. Routine work (running a script or test, digesting a log or diff, checking screenshots, a search) goes to the cheapest agent that can do it, and large structured data is read by a script or such an agent, never pasted into your own context.
+
+Each native agent has a turn budget (`maxTurns`, by role unless the agent sets it). An agent that stops at its budget, or whose context has grown past about 300k tokens, is treated as blocked: take what it committed, and give a fresh agent the brief plus a short handoff (HEAD, done, open items). Do not resume the old session; every step of a long context costs many times a fresh one.
+
 New branches are named `task/<short-lowercase-slug>`. Reuse a branch the user explicitly targets.
 
 ## 5. Verify
@@ -82,7 +90,7 @@ At every status change:
 1. Rewrite the row's Status cell. It must start with `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, or `Blocked`, followed by an optional commit in backticks and at most one short sentence.
 2. Append one log line to the task file.
 
-`Done` names the commit that proves it. Detailed results go in the task file, not in the index. Simple work gets one row that goes straight to `Done`, or no row at all for a trivial fix. Read a task file only when you work on that task. With the helper, `lemmings tasks add|update|next|check` does these edits. `tasks next` gives the next Parallel wave: the not-started tasks whose dependencies are Done. Format and rules: [references/tasks.md](references/tasks.md).
+`Done` needs the commit that proves it and removes the task from the journal: its row and file are deleted and one line goes to `ARCHIVE.md`, which you do not read. The journal holds only live work. Detailed results go in the task file while the task is open. Simple work needs no row, or one row that goes straight to `Done`. Read a task file only when you work on that task. With the helper, `lemmings tasks add|update|archive|next|check` does these edits. `tasks next` gives the next Parallel wave: the not-started tasks whose dependencies are Done. Format and rules: [references/tasks.md](references/tasks.md).
 
 ## Agents and models
 
@@ -95,7 +103,7 @@ Roles are worker (writes within owned paths), reviewer (read-only), and explorer
 | Codex | `lemmings-codex-worker` (gpt-6-luna, max) | — | `lemmings-codex-reviewer` (gpt-6-sol, high) | `lemmings-codex-explorer` (gpt-6-luna, medium) |
 | Claude Code | `lemmings-claude-worker` (sonnet) | `lemmings-claude-worker-strong` (opus) | `lemmings-claude-reviewer` (opus) | `lemmings-claude-explorer` (haiku) |
 
-A project may add or override agents in `.agents/lemmings.json` → `agents`. Each agent has a `role`, a `host` and `model`, a `use` text that says what it is good at, and `for`, the manager hosts that may use it. It may also have `default: true` and `escalateTo`, a stronger agent of the same role. Use only agents whose `for` includes your host. `lemmings agents list` prints the effective set. Without the helper, read `defaults.json` in this skill and `.agents/lemmings.json` yourself: project agents override shipped ones by name, and `"defaults": false` drops the shipped ones.
+A project may add or override agents in `.agents/lemmings.json` → `agents`. Each agent has a `role`, a `host` and `model`, a `use` text that says what it is good at, and `for`, the manager hosts that may use it. It may also have `default: true`, `escalateTo` (a stronger agent of the same role), `maxTurns` (turn budget of its native subagent, default 25 explorer, 40 reviewer, 80 worker), and `instructions` (up to 600 characters appended to the role prompt, for a narrow specialty). Use only agents whose `for` includes your host. `lemmings agents list` prints the effective set. Without the helper, read `defaults.json` in this skill and `.agents/lemmings.json` yourself: project agents override shipped ones by name, and `"defaults": false` drops the shipped ones.
 
 Projects that refer to the retired shipped `codex-worker-strong` must define their own agent by that name or remove the reference.
 

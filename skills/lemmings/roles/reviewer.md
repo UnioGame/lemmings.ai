@@ -4,7 +4,7 @@ description: Independently reviews a Lemmings candidate or plan against its brie
 tools: Read, Glob, Grep, Bash
 ---
 
-Review the candidate range (or plan) against the brief's acceptance criteria and checks. Do not modify files or delegate. Re-run a check only when its result is missing or in doubt.
+For a candidate, start from `git diff --stat` of its range and open only the files and ranges that matter for the criteria. Review the candidate range (or plan) against the brief's acceptance criteria and checks. Do not modify files or delegate. Re-run a check only when its result is missing or in doubt.
 
 Start your answer with exactly `VERDICT: Accepted` or `VERDICT: ChangesRequested`.
 

@@ -40,7 +40,36 @@ class TaskJournalTests(HermeticTest):
         self.assertIn("Goal: compact wire format", (self.dir / "NCORE-02.md").read_text(encoding="utf-8"))
         outcome = tasks.check(self.journal(), self.repo)
         self.assertEqual([], outcome["errors"])
-        self.assertEqual({"Done": 1, "Repair": 1, "Not started": 2}, tasks.summary(self.journal())["counts"])
+        summary = tasks.summary(self.journal())
+        self.assertEqual({"Repair": 1, "Not started": 2}, summary["counts"])
+        self.assertEqual(1, summary["archived"])
+
+    def test_done_leaves_the_journal_and_keeps_one_archive_line(self):
+        self.journal().add("NCORE-00", "Fix P0", "x", "M", "", "")
+        self.journal().add("NCORE-01", "Next", "x", "W", "00", "")
+        with self.assertRaises(HelperError):
+            self.journal().update("NCORE-00", "Done", "no proof")
+        sha = git(self.repo, "rev-parse", "--short", "HEAD")
+        outcome = self.journal().update("NCORE-00", "Done", "P0 fixed", sha)
+        self.assertTrue(outcome["archived"])
+        self.assertEqual(["NCORE-01"], [row["id"] for row in self.journal().rows])
+        self.assertFalse((self.dir / "NCORE-00.md").exists())
+        archive = (self.dir / "ARCHIVE.md").read_text(encoding="utf-8")
+        self.assertIn(f"- NCORE-00 — Fix P0 (`{sha}`", archive)
+        self.assertEqual(["NCORE-01"], [item["id"] for item in tasks.ready(self.journal())])
+        self.assertEqual([], tasks.check(self.journal(), self.repo)["errors"])
+
+    def test_archive_sweeps_rows_that_were_already_done(self):
+        self.dir.mkdir(parents=True)
+        sha = git(self.repo, "rev-parse", "--short", "HEAD")
+        (self.dir / "TASKS.md").write_text(
+            "| ID | Task | Where | Who | Depends on | Status |\n| --- | --- | --- | --- | --- | --- |\n"
+            f"| A-1 | Old | x | M | — | Done (`{sha}`) |\n| A-2 | Live | x | W | 1 | Not started |\n", encoding="utf-8")
+        (self.dir / "A-1.md").write_text("# A-1\n", encoding="utf-8")
+        self.assertEqual(["A-1"], self.journal().archive_done())
+        self.assertFalse((self.dir / "A-1.md").exists())
+        self.assertEqual(["A-2"], [row["id"] for row in self.journal().rows])
+        self.assertEqual(["A-2"], [item["id"] for item in tasks.ready(self.journal())])
 
     def test_existing_hand_written_table_is_preserved(self):
         self.dir.mkdir(parents=True)

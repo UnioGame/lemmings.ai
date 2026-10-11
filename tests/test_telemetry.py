@@ -45,3 +45,41 @@ class TelemetryTests(HermeticTest):
         self.assertEqual((2, 1, 4.0), (journal["repairRounds"], journal["escalations"], journal["medianLeadHours"]))
         self.assertIsNone(summarize_tasks(self.tmp / "missing"))
         self.assertIn("Tasks: 3", render_markdown({"routes": [], "taskJournal": journal}))
+
+
+class UsageTests(HermeticTest):
+    def transcript(self, path, *entries):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
+
+    def reply(self, ident, model, **usage):
+        return {"type": "assistant", "timestamp": "2026-10-10T10:00:00Z", "requestId": ident,
+                "message": {"id": ident, "model": model, "usage": usage}}
+
+    def test_cost_is_grouped_by_task_and_agent_type(self):
+        from lemmings_telemetry.usage import collect, project_slug
+
+        repo = self.tmp / "game"
+        repo.mkdir()
+        projects = self.tmp / "projects"
+        base = projects / project_slug(repo) / "session1"
+        self.transcript(projects / project_slug(repo) / "session1.jsonl",
+                        {"message": {"content": [{"type": "tool_use", "id": "t1", "name": "Agent",
+                                                  "input": {"subagent_type": "lemmings-claude-worker", "prompt": "x"}},
+                                                 {"type": "tool_use", "id": "t2", "name": "Agent",
+                                                  "input": {"subagent_type": "general-purpose", "prompt": "y"}}]}},
+                        {"message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "agentId: aaa1"},
+                                                 {"type": "tool_result", "tool_use_id": "t2", "content": "agentId: bbb2"}]}})
+        user = lambda text: {"type": "user", "message": {"content": text}}  # noqa: E731
+        self.transcript(base / "subagents" / "agent-aaa1.jsonl", user("Task: FK-7\nGoal: x"),
+                        self.reply("m1", "claude-sonnet-5-5", input_tokens=10, output_tokens=1000, cache_read_input_tokens=200000),
+                        self.reply("m1", "claude-sonnet-5-5", input_tokens=10, output_tokens=1000, cache_read_input_tokens=200000))
+        self.transcript(base / "subagents" / "agent-bbb2.jsonl", user("no header here"),
+                        self.reply("m2", "claude-haiku-5-5", input_tokens=1000, output_tokens=100))
+        report = collect(projects, repo, None)
+        self.assertEqual(2, report["subagents"])
+        self.assertEqual(1, report["byTask"]["FK-7"]["requests"])  # the duplicated message counts once
+        self.assertEqual(200010, report["byTask"]["FK-7"]["peakContext"])
+        self.assertEqual(1, report["outsideLemmings"]["agents"])
+        self.assertIn("(no Task line)", report["byTask"])
+        self.assertEqual(["lemmings-claude-worker", "general-purpose"], list(report["byAgentType"]))

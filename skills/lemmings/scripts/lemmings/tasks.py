@@ -11,10 +11,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from . import brief as briefs
 from .gitutil import HelperError, git
 
 DEFAULT_DIR = "docs/tasks"
 INDEX = "TASKS.md"
+ARCHIVE = "ARCHIVE.md"
+ARCHIVE_HEAD = ("# Archive\n\nFinished tasks, one line each, oldest first. The commit holds the result; "
+                "do not read this file during normal work.\n\n")
 COLUMNS = ("ID", "Task", "Where", "Who", "Depends on", "Status")
 STATUSES = ("Not started", "In progress", "In review", "Repair", "Escalated", "Done", "Deferred", "Blocked")
 FINISHED = ("Done",)
@@ -23,6 +27,7 @@ TASK_ID = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*")
 STATUS = re.compile(r"(Not started|In progress|In review|Repair(?: \d+)?|Escalated|Done|Deferred|Blocked)\b")
 COMMIT = re.compile(r"`([0-9a-f]{7,40})`")
 LOG_LINE = re.compile(r"^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) " + STATUS.pattern + r"(?: — (.*))?$")
+ARCHIVE_LINE = re.compile(r"^- ([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*) — ")
 NONE_MARKS = {"", "—", "-", "–", "none"}
 
 
@@ -56,6 +61,9 @@ class Journal:
         self.lines: list[str] = self.index.read_text(encoding="utf-8").splitlines() if self.index.is_file() else []
         self.header_at: int | None = None
         self.rows: list[dict[str, Any]] = []
+        archive = directory / ARCHIVE
+        self.archived: list[str] = [m.group(1) for line in (archive.read_text(encoding="utf-8").splitlines()
+                                                           if archive.is_file() else []) if (m := ARCHIVE_LINE.match(line))]
         for number, line in enumerate(self.lines):
             cells = _cells(line)
             if self.header_at is None:
@@ -79,7 +87,7 @@ class Journal:
 
     def dependencies(self, row: dict[str, Any]) -> list[str]:
         """Dependency ids; a short form like `05` means the same prefix as the row (NCORE-05)."""
-        ids = {item["id"] for item in self.rows}
+        ids = {item["id"] for item in self.rows} | set(self.archived)
         prefix = row["id"].rsplit("-", 1)[0] + "-" if "-" in row["id"] else ""
         result = []
         for token in re.split(r"[,\s]+", row["depends"]):
@@ -134,7 +142,7 @@ class Journal:
         insert_at = (self.rows[-1]["line"] + 1) if self.rows else self.header_at + 2
         self.lines.insert(insert_at, row)
         self._write()
-        body = brief.strip() or "Goal:\nAcceptance:\n- \nOwned paths:\nChecks:\nRisks:\nContext:"
+        body = brief.strip() or briefs.template(task_id)
         path.write_text(f"# {task_id} · {title}\n\n## Brief\n\n{body}\n\n## Log\n\n- {_now()} Not started — planned\n\n"
                         "## Evidence\n", encoding="utf-8", newline="\n")
         return {"id": task_id, "index": str(self.index), "file": str(path)}
@@ -147,6 +155,11 @@ class Journal:
         if commit and not re.fullmatch(r"[0-9a-f]{7,40}", commit):
             raise HelperError("commit must be a hex SHA")
         row = self.find(task_id)
+        if match.group(1) == "Done":
+            commit = commit or next(iter(COMMIT.findall(row["status"])), None)
+            if not commit:
+                raise HelperError("Done needs --commit: the commit that proves the task is its only record once archived")
+            return self._archive(row, commit, note)
         cell = status + (f" (`{commit}`)" if commit else "") + (f": {note}" if note else "") + f" — [details]({task_id}.md)"
         cells = [row["id"], row["task"], row["where"], who or row["who"], row["depends"], cell]
         self.lines[row["line"]] = "| " + " | ".join(_escape(value) for value in cells) + " |"
@@ -159,6 +172,31 @@ class Journal:
         text = _append_to_log(text, entry)
         path.write_text(text, encoding="utf-8", newline="\n")
         return {"id": task_id, "status": status, "log": entry}
+
+    def _archive(self, row: dict[str, Any], commit: str, note: str = "") -> dict[str, Any]:
+        """Finished work leaves the journal: drop the row and the task file, keep one line in ARCHIVE.md."""
+        task_id = row["id"]
+        del self.lines[row["line"]]
+        self._write()
+        path = self.task_file(task_id)
+        if path.is_file():
+            path.unlink()
+        archive = self.dir / ARCHIVE
+        head = "" if archive.is_file() else ARCHIVE_HEAD
+        line = f"- {task_id} — {row['task']} (`{commit}`, {_now()[:10]})" + (f": {note}" if note else "")
+        with archive.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(head + line + "\n")
+        self.__init__(self.dir)
+        return {"id": task_id, "status": "Done", "archived": True, "commit": commit, "log": line}
+
+    def archive_done(self) -> list[str]:
+        """Archive every row already marked Done (journals written before automatic archiving)."""
+        done = [row for row in self.rows if status_word(row["status"]) in FINISHED]
+        moved = []
+        for row in sorted(done, key=lambda item: -item["line"]):  # bottom-up keeps line numbers valid
+            self._archive(row, next(iter(COMMIT.findall(row["status"])), "none"))
+            moved.append(row["id"])
+        return moved[::-1]
 
 
 def _now() -> str:
@@ -193,7 +231,10 @@ def check(journal: Journal, repo: Path) -> dict[str, list[str]]:
         if task_id in seen:
             errors.append(f"{task_id}: duplicate id")
         seen.add(task_id)
-    ids = {row["id"] for row in journal.rows}
+    ids = {row["id"] for row in journal.rows} | set(journal.archived)
+    for task_id in journal.archived:
+        if task_id in {row["id"] for row in journal.rows}:
+            errors.append(f"{task_id}: is both in the index and in {ARCHIVE}")
     graph: dict[str, list[str]] = {}
     for row in journal.rows:
         task_id, status = row["id"], status_word(row["status"])
@@ -205,10 +246,12 @@ def check(journal: Journal, repo: Path) -> dict[str, list[str]]:
             if dep not in ids:
                 errors.append(f"{task_id}: unknown dependency {dep}")
         if status in ACTIVE + FINISHED:
-            waiting = [dep for dep in deps if dep in ids and status_word(journal.find(dep)["status"]) not in FINISHED]
+            waiting = [dep for dep in deps if dep in ids and dep not in journal.archived
+                       and status_word(journal.find(dep)["status"]) not in FINISHED]
             if waiting:
                 warnings.append(f"{task_id}: {status} while dependencies are not Done: {', '.join(waiting)}")
         if status in FINISHED:
+            warnings.append(f"{task_id}: Done rows are archived by `tasks update` or `tasks archive`")
             commits = COMMIT.findall(row["status"])
             if not commits:
                 errors.append(f"{task_id}: Done needs at least one commit in backticks")
@@ -242,7 +285,8 @@ def check(journal: Journal, repo: Path) -> dict[str, list[str]]:
 
 def ready(journal: Journal) -> list[dict[str, Any]]:
     """Not-started tasks whose dependencies are all Done: the next wave."""
-    statuses = {row["id"]: status_word(row["status"]) for row in journal.rows}
+    statuses = {**{task_id: "Done" for task_id in journal.archived},
+                **{row["id"]: status_word(row["status"]) for row in journal.rows}}
     wave = []
     for row in journal.rows:
         if statuses[row["id"]] != "Not started":
@@ -258,6 +302,6 @@ def summary(journal: Journal) -> dict[str, Any]:
     for row in journal.rows:
         word = status_word(row["status"]) or "Unknown"
         counts[word] = counts.get(word, 0) + 1
-    return {"counts": counts,
+    return {"counts": counts, "archived": len(journal.archived),
             "tasks": [{"id": row["id"], "task": row["task"], "who": row["who"], "status": status_word(row["status"]),
                        "depends": journal.dependencies(row)} for row in journal.rows]}

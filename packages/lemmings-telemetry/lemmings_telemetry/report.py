@@ -145,7 +145,11 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="lemmings-telemetry", description="Offline report over Lemmings dispatch runs")
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["usage"]:
+        from .usage import main as usage_main
+        return usage_main(argv[1:])
+    parser = argparse.ArgumentParser(prog="lemmings-telemetry", description="Offline report over Lemmings dispatch runs; `usage` reports subagent token use per task")
     parser.add_argument("--repo", default=".")
     parser.add_argument("--runs", help="explicit runs directory (default: <git-common-dir>/lemmings/runs)")
     parser.add_argument("--days", type=int, help="only include runs from the last N days")

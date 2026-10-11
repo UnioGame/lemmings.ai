@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "6.5.0"
+VERSION = "6.6.0"
 RETIRED_AGENTS = (".codex/agents/lemmings-orchestrator.toml", ".codex/agents/lemmings-validator.toml",
                   ".codex/agents/lemmings-summarizer.toml", ".codex/agents/lemmings-worker.toml",
                   ".codex/agents/lemmings-reviewer.toml", ".codex/agents/lemmings-explorer.toml",

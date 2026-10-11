@@ -9,8 +9,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, agents, dispatch, scope, tasks, workspace
+from . import __version__, agents, brief, dispatch, scope, tasks, workspace
 from .gitutil import CONFIG_PATH, HelperError, git, load_config, toplevel
+
+
+KNOWN_CONFIG_KEYS = {"agents", "defaults", "tasks", "worktreeRoot", "workspace", "contextPolicy"}
 
 
 def _version(command: list[str]) -> str | None:
@@ -44,10 +47,12 @@ def doctor(repo: Path) -> dict[str, Any]:
         missing = [host for host in needed if host != "native" and not hosts.get(host)]
         if missing:
             problems.append(f"agent {row['name']} needs {', '.join(missing)} on PATH")
+    unknown = sorted(set(config) - KNOWN_CONFIG_KEYS)
+    warnings = [f"{CONFIG_PATH}: key {key!r} is not read by Lemmings {__version__}; remove it" for key in unknown]
     stale = agents.sync(repo, configured, check=True)["stale"]
     if stale:
         problems.append("native agent definitions are out of date; run `agents sync`")
-    return {"ok": not problems, **result, "agents": rows, "problems": problems}
+    return {"ok": not problems, **result, "agents": rows, "problems": problems, "warnings": warnings}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,9 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--note", default="", help="short result or reason")
     update.add_argument("--commit", help="commit SHA that proves the step")
     update.add_argument("--who", help="replace the Who cell, e.g. 'W (custom-worker -> custom-worker-strong)'")
+    journal.add_parser("archive", parents=[common], help="move rows already marked Done into ARCHIVE.md and delete their task files")
     journal.add_parser("check", parents=[common], help="validate ids, dependencies, statuses, commits, and logs")
     journal.add_parser("next", parents=[common], help="Not started tasks whose dependencies are Done")
     journal.add_parser("list", parents=[common], help="all tasks with their status and a count per status")
+
+    draft = commands.add_parser("brief", help="the brief format").add_subparsers(dest="action", required=True)
+    verify = draft.add_parser("check", parents=[common], help="advisory size and shape check of a brief; never blocks")
+    verify.add_argument("file", help="Markdown brief file, or - for stdin")
+    draft.add_parser("template", help="print an empty brief")
 
     check = commands.add_parser("scope", parents=[common], help="check changed paths against owned/forbidden rules")
     check.add_argument("--base", required=True)
@@ -141,25 +152,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         root = toplevel(repo)
         journal = tasks.Journal(tasks.tasks_dir(root, load_config(root)))
         if args.action == "add":
-            brief = Path(args.brief).read_text(encoding="utf-8-sig") if args.brief else ""
-            return {"ok": True, **journal.add(args.id, args.title, args.where, args.who, args.depends, brief)}
+            text = Path(args.brief).read_text(encoding="utf-8-sig") if args.brief else ""
+            outcome = journal.add(args.id, args.title, args.where, args.who, args.depends, text)
+            return {"ok": True, **outcome, "briefWarnings": brief.check(text, load_config(root))["warnings"]}
         if args.action == "update":
             return {"ok": True, **journal.update(args.id, args.status, args.note, args.commit, args.who)}
+        if args.action == "archive":
+            return {"ok": True, "archived": journal.archive_done()}
         if args.action == "check":
             outcome = tasks.check(journal, root)
             return {"ok": not outcome["errors"], **outcome}
         if args.action == "next":
             return {"ok": True, "ready": tasks.ready(journal)}
         return {"ok": True, **tasks.summary(journal)}
+    if args.command == "brief":
+        if args.action == "template":
+            return {"ok": True, "template": brief.template()}
+        text = sys.stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8-sig")
+        return brief.check(text, load_config(toplevel(repo)))
     if args.command == "scope":
         root = toplevel(repo)
         paths = scope.changed_paths(root, args.base, args.head, worktree=args.worktree)
         violations = scope.check_scope(paths, args.owned, args.forbidden)
         return {"ok": not violations, "changedPaths": paths, "violations": violations}
-    brief = sys.stdin.read() if args.brief == "-" else Path(args.brief).read_text(encoding="utf-8-sig")
+    text = sys.stdin.read() if args.brief == "-" else Path(args.brief).read_text(encoding="utf-8-sig")
     if not args.role and not args.agent:
         raise HelperError("dispatch needs a role or --agent")
-    return dispatch.dispatch(repo, args.role, brief, agent=args.agent, manager=args.manager, cwd=Path(args.cwd) if args.cwd else None, host=args.host,
+    return dispatch.dispatch(repo, args.role, text, agent=args.agent, manager=args.manager, cwd=Path(args.cwd) if args.cwd else None, host=args.host,
                              model=args.model, effort=args.effort, timeout=args.timeout, dry_run=args.dry_run)
 
 

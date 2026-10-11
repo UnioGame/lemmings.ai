@@ -14,7 +14,7 @@
 
 ## Design rules
 
-- AI-first: the model makes decisions and does the work. Python only does what an agent cannot do reliably (worktree lifecycle, scope checks from the real diff, launching other host CLIs, verifying model identity). Do not add task state machines, JSON protocol artifacts, budgets, or hooks.
+- AI-first: the model makes decisions and does the work. Python only does what an agent cannot do reliably (worktree lifecycle, scope checks from the real diff, launching other host CLIs, verifying model identity). Do not add task state machines, JSON protocol artifacts, or runtime enforcement by default. A budget, a limit, or a hook is allowed only with measured benefit (for example a token-usage report) and the lightest form that works: a field in a native agent definition or a line in `SKILL.md` before any code; hooks stay out of the package. The manager decides what advisory output means; helpers print facts and warnings, they do not gate.
 - Never silently substitute a model the user or config assigned.
 - The reviewer is independent and read-only. P3 findings never block.
 - Every new task branch is named `task/<slug>`.

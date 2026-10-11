@@ -64,14 +64,18 @@ The reviewer blocks only on P0–P2 findings, each with a concrete failure scena
 Every task is a short Markdown **brief** that the manager writes and keeps in the task journal:
 
 ```markdown
+Task: <journal id>
+Agent: <agent name>
 Goal: <one sentence>
 Acceptance:
-- <observable criterion>
+- <observable criterion, at most 5>
 Owned paths: <paths/globs the writer may change>
-Checks: <commands or manual checks that can falsify the change>
-Risks: <material risks, each with the check that covers it>
-Context: <up to ~10 files/symbols worth reading first>
+Checks: <exact commands and the expected result>
+Context: <at most 10 items, one per line as `path#symbol: why`; references, not prose>
+Stop: <done when ...; return blocked when ...>
 ```
+
+A brief is re-read by the agent on every step, so it stays short (under 4 KB by default; `contextPolicy` in `.agents/lemmings.json` sets `targetBytes` and `ceilingBytes`) and points at sections instead of pasting them. `lemmings brief check` gives the manager size and shape warnings; the manager decides what to do with them. The `Task:` line ties each agent's token use to its task in `lemmings-telemetry usage`.
 
 The manager assigns each brief to an agent:
 
@@ -90,11 +94,11 @@ The manager, and only the manager, records every task in `docs/tasks/`. The jour
 | NCORE-13 | Compact delta wire format | `unigame.staticecs.network` | W (codex-worker) | 11 | Done (`50fc170`): 44 → 16 B/entity — details |
 | NCORE-15b | Cells: CPU cost and scope-change errors | network + server | W (custom-worker → custom-worker-strong) | 15 | In review (`864161b`) — details |
 
-- **Index.** `TASKS.md` is the only place with status. A status starts with `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, or `Blocked`. `Done` always names a commit.
+- **Index.** `TASKS.md` is the only place with status. A status starts with `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, or `Blocked`. `Done` always names a commit and archives the task: its row and file are removed and one line goes to `ARCHIVE.md`, so the journal holds only live work.
 - **Task file.** Each task has its own `<ID>.md` with the brief (which the worker receives as-is), a timestamped log line for every status change, and the evidence. The manager reads it only when working on that task, so the context stays small as the project grows.
 - **Next wave.** Dependencies drive the next wave: the not-started tasks whose dependencies are Done.
 - **Resuming.** After a session ends, the manager resumes from the index.
-- **Without Python**, the journal is plain Markdown edits. With Python, `lemmings tasks add|update|next|list|check` makes the edits deterministic and validates ids, dependencies, statuses, commits, and index–log consistency. See [references/tasks.md](skills/lemmings/references/tasks.md).
+- **Without Python**, the journal is plain Markdown edits. With Python, `lemmings tasks add|update|archive|next|list|check` makes the edits deterministic and validates ids, dependencies, statuses, commits, and index–log consistency. See [references/tasks.md](skills/lemmings/references/tasks.md).
 
 ### Decomposition and execution
 

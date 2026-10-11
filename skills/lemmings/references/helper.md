@@ -8,12 +8,17 @@ python .agents/skills/lemmings/scripts/run.py <command> [--repo PATH] ...
 
 ## doctor
 
-`doctor` reports Python, Git, and which host CLIs (`codex`, `claude`, `opencode`) are on PATH. It also lists the configured agents and flags agents whose host is missing, as well as native agent files that `agents sync` has not updated.
+`doctor` reports Python, Git, and which host CLIs (`codex`, `claude`, `opencode`) are on PATH. It also lists the configured agents and flags agents whose host is missing, as well as native agent files that `agents sync` has not updated. `warnings` lists keys of `.agents/lemmings.json` that this version does not read (for example the removed `invocationBudgets`), so stale settings do not look like active limits.
+
+## brief
+
+- `brief template` prints an empty brief.
+- `brief check <file|->` prints the size and shape of a brief with `warnings`: missing sections, size over `contextPolicy.targetBytes` (default 4096) or `ceilingBytes` (default 16384), more than 5 acceptance criteria or 10 context items, pasted code, and polling instructions. It is advice for the manager and never fails.
 
 ## agents
 
-- `agents list` shows every agent with its role, host, model, `use`, default flag, escalation chain, and native subagent name.
-- `agents sync [--check]` writes a native subagent definition for each configured agent that runs on Codex or Claude Code. For Codex this is `.codex/agents/lemmings-<name>.toml` with `model` and `model_reasoning_effort`; for Claude Code it is `.claude/agents/lemmings-<name>.md` with `model`. It also removes stale generated files. Files it did not generate are never overwritten. The installer runs `agents sync` automatically; run it again after editing `.agents/lemmings.json`.
+- `agents list` shows every agent with its role, turn budget (`maxTurns`), host, model, `use`, default flag, escalation chain, and native subagent name.
+- `agents sync [--check]` writes a native subagent definition for each configured agent that runs on Codex or Claude Code. For Codex this is `.codex/agents/lemmings-<name>.toml` with `model` and `model_reasoning_effort`; for Claude Code it is `.claude/agents/lemmings-<name>.md` with `model` and `maxTurns` (the agent's own value, else 25 explorer, 40 reviewer, 80 worker). An agent's `instructions` text is appended to its role prompt in both. Codex has no turn limit in its agent files; use the `dispatch` deadline there. It also removes stale generated files. Files it did not generate are never overwritten. The installer runs `agents sync` automatically; run it again after editing `.agents/lemmings.json`.
 
 ## workspace
 

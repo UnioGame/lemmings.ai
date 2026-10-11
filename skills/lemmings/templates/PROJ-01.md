@@ -2,13 +2,15 @@
 
 ## Brief
 
+Task: PROJ-01
+Agent: <agent name>
 Goal: <one sentence>
 Acceptance:
-- <observable criterion>
+- <observable criterion, at most 5>
 Owned paths: <paths/globs the writer may change>
-Checks: <commands or manual checks that can falsify the change>
-Risks: <material risks, each with the check that covers it>
-Context: <up to ~10 files/symbols worth reading first>
+Checks: <exact commands and the expected result>
+Context: <at most 10 items, one per line as `path#symbol: why`; references, not prose>
+Stop: <done when ...; return blocked when ...>
 
 ## Log
 

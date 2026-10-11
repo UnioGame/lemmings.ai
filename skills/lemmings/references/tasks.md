@@ -2,8 +2,10 @@
 
 The journal records every task and its status so work can be tracked, reviewed, and resumed after a session ends. It has two parts:
 
-- **`docs/tasks/TASKS.md`**, the index: one short row per task and the only place that holds the current status. Read it whole to see the program of work and the next wave.
+- **`docs/tasks/TASKS.md`**, the index: one short row per live task and the only place that holds the current status. Read it whole to see the program of work and the next wave.
 - **`docs/tasks/<ID>.md`**, the task file: the brief, a timestamped log of every status change, and evidence. Open it only for the task you are working on. It is also the brief you give the worker (`dispatch --brief docs/tasks/<ID>.md`).
+
+The journal holds only live work. When a task reaches `Done`, its row and task file are removed and one line (`- ID — title (`commit`, date)`) is appended to `ARCHIVE.md` in the same directory. Do not read `ARCHIVE.md` during normal work; the commit holds the result. A dependency on an archived id counts as `Done`.
 
 Configure a different directory with `.agents/lemmings.json` → `"tasks": {"dir": "..."}`. Commit the journal so the team sees it. Templates: [TASKS.md](../templates/TASKS.md) and [PROJ-01.md](../templates/PROJ-01.md).
 
@@ -25,7 +27,7 @@ Only the manager writes to the journal. Workers and reviewers report to the mana
 - **Where**: the repository, package, or area.
 - **Who**: the role (`M` manager, `W` worker, `R` reviewer, `E` explorer) and the agent. After an escalation it shows the chain, for example `W (custom-worker → custom-worker-strong)`.
 - **Depends on**: comma-separated ids. A short form such as `05` means the row's own prefix (`PROJ-05`). Use `—` for none.
-- **Status**: starts with exactly one of `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, `Blocked`. It may add a commit in backticks, a result of at most one short sentence, and the details link. `Done` must name the commit that proves it. Measurements, tables, and reasoning belong in the task file or a linked context document, not in the cell.
+- **Status**: starts with exactly one of `Not started`, `In progress`, `In review`, `Repair N`, `Escalated`, `Done`, `Deferred`, `Blocked`. It may add a commit in backticks, a result of at most one short sentence, and the details link. `Done` must name the commit that proves it, and archives the task at once. Measurements, tables, and reasoning belong in the task file or a linked context document, not in the cell.
 
 ## Task file format
 
@@ -65,8 +67,9 @@ Simple work gets a single row that goes straight to `Done`. For a trivial fix yo
 
 With Python, `lemmings tasks ...` performs the same edits deterministically:
 
-- `tasks add <ID> --title ... [--where] [--who] [--depends "05, 06"] [--brief brief.md]` adds the row and creates the task file.
-- `tasks update <ID> --status "Repair 1" [--note ...] [--commit <sha>] [--who ...]` rewrites the status cell and appends the log line.
+- `tasks add <ID> --title ... [--where] [--who] [--depends "05, 06"] [--brief brief.md]` adds the row and creates the task file from the brief (or the brief template). It returns `briefWarnings` from `lemmings brief check`.
+- `tasks update <ID> --status "Repair 1" [--note ...] [--commit <sha>] [--who ...]` rewrites the status cell and appends the log line. `--status Done --commit <sha>` archives the task instead (the commit is required).
+- `tasks archive` archives every row already marked `Done`, for journals written before automatic archiving.
 - `tasks next` lists `Not started` tasks whose dependencies are `Done`: the next Parallel wave.
 - `tasks list` lists every task with its status and a count per status.
 - `tasks check` reports errors for duplicate ids, unknown or cyclic dependencies, a status outside the vocabulary, `Done` without a commit, broken links, and an index that disagrees with the log. It warns when a task started before its dependencies were `Done` or when its commit is not in this repository.
