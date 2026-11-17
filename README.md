@@ -162,8 +162,8 @@ Lemmings works right after installation with these shipped agents (`skills/lemmi
 
 | Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
 | --- | --- | --- | --- | --- |
-| Codex | gpt-6-luna, max | gpt-6.2-sol, high | gpt-6-sol, high | gpt-6-luna, medium |
-| Claude Code | sonnet | opus | opus | haiku |
+| Codex | gpt-6.2-sol, medium | gpt-6.2-sol, high | gpt-6.2-sol, high | gpt-6-luna, medium |
+| Claude Code | sonnet, medium | opus, high | opus, medium | haiku, medium |
 
 To change or extend them, add agents to `.agents/lemmings.json`, where project agents override shipped ones by name. Set `"defaults": false` to drop the shipped set entirely.
 
@@ -178,7 +178,7 @@ You can also define several named agents per role in `.agents/lemmings.json`, ea
                  "use": "Routine, well-specified implementation", "default": true, "escalateTo": "luna-max"},
     "luna-max": {"role": "worker", "host": "codex", "model": "gpt-6-luna", "effort": "max",
                  "use": "Hard or cross-cutting changes; takes over when a cheaper worker fails"},
-    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-6-sol", "effort": "high", "default": true},
+    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-6.2-sol", "effort": "high", "default": true},
     "opus":     {"role": "reviewer", "host": "claude", "model": "opus", "use": "Security and concurrency risks"}
   }
 }
@@ -186,7 +186,7 @@ You can also define several named agents per role in `.agents/lemmings.json`, ea
 
 - **Choosing.** For each brief, the manager picks the agent whose `use` fits the work, or the role's `default`, and names it in the brief and in the report. Reviewers work the same way: the default reviewer, plus any reviewer whose `use` matches a material risk.
 - **Escalation.** When an agent reports blocked, fails to resolve the same check or finding after two repair rounds, or keeps failing to run, the manager stops it. The `escalateTo` agent then gets a fresh session in the same worktree, with the brief and a short handoff (HEAD, what was tried, failing checks, open findings). Every escalation is reported, and the task stops with a blocker when the chain ends. In the example, if `deepseek` cannot finish, `luna-max` takes over.
-- **Pinned models for native subagents.** `lemmings agents sync` writes `.codex/agents/lemmings-<name>.toml` (with `model` and `model_reasoning_effort`) and `.claude/agents/lemmings-<name>.md` (with `model`) for agents that run on the manager's own host. The installer runs it, and `doctor` warns when the files are out of date.
+- **Pinned models for native subagents.** `lemmings agents sync` writes `.codex/agents/lemmings-<name>.toml` (with `model` and `model_reasoning_effort`) and `.claude/agents/lemmings-<name>.md` (with `model` and configured `effort`) for agents that run on the manager's own host. The installer runs it, and `doctor` warns when the files are out of date.
 - **Other hosts.** An agent on another host, or a Codex agent with a `profile`, runs through `lemmings dispatch --agent <name>`. It starts a fresh `codex exec`, `claude -p`, or `opencode run` session with that CLI's own login. Reviewers and explorers are read-only, and every run has a deadline and is recorded under `<git-common-dir>/lemmings/runs/`. The helper checks which model actually answered and reports a mismatch as an error. The per-agent `fallback` routes are only a transport retry, used when a CLI is missing, fails, or times out.
 
 `lemmings agents list` shows every agent, its default flag, and its escalation chain. Full reference: [references/helper.md](skills/lemmings/references/helper.md#agents).

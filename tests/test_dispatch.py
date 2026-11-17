@@ -147,6 +147,7 @@ class DispatchTests(HermeticTest):
         self.assertEqual("claude-reviewer", result["agent"])
         claude_cmd = result["attempts"][0]["argv"]
         self.assertEqual("opus", claude_cmd[claude_cmd.index("--model") + 1])
+        self.assertEqual("medium", claude_cmd[claude_cmd.index("--effort") + 1])
 
     def test_invalid_override(self):
         with self.assertRaises(HelperError):

@@ -1,8 +1,9 @@
 ---
 name: lemmings-claude-reviewer
-description: Independently reviews a Lemmings candidate or plan against its brief, read-only, and returns a verdict. Use for: Independent candidate and plan review
+description: "Independently reviews a Lemmings candidate or plan against its brief, read-only, and returns a verdict. Use for: Independent candidate and plan review"
 tools: Read, Glob, Grep, Bash
 model: opus
+effort: medium
 maxTurns: 40
 ---
 

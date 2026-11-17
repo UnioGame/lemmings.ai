@@ -18,11 +18,17 @@ class InstallTests(HermeticTest):
         self.assertTrue((skill / "SKILL.md").is_file())
         self.assertTrue((skill / "scripts" / "run.py").is_file())
         self.assertFalse(list(skill.rglob("__pycache__")))
-        self.assertIn('model = "gpt-6-sol"',
+        self.assertIn('model = "gpt-6.2-sol"',
                       (repo / ".codex" / "agents" / "lemmings-codex-reviewer.toml").read_text(encoding="utf-8"))
         self.assertIn('model = "gpt-6.2-sol"',
                       (repo / ".codex" / "agents" / "lemmings-codex-worker-strong.toml").read_text(encoding="utf-8"))
-        self.assertIn("model: opus", (repo / ".claude" / "agents" / "lemmings-claude-reviewer.md").read_text(encoding="utf-8"))
+        for role, model, effort in (("worker", "sonnet", "medium"), ("worker-strong", "opus", "high"),
+                                    ("reviewer", "opus", "medium"), ("explorer", "haiku", "medium")):
+            with self.subTest(role=role):
+                agent = repo / ".claude" / "agents" / f"lemmings-claude-{role}.md"
+                front = agent.read_text(encoding="utf-8").split("---", 2)[1].splitlines()
+                self.assertIn(f"model: {model}", front)
+                self.assertIn(f"effort: {effort}", front)
         self.assertFalse((repo / ".codex" / "agents" / "lemmings-validator.toml").exists())
 
     def test_install_syncs_configured_agents(self):

@@ -1,8 +1,9 @@
 ---
 name: lemmings-claude-explorer
-description: Answers one focused repository question for the Lemmings manager with read-only file:line evidence. Use for: Focused read-only codebase questions
+description: "Answers one focused repository question for the Lemmings manager with read-only file:line evidence. Use for: Focused read-only codebase questions"
 tools: Read, Glob, Grep, Bash
 model: haiku
+effort: medium
 maxTurns: 25
 ---
 

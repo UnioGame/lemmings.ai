@@ -148,11 +148,13 @@ def _body(body: str, instructions: str | None) -> str:
 
 
 def render_claude(role: str, name: str, description: str, model: str | None = None, note: str | None = None,
-                  turns: int | None = None, instructions: str | None = None) -> str:
+                  turns: int | None = None, instructions: str | None = None, effort: str | None = None) -> str:
     meta, body = _template(role)
-    lines = ["---", f"name: {name}", f"description: {description}", f"tools: {meta['tools']}"]
+    lines = ["---", f"name: {name}", f"description: {json.dumps(description, ensure_ascii=False)}", f"tools: {meta['tools']}"]
     if model:
         lines.append(f"model: {model}")
+    if effort:
+        lines.append(f"effort: {effort}")
     lines.append(f"maxTurns: {turns or ROLE_TURNS[role]}")
     lines += ["---", ""]
     if note:
@@ -191,7 +193,7 @@ def planned_files(repo: Path, agents: Mapping[str, Mapping[str, Any]]) -> dict[P
         if runs_natively_on(agent, "claude"):
             files[repo / ".claude" / "agents" / f"{name}.md"] = render_claude(
                 agent["role"], name, description, agent.get("model"), GENERATED, max_turns(agent),
-                agent.get("instructions"))
+                agent.get("instructions"), effort=agent.get("effort"))
     return files
 
 

@@ -56,7 +56,9 @@ class AgentConfigTests(HermeticTest):
         self.assertIn('sandbox_mode = "workspace-write"', luna)
         self.assertIn("Use for: Hard changes", luna)
         self.assertIn('sandbox_mode = "read-only"', (codex / "lemmings-sol.toml").read_text(encoding="utf-8"))
-        self.assertIn("model: opus", (claude / "lemmings-opus-worker.md").read_text(encoding="utf-8"))
+        opus = (claude / "lemmings-opus-worker.md").read_text(encoding="utf-8")
+        self.assertIn("model: opus", opus)
+        self.assertNotIn("\neffort:", opus)
         self.assertFalse((codex / "lemmings-deepseek.toml").exists())  # profile agents go through dispatch
         self.assertTrue((codex / "lemmings-scout.toml").exists() and (claude / "lemmings-scout.md").exists())
         self.assertEqual([], agents.sync(repo, configured, check=True)["stale"])
@@ -93,9 +95,9 @@ class ShippedDefaultTests(HermeticTest):
         shipped = agents.load_agents({})
         codex = {role: agents.default_agent(shipped, role, "codex") for role in agents.ROLES}
         claude = {role: agents.default_agent(shipped, role, "claude") for role in agents.ROLES}
-        self.assertEqual(("codex-worker", "gpt-6-luna", "max"),
+        self.assertEqual(("codex-worker", "gpt-6.2-sol", "medium"),
                          (codex["worker"]["name"], codex["worker"]["model"], codex["worker"]["effort"]))
-        self.assertEqual(("gpt-6-sol", "high"), (codex["reviewer"]["model"], codex["reviewer"]["effort"]))
+        self.assertEqual(("gpt-6.2-sol", "high"), (codex["reviewer"]["model"], codex["reviewer"]["effort"]))
         self.assertEqual(("gpt-6-luna", "medium"), (codex["explorer"]["model"], codex["explorer"]["effort"]))
         strong = shipped["codex-worker-strong"]
         self.assertEqual(("gpt-6.2-sol", "high"), (strong["model"], strong["effort"]))

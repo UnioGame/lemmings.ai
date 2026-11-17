@@ -1,7 +1,7 @@
 {
   "agents": {
     "codex-worker": {
-      "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-6-luna", "effort": "max",
+      "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-6.2-sol", "effort": "medium",
       "default": true, "escalateTo": "codex-worker-strong",
       "use": "Everyday implementation, tests, and repairs"
     },
@@ -10,7 +10,7 @@
       "use": "Hard or cross-cutting changes; takes over when codex-worker cannot finish"
     },
     "codex-reviewer": {
-      "role": "reviewer", "for": ["codex"], "host": "codex", "model": "gpt-6-sol", "effort": "high",
+      "role": "reviewer", "for": ["codex"], "host": "codex", "model": "gpt-6.2-sol", "effort": "high",
       "default": true, "use": "Independent candidate and plan review"
     },
     "codex-explorer": {
@@ -18,20 +18,20 @@
       "default": true, "use": "Focused read-only codebase questions"
     },
     "claude-worker": {
-      "role": "worker", "for": ["claude"], "host": "claude", "model": "sonnet",
+      "role": "worker", "for": ["claude"], "host": "claude", "model": "sonnet", "effort": "medium",
       "default": true, "escalateTo": "claude-worker-strong",
       "use": "Everyday implementation, tests, and repairs"
     },
     "claude-worker-strong": {
-      "role": "worker", "for": ["claude"], "host": "claude", "model": "opus",
+      "role": "worker", "for": ["claude"], "host": "claude", "model": "opus", "effort": "high",
       "use": "Hard or cross-cutting changes; takes over when claude-worker cannot finish"
     },
     "claude-reviewer": {
-      "role": "reviewer", "for": ["claude"], "host": "claude", "model": "opus",
+      "role": "reviewer", "for": ["claude"], "host": "claude", "model": "opus", "effort": "medium",
       "default": true, "use": "Independent candidate and plan review"
     },
     "claude-explorer": {
-      "role": "explorer", "for": ["claude"], "host": "claude", "model": "haiku",
+      "role": "explorer", "for": ["claude"], "host": "claude", "model": "haiku", "effort": "medium",
       "default": true, "use": "Focused read-only codebase questions"
     }
   }

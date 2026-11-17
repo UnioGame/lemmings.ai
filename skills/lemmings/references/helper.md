@@ -18,7 +18,7 @@ python .agents/skills/lemmings/scripts/run.py <command> [--repo PATH] ...
 ## agents
 
 - `agents list` shows every agent with its role, turn budget (`maxTurns`), host, model, `use`, default flag, escalation chain, and native subagent name.
-- `agents sync [--check]` writes a native subagent definition for each configured agent that runs on Codex or Claude Code. For Codex this is `.codex/agents/lemmings-<name>.toml` with `model` and `model_reasoning_effort`; for Claude Code it is `.claude/agents/lemmings-<name>.md` with `model` and `maxTurns` (the agent's own value, else 25 explorer, 40 reviewer, 80 worker). An agent's `instructions` text is appended to its role prompt in both. Codex has no turn limit in its agent files; use the `dispatch` deadline there. It also removes stale generated files. Files it did not generate are never overwritten. The installer runs `agents sync` automatically; run it again after editing `.agents/lemmings.json`.
+- `agents sync [--check]` writes a native subagent definition for each configured agent that runs on Codex or Claude Code. For Codex this is `.codex/agents/lemmings-<name>.toml` with `model` and `model_reasoning_effort`; for Claude Code it is `.claude/agents/lemmings-<name>.md` with `model`, configured `effort`, and `maxTurns` (the agent's own value, else 25 explorer, 40 reviewer, 80 worker). An agent's `instructions` text is appended to its role prompt in both. Codex has no turn limit in its agent files; use the `dispatch` deadline there. It also removes stale generated files. Files it did not generate are never overwritten. The installer runs `agents sync` automatically; run it again after editing `.agents/lemmings.json`.
 
 ## workspace
 
@@ -55,8 +55,8 @@ Every run is recorded in `<git-common-dir>/lemmings/runs/<timestamp>-<role>-<age
 
 Lemmings ships default agents in `skills/lemmings/defaults.json`, which works without any configuration:
 
-- **Codex:** `codex-worker` (gpt-6-luna, max) escalates to `codex-worker-strong` (gpt-6.2-sol, high). `codex-reviewer` uses gpt-6-sol, high. `codex-explorer` uses gpt-6-luna, medium.
-- **Claude Code:** `claude-worker` (sonnet) escalates to `claude-worker-strong` (opus). `claude-reviewer` uses opus; `claude-explorer` uses haiku.
+- **Codex:** `codex-worker` (gpt-6.2-sol, medium) escalates to `codex-worker-strong` (gpt-6.2-sol, high). `codex-reviewer` uses gpt-6.2-sol, high. `codex-explorer` uses gpt-6-luna, medium.
+- **Claude Code:** `claude-worker` (sonnet, medium) escalates to `claude-worker-strong` (opus, high). `claude-reviewer` uses opus, medium. `claude-explorer` uses haiku, medium.
 
 Each shipped agent serves only its own host (`for`). A Codex manager never depends on the Claude CLI, and a Claude manager never depends on Codex.
 
@@ -69,11 +69,11 @@ Each shipped agent serves only its own host (`for`). A Codex manager never depen
                  "use": "Routine, well-specified implementation", "default": true, "escalateTo": "luna-max"},
     "luna-max": {"role": "worker", "host": "codex", "model": "gpt-6-luna", "effort": "max",
                  "use": "Hard or cross-cutting changes; takes over when a cheaper worker fails"},
-    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-6-sol", "effort": "high", "default": true,
+    "sol":      {"role": "reviewer", "host": "codex", "model": "gpt-6.2-sol", "effort": "high", "default": true,
                  "escalateTo": "opus"},
     "opus":     {"role": "reviewer", "host": "claude", "model": "opus",
                  "use": "Security, concurrency, and data-loss risks",
-                 "fallback": [{"host": "codex", "model": "gpt-6-sol"}]},
+                 "fallback": [{"host": "codex", "model": "gpt-6.2-sol"}]},
     "scout":    {"role": "explorer", "host": "native", "use": "Codebase questions"}
   },
   "workspace": {"root": "../lemmings-worktrees", "largeThresholdGiB": 10}

@@ -1,8 +1,9 @@
 ---
 name: lemmings-claude-worker-strong
-description: Implements one Lemmings brief inside its owned paths, runs its checks, commits, and reports. Use for: Hard or cross-cutting changes; takes over when claude-worker cannot finish
+description: "Implements one Lemmings brief inside its owned paths, runs its checks, commits, and reports. Use for: Hard or cross-cutting changes; takes over when claude-worker cannot finish"
 tools: Read, Glob, Grep, Bash, Edit, Write
 model: opus
+effort: high
 maxTurns: 80
 ---
 

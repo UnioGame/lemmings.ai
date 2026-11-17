@@ -1,8 +1,9 @@
 ---
 name: lemmings-claude-worker
-description: Implements one Lemmings brief inside its owned paths, runs its checks, commits, and reports. Use for: Everyday implementation, tests, and repairs
+description: "Implements one Lemmings brief inside its owned paths, runs its checks, commits, and reports. Use for: Everyday implementation, tests, and repairs"
 tools: Read, Glob, Grep, Bash, Edit, Write
 model: sonnet
+effort: medium
 maxTurns: 80
 ---
 
