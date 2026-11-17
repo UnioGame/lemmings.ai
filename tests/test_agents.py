@@ -97,10 +97,11 @@ class ShippedDefaultTests(HermeticTest):
                          (codex["worker"]["name"], codex["worker"]["model"], codex["worker"]["effort"]))
         self.assertEqual(("gpt-6-sol", "high"), (codex["reviewer"]["model"], codex["reviewer"]["effort"]))
         self.assertEqual(("gpt-6-luna", "medium"), (codex["explorer"]["model"], codex["explorer"]["effort"]))
-        self.assertNotIn("codex-worker-strong", shipped)
+        strong = shipped["codex-worker-strong"]
+        self.assertEqual(("gpt-6.2-sol", "high"), (strong["model"], strong["effort"]))
         self.assertEqual(("claude-worker", "sonnet"), (claude["worker"]["name"], claude["worker"]["model"]))
         self.assertEqual("opus", claude["reviewer"]["model"])
-        self.assertEqual(["codex-worker"], agents.escalation_chain(shipped, "codex-worker"))
+        self.assertEqual(["codex-worker", "codex-worker-strong"], agents.escalation_chain(shipped, "codex-worker"))
         self.assertEqual(["claude-worker", "claude-worker-strong"], agents.escalation_chain(shipped, "claude-worker"))
         for agent in shipped.values():
             self.assertEqual([agent["host"]], agent["for"])  # a host never depends on the other CLI
@@ -111,7 +112,7 @@ class ShippedDefaultTests(HermeticTest):
                          "model": "deepseek-v4-pro", "default": True, "escalateTo": "codex-worker"}}})
         self.assertEqual("deepseek", agents.default_agent(merged, "worker", "codex")["name"])
         self.assertEqual("claude-worker", agents.default_agent(merged, "worker", "claude")["name"])
-        self.assertEqual(["deepseek", "codex-worker"], agents.escalation_chain(merged, "deepseek"))
+        self.assertEqual(["deepseek", "codex-worker", "codex-worker-strong"], agents.escalation_chain(merged, "deepseek"))
 
     def test_project_overrides_by_name_and_can_drop_defaults(self):
         merged = agents.load_agents({"agents": {"claude-reviewer": {"role": "reviewer", "for": ["claude"],
@@ -120,22 +121,23 @@ class ShippedDefaultTests(HermeticTest):
         self.assertEqual("claude-reviewer", agents.default_agent(merged, "reviewer", "claude")["name"])
         self.assertEqual({}, agents.load_agents({"defaults": False}))
 
-    def test_removed_shipped_escalation_requires_project_agent(self):
-        with self.assertRaisesRegex(HelperError, "escalateTo must name another worker agent"):
-            agents.load_agents({"agents": {"custom-worker": {
-                "role": "worker", "for": ["codex"], "host": "codex",
-                "escalateTo": "codex-worker-strong"}}})
+    def test_project_worker_can_escalate_to_shipped_strong_worker(self):
+        configured = agents.load_agents({"agents": {"custom-worker": {
+            "role": "worker", "for": ["codex"], "host": "codex",
+            "escalateTo": "codex-worker-strong"}}})
+        self.assertEqual(["custom-worker", "codex-worker-strong"], agents.escalation_chain(configured, "custom-worker"))
 
     def test_sync_writes_the_shipped_agents(self):
         repo = self.make_repo()
-        retired = repo / ".codex" / "agents" / "lemmings-codex-worker-strong.toml"
-        retired.parent.mkdir(parents=True)
-        retired.write_text(f"# {agents.GENERATED}\nmodel = \"old\"\n", encoding="utf-8")
+        strong = repo / ".codex" / "agents" / "lemmings-codex-worker-strong.toml"
+        strong.parent.mkdir(parents=True)
+        strong.write_text(f"# {agents.GENERATED}\nmodel = \"old\"\n", encoding="utf-8")
         agents.sync(repo, agents.load_agents({}))
         codex = sorted(path.name for path in (repo / ".codex" / "agents").iterdir())
         claude = sorted(path.name for path in (repo / ".claude" / "agents").iterdir())
         self.assertEqual(["lemmings-codex-explorer.toml", "lemmings-codex-reviewer.toml",
-                          "lemmings-codex-worker.toml"], codex)
-        self.assertFalse(retired.exists())
+                          "lemmings-codex-worker-strong.toml", "lemmings-codex-worker.toml"], codex)
+        definition = tomllib.loads(strong.read_text(encoding="utf-8"))
+        self.assertEqual(("gpt-6.2-sol", "high"), (definition["model"], definition["model_reasoning_effort"]))
         self.assertEqual(["lemmings-claude-explorer.md", "lemmings-claude-reviewer.md",
                           "lemmings-claude-worker-strong.md", "lemmings-claude-worker.md"], claude)

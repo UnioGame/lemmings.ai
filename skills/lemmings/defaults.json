@@ -2,8 +2,12 @@
   "agents": {
     "codex-worker": {
       "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-6-luna", "effort": "max",
-      "default": true,
+      "default": true, "escalateTo": "codex-worker-strong",
       "use": "Everyday implementation, tests, and repairs"
+    },
+    "codex-worker-strong": {
+      "role": "worker", "for": ["codex"], "host": "codex", "model": "gpt-6.2-sol", "effort": "high",
+      "use": "Hard or cross-cutting changes; takes over when codex-worker cannot finish"
     },
     "codex-reviewer": {
       "role": "reviewer", "for": ["codex"], "host": "codex", "model": "gpt-6-sol", "effort": "high",

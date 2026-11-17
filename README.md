@@ -162,12 +162,12 @@ Lemmings works right after installation with these shipped agents (`skills/lemmi
 
 | Your host | Worker (default) | Escalation worker | Reviewer | Explorer |
 | --- | --- | --- | --- | --- |
-| Codex | gpt-6-luna, max | — | gpt-6-sol, high | gpt-6-luna, medium |
+| Codex | gpt-6-luna, max | gpt-6.2-sol, high | gpt-6-sol, high | gpt-6-luna, medium |
 | Claude Code | sonnet | opus | opus | haiku |
 
 To change or extend them, add agents to `.agents/lemmings.json`, where project agents override shipped ones by name. Set `"defaults": false` to drop the shipped set entirely.
 
-The shipped `codex-worker-strong` agent has been removed. Projects that reference it in `escalateTo` must define their own agent with that name or remove the reference.
+The Codex worker escalates to `codex-worker-strong`. Use Astra only when the user explicitly requests it.
 
 You can also define several named agents per role in `.agents/lemmings.json`, each with its own host and model, a `use` note that says what it is good at, and an optional `escalateTo` agent that takes over when it fails:
 
